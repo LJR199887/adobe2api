@@ -756,7 +756,7 @@ def build_generation_router(
                     except Exception:
                         old_size = 0
 
-                        video_bytes, video_meta = client.generate_video(
+                    video_bytes, video_meta = client.generate_video(
                         token=token,
                         video_conf=resolved_video_conf or {},
                         prompt=prompt,

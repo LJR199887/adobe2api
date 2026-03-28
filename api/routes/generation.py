@@ -65,6 +65,114 @@ def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | Non
     return locale, timeline_events, audio
 
 
+def _coerce_video_duration(value: Any, allowed: list[int], default: int) -> int:
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        parsed = int(str(value).strip().rstrip("sS"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="unsupported duration")
+    if parsed not in allowed:
+        raise HTTPException(status_code=400, detail="unsupported duration")
+    return parsed
+
+
+def _coerce_video_resolution(
+    value: Any, allowed: list[str], default: str | None
+) -> str | None:
+    if not allowed:
+        return default
+    if value is None or str(value).strip() == "":
+        return default
+    normalized = str(value).strip().lower()
+    resolution_aliases = {
+        "720": "720p",
+        "720p": "720p",
+        "1080": "1080p",
+        "1080p": "1080p",
+        "fhd": "1080p",
+        "fullhd": "1080p",
+    }
+    resolved = resolution_aliases.get(normalized, normalized)
+    if resolved not in allowed:
+        raise HTTPException(status_code=400, detail="unsupported resolution")
+    return resolved
+
+
+def _resolve_video_request_config(model_id: str, data: dict, video_conf: dict) -> dict:
+    resolved = dict(video_conf or {})
+    allow_request_overrides = bool(resolved.get("allow_request_overrides"))
+
+    if not allow_request_overrides:
+        resolved["resolved_model_id"] = str(resolved.get("canonical_model") or model_id)
+        return resolved
+
+    duration_options = [
+        int(item)
+        for item in (resolved.get("duration_options") or [])
+        if str(item).strip()
+    ]
+    aspect_ratio_options = [
+        str(item).strip()
+        for item in (resolved.get("aspect_ratio_options") or [])
+        if str(item).strip()
+    ]
+    resolution_options = [
+        str(item).strip().lower()
+        for item in (resolved.get("resolution_options") or [])
+        if str(item).strip()
+    ]
+    reference_mode_options = [
+        str(item).strip().lower()
+        for item in (resolved.get("reference_mode_options") or [])
+        if str(item).strip()
+    ]
+
+    default_duration = int(resolved.get("duration") or (duration_options[0] if duration_options else 8))
+    default_ratio = str(
+        resolved.get("aspect_ratio") or (aspect_ratio_options[0] if aspect_ratio_options else "16:9")
+    ).strip()
+    default_resolution = (
+        str(resolved.get("resolution") or (resolution_options[0] if resolution_options else "")).strip().lower()
+        or None
+    )
+    default_reference_mode = str(
+        resolved.get("reference_mode") or (reference_mode_options[0] if reference_mode_options else "frame")
+    ).strip().lower()
+
+    requested_ratio = str(data.get("aspect_ratio") or "").strip()
+    if not requested_ratio and aspect_ratio_options:
+        requested_ratio = default_ratio
+    if requested_ratio and aspect_ratio_options and requested_ratio not in aspect_ratio_options:
+        raise HTTPException(status_code=400, detail="unsupported aspect_ratio")
+
+    requested_resolution = (
+        data.get("resolution")
+        or data.get("video_resolution")
+        or data.get("output_resolution")
+    )
+    requested_reference_mode = str(
+        data.get("reference_mode") or data.get("video_reference_mode") or default_reference_mode
+    ).strip().lower() or default_reference_mode
+    if reference_mode_options and requested_reference_mode not in reference_mode_options:
+        raise HTTPException(status_code=400, detail="unsupported reference_mode")
+
+    resolved["duration"] = _coerce_video_duration(
+        data.get("duration") or data.get("video_duration"),
+        duration_options,
+        default_duration,
+    )
+    resolved["aspect_ratio"] = requested_ratio or default_ratio
+    resolved["resolution"] = _coerce_video_resolution(
+        requested_resolution,
+        resolution_options,
+        default_resolution,
+    )
+    resolved["reference_mode"] = requested_reference_mode
+    resolved["resolved_model_id"] = model_id
+    return resolved
+
+
 def build_generation_router(
     *,
     store,
@@ -111,13 +219,27 @@ def build_generation_router(
                 }
             )
         for model_id, conf in video_model_catalog.items():
+            if conf.get("hidden"):
+                continue
+            item = {
+                "id": model_id,
+                "object": "model",
+                "owned_by": "adobe2api",
+                "description": conf["description"],
+            }
+            parameters = {}
+            if conf.get("duration_options"):
+                parameters["duration"] = conf["duration_options"]
+            if conf.get("aspect_ratio_options"):
+                parameters["aspect_ratio"] = conf["aspect_ratio_options"]
+            if conf.get("resolution_options"):
+                parameters["resolution"] = conf["resolution_options"]
+            if conf.get("reference_mode_options"):
+                parameters["reference_mode"] = conf["reference_mode_options"]
+            if parameters:
+                item["parameters"] = parameters
             data.append(
-                {
-                    "id": model_id,
-                    "object": "model",
-                    "owned_by": "adobe2api",
-                    "description": conf["description"],
-                }
+                item
             )
         return {"object": "list", "data": data}
 
@@ -502,7 +624,7 @@ def build_generation_router(
                 status_code=400,
                 content={
                     "error": {
-                        "message": "Invalid video model. Use /v1/models to get supported firefly-sora2-*, firefly-veo31-* or firefly-veo31-fast-* models",
+                        "message": "Invalid video model. Use /v1/models to get supported firefly-sora2, firefly-sora2-pro, firefly-veo31 or firefly-veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
                         "type": "invalid_request_error",
                     }
                 },
@@ -511,23 +633,38 @@ def build_generation_router(
         is_video_model = video_conf is not None
         if not is_video_model:
             _validate_prompt_length(prompt)
-        resolved_model_id = model_id if is_video_model else None
+        resolved_video_conf = (
+            _resolve_video_request_config(model_id, data, video_conf or {})
+            if is_video_model
+            else {}
+        )
+        resolved_model_id = (
+            str(resolved_video_conf.get("resolved_model_id") or model_id)
+            if is_video_model
+            else None
+        )
         ratio = "9:16"
         output_resolution = "2K"
-        duration = int(video_conf["duration"]) if video_conf else 12
+        duration = int(resolved_video_conf["duration"]) if is_video_model else 12
         video_resolution = (
-            str(video_conf.get("resolution") or "720p") if video_conf else "720p"
+            str(resolved_video_conf.get("resolution") or "720p")
+            if is_video_model
+            else "720p"
         )
-        if video_conf:
-            ratio = str(video_conf.get("aspect_ratio") or ratio)
-        video_engine = str(video_conf.get("engine") or "sora2") if video_conf else ""
+        if is_video_model:
+            ratio = str(resolved_video_conf.get("aspect_ratio") or ratio)
+        video_engine = (
+            str(resolved_video_conf.get("engine") or "sora2") if is_video_model else ""
+        )
         generate_audio = True
         negative_prompt = ""
         video_locale = "en-US"
         timeline_events = None
         video_audio = None
         video_reference_mode = (
-            str(video_conf.get("reference_mode") or "frame") if video_conf else "frame"
+            str(resolved_video_conf.get("reference_mode") or "frame")
+            if is_video_model
+            else "frame"
         )
         if is_video_model:
             resolved_video_options = resolve_video_options(data)
@@ -606,9 +743,9 @@ def build_generation_router(
                     except Exception:
                         old_size = 0
 
-                    video_bytes, video_meta = client.generate_video(
+                        video_bytes, video_meta = client.generate_video(
                         token=token,
-                        video_conf=video_conf or {},
+                        video_conf=resolved_video_conf or {},
                         prompt=prompt,
                         aspect_ratio=ratio,
                         duration=duration,

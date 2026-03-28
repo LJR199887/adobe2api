@@ -53,7 +53,11 @@ def resolve_ratio_and_resolution(
     if not model_conf.get("allow_request_overrides"):
         ratio = str(model_conf.get("aspect_ratio") or "1:1").strip()
         output_resolution = str(model_conf.get("output_resolution") or "2K").upper()
-        return ratio, output_resolution, resolved_model_id
+        return (
+            ratio,
+            output_resolution,
+            str(model_conf.get("canonical_model") or resolved_model_id),
+        )
 
     ratio = str(data.get("aspect_ratio") or "").strip() or ratio_from_size(
         data.get("size", "1024x1024")
@@ -81,4 +85,4 @@ def resolve_ratio_and_resolution(
     if allowed_resolutions and output_resolution not in allowed_resolutions:
         output_resolution = str(model_conf.get("output_resolution") or "2K").upper()
 
-    return ratio, output_resolution, resolved_model_id
+    return ratio, output_resolution, str(model_conf.get("canonical_model") or resolved_model_id)

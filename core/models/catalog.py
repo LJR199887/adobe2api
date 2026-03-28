@@ -18,55 +18,108 @@ def _register_image_model(
     upstream_model_id: str,
     upstream_model_version: str,
     family_label: str,
+    fixed_output_resolution: str | None = None,
 ) -> None:
+    resolution_options = (
+        [fixed_output_resolution]
+        if fixed_output_resolution
+        else ["1K", "2K"]
+    )
     MODEL_CATALOG[model_id] = {
         "upstream_model": "google:firefly:colligo:nano-banana-pro",
         "upstream_model_id": upstream_model_id,
         "upstream_model_version": upstream_model_version,
-        "output_resolution": "2K",
-        "output_resolution_options": ["1K", "2K", "4K"],
+        "output_resolution": fixed_output_resolution or "2K",
+        "output_resolution_options": resolution_options,
         "aspect_ratio": "16:9",
         "aspect_ratio_options": ["1:1", "16:9", "9:16", "4:3", "3:4"],
-        "description": f"{family_label} image model (set output_resolution/aspect_ratio in request)",
+        "description": (
+            f"{family_label} 4K image model (set aspect_ratio in request)"
+            if fixed_output_resolution == "4K"
+            else f"{family_label} image model (set output_resolution/aspect_ratio in request)"
+        ),
         "allow_request_overrides": True,
     }
 
     for res in ("1k", "2k", "4k"):
         for ratio, suffix in RATIO_SUFFIX_MAP.items():
-            alias_id = f"{model_id}-{res}-{suffix}"
-            MODEL_CATALOG[alias_id] = {
-                "upstream_model": "google:firefly:colligo:nano-banana-pro",
-                "upstream_model_id": upstream_model_id,
-                "upstream_model_version": upstream_model_version,
-                "output_resolution": res.upper(),
-                "aspect_ratio": ratio,
-                "description": f"{family_label} ({res.upper()} {ratio})",
-                "canonical_model": model_id,
-                "hidden": True,
-                "allow_request_overrides": False,
-            }
+            for alias_id in (f"{model_id}-{res}-{suffix}", f"firefly-{model_id}-{res}-{suffix}"):
+                MODEL_CATALOG[alias_id] = {
+                    "upstream_model": "google:firefly:colligo:nano-banana-pro",
+                    "upstream_model_id": upstream_model_id,
+                    "upstream_model_version": upstream_model_version,
+                    "output_resolution": res.upper(),
+                    "aspect_ratio": ratio,
+                    "description": f"{family_label} ({res.upper()} {ratio})",
+                    "canonical_model": model_id,
+                    "hidden": True,
+                    "allow_request_overrides": False,
+                }
+
+
+def _register_image_family_alias(alias_id: str, canonical_model: str) -> None:
+    base = dict(MODEL_CATALOG[canonical_model])
+    base.update(
+        {
+            "canonical_model": canonical_model,
+            "hidden": True,
+            "allow_request_overrides": True,
+        }
+    )
+    MODEL_CATALOG[alias_id] = base
 
 
 _register_image_model(
-    "firefly-nano-banana-pro",
+    "nano-banana-pro",
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-2",
-    family_label="Firefly Nano Banana Pro",
+    family_label="Nano Banana Pro",
 )
 _register_image_model(
-    "firefly-nano-banana",
+    "nano-banana-pro-4k",
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-2",
-    family_label="Firefly Nano Banana",
+    family_label="Nano Banana Pro",
+    fixed_output_resolution="4K",
 )
 _register_image_model(
-    "firefly-nano-banana2",
+    "nano-banana",
+    upstream_model_id="gemini-flash",
+    upstream_model_version="nano-banana-2",
+    family_label="Nano Banana",
+)
+_register_image_model(
+    "nano-banana-4k",
+    upstream_model_id="gemini-flash",
+    upstream_model_version="nano-banana-2",
+    family_label="Nano Banana",
+    fixed_output_resolution="4K",
+)
+_register_image_model(
+    "nano-banana2",
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-3",
-    family_label="Firefly Nano Banana 2",
+    family_label="Nano Banana 2",
+)
+_register_image_model(
+    "nano-banana2-4k",
+    upstream_model_id="gemini-flash",
+    upstream_model_version="nano-banana-3",
+    family_label="Nano Banana 2",
+    fixed_output_resolution="4K",
 )
 
-DEFAULT_MODEL_ID = "firefly-nano-banana-pro"
+for canonical_id in (
+    "nano-banana",
+    "nano-banana-4k",
+    "nano-banana-pro",
+    "nano-banana-pro-4k",
+    "nano-banana2",
+    "nano-banana2-4k",
+):
+    _register_image_family_alias(f"firefly-{canonical_id}", canonical_id)
+
+DEFAULT_MODEL_ID = "nano-banana-pro"
 
 VIDEO_MODEL_CATALOG: dict[str, dict] = {}
 
@@ -102,6 +155,18 @@ def _register_video_model(
     }
 
 
+def _register_video_family_alias(alias_id: str, canonical_model: str) -> None:
+    base = dict(VIDEO_MODEL_CATALOG[canonical_model])
+    base.update(
+        {
+            "canonical_model": canonical_model,
+            "hidden": True,
+            "allow_request_overrides": True,
+        }
+    )
+    VIDEO_MODEL_CATALOG[alias_id] = base
+
+
 def _register_video_alias(
     alias_id: str,
     *,
@@ -129,8 +194,8 @@ def _register_video_alias(
 
 
 _register_video_model(
-    "firefly-sora2",
-    description="Firefly Sora2 video model (set duration/aspect_ratio in request)",
+    "sora2",
+    description="Sora2 video model (set duration/aspect_ratio in request)",
     engine="sora2",
     upstream_model="openai:firefly:colligo:sora2",
     duration=8,
@@ -140,8 +205,8 @@ _register_video_model(
 )
 
 _register_video_model(
-    "firefly-sora2-pro",
-    description="Firefly Sora2 Pro video model (set duration/aspect_ratio in request)",
+    "sora2-pro",
+    description="Sora2 Pro video model (set duration/aspect_ratio in request)",
     engine="sora2",
     upstream_model="openai:firefly:colligo:sora2-pro",
     duration=8,
@@ -151,8 +216,8 @@ _register_video_model(
 )
 
 _register_video_model(
-    "firefly-veo31",
-    description="Firefly Veo31 video model (set duration/aspect_ratio/resolution/reference_mode in request)",
+    "veo31",
+    description="Veo31 video model (set duration/aspect_ratio/resolution/reference_mode in request)",
     engine="veo31-standard",
     upstream_model="google:firefly:colligo:veo31",
     duration=4,
@@ -166,8 +231,8 @@ _register_video_model(
 )
 
 _register_video_model(
-    "firefly-veo31-ref",
-    description="Firefly Veo31 Ref video model (set duration/aspect_ratio/resolution in request)",
+    "veo31-ref",
+    description="Veo31 Ref video model (set duration/aspect_ratio/resolution in request)",
     engine="veo31-standard",
     upstream_model="google:firefly:colligo:veo31",
     duration=4,
@@ -181,8 +246,8 @@ _register_video_model(
 )
 
 _register_video_model(
-    "firefly-veo31-fast",
-    description="Firefly Veo31 Fast video model (set duration/aspect_ratio/resolution in request)",
+    "veo31-fast",
+    description="Veo31 Fast video model (set duration/aspect_ratio/resolution in request)",
     engine="veo31-fast",
     upstream_model="google:firefly:colligo:veo31-fast",
     duration=4,
@@ -194,59 +259,82 @@ _register_video_model(
     reference_mode="frame",
 )
 
+for canonical_id in ("sora2", "sora2-pro", "veo31", "veo31-ref", "veo31-fast"):
+    _register_video_family_alias(f"firefly-{canonical_id}", canonical_id)
+
 for dur in (4, 8, 12):
     for ratio in ("9:16", "16:9"):
-        _register_video_alias(
+        for alias_id in (
+            f"sora2-{dur}s-{RATIO_SUFFIX_MAP[ratio]}",
             f"firefly-sora2-{dur}s-{RATIO_SUFFIX_MAP[ratio]}",
-            canonical_model="firefly-sora2",
-            duration=dur,
-            aspect_ratio=ratio,
-            description=f"Firefly Sora2 video model ({dur}s {ratio})",
-        )
+        ):
+            _register_video_alias(
+                alias_id,
+                canonical_model="sora2",
+                duration=dur,
+                aspect_ratio=ratio,
+                description=f"Sora2 video model ({dur}s {ratio})",
+            )
 
 for dur in (4, 8, 12):
     for ratio in ("9:16", "16:9"):
-        _register_video_alias(
+        for alias_id in (
+            f"sora2-pro-{dur}s-{RATIO_SUFFIX_MAP[ratio]}",
             f"firefly-sora2-pro-{dur}s-{RATIO_SUFFIX_MAP[ratio]}",
-            canonical_model="firefly-sora2-pro",
-            duration=dur,
-            aspect_ratio=ratio,
-            description=f"Firefly Sora2 Pro video model ({dur}s {ratio})",
-        )
+        ):
+            _register_video_alias(
+                alias_id,
+                canonical_model="sora2-pro",
+                duration=dur,
+                aspect_ratio=ratio,
+                description=f"Sora2 Pro video model ({dur}s {ratio})",
+            )
 
 for dur in (4, 6, 8):
     for ratio in ("16:9", "9:16"):
         for res in ("1080p", "720p"):
-            _register_video_alias(
+            for alias_id in (
+                f"veo31-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-{res}",
                 f"firefly-veo31-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-{res}",
-                canonical_model="firefly-veo31",
-                duration=dur,
-                aspect_ratio=ratio,
-                resolution=res,
-                description=f"Firefly Veo31 video model ({dur}s {ratio} {res})",
-            )
+            ):
+                _register_video_alias(
+                    alias_id,
+                    canonical_model="veo31",
+                    duration=dur,
+                    aspect_ratio=ratio,
+                    resolution=res,
+                    description=f"Veo31 video model ({dur}s {ratio} {res})",
+                )
 
 for dur in (4, 6, 8):
     for ratio in ("16:9", "9:16"):
         for res in ("1080p", "720p"):
-            _register_video_alias(
+            for alias_id in (
+                f"veo31-ref-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-{res}",
                 f"firefly-veo31-ref-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-{res}",
-                canonical_model="firefly-veo31-ref",
-                duration=dur,
-                aspect_ratio=ratio,
-                resolution=res,
-                reference_mode="image",
-                description=f"Firefly Veo31 Ref video model ({dur}s {ratio} {res})",
-            )
+            ):
+                _register_video_alias(
+                    alias_id,
+                    canonical_model="veo31-ref",
+                    duration=dur,
+                    aspect_ratio=ratio,
+                    resolution=res,
+                    reference_mode="image",
+                    description=f"Veo31 Ref video model ({dur}s {ratio} {res})",
+                )
 
 for dur in (4, 6, 8):
     for ratio in ("16:9", "9:16"):
         for res in ("1080p", "720p"):
-            _register_video_alias(
+            for alias_id in (
+                f"veo31-fast-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-{res}",
                 f"firefly-veo31-fast-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-{res}",
-                canonical_model="firefly-veo31-fast",
-                duration=dur,
-                aspect_ratio=ratio,
-                resolution=res,
-                description=f"Firefly Veo31 Fast video model ({dur}s {ratio} {res})",
-            )
+            ):
+                _register_video_alias(
+                    alias_id,
+                    canonical_model="veo31-fast",
+                    duration=dur,
+                    aspect_ratio=ratio,
+                    resolution=res,
+                    description=f"Veo31 Fast video model ({dur}s {ratio} {res})",
+                )

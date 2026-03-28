@@ -169,7 +169,7 @@ def _resolve_video_request_config(model_id: str, data: dict, video_conf: dict) -
         default_resolution,
     )
     resolved["reference_mode"] = requested_reference_mode
-    resolved["resolved_model_id"] = model_id
+    resolved["resolved_model_id"] = str(resolved.get("canonical_model") or model_id)
     return resolved
 
 
@@ -626,7 +626,10 @@ def build_generation_router(
 
         model_id = str(data.get("model") or "").strip()
         if (
-            model_id.startswith("firefly-sora2")
+            model_id.startswith("sora2")
+            or model_id.startswith("veo31-fast")
+            or model_id.startswith("veo31-")
+            or model_id.startswith("firefly-sora2")
             or model_id.startswith("firefly-veo31-fast")
             or model_id.startswith("firefly-veo31-")
         ) and model_id not in video_model_catalog:
@@ -634,7 +637,7 @@ def build_generation_router(
                 status_code=400,
                 content={
                     "error": {
-                        "message": "Invalid video model. Use /v1/models to get supported firefly-sora2, firefly-sora2-pro, firefly-veo31, firefly-veo31-ref or firefly-veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
+                        "message": "Invalid video model. Use /v1/models to get supported sora2, sora2-pro, veo31, veo31-ref or veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
                         "type": "invalid_request_error",
                     }
                 },

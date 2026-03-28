@@ -3,6 +3,7 @@
   "name": "Adobe Cookie Exporter",
   "description": "Export Adobe/Firefly cookies in adobe_register-compatible JSON format.",
   "version": "1.0.0",
+  "incognito": "split",
   "permissions": [
     "cookies",
     "downloads",

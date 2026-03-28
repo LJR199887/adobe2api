@@ -11,6 +11,60 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from api.schemas import GenerateRequest
 
 
+def _validate_prompt_length(prompt: str) -> None:
+    if len(str(prompt or "").strip()) < 3:
+        raise HTTPException(
+            status_code=400,
+            detail="prompt must contain at least 3 characters",
+        )
+
+
+def _normalize_upstream_request_error(exc: Exception) -> tuple[int, str, str] | None:
+    message = str(exc or "").strip()
+    lowered = message.lower()
+    if ("poll failed: 400" in lowered or "submit failed: 400" in lowered) and (
+        "validation error" in lowered
+        or "字符串应至少包含 3 个字符" in message
+        or "string should have at least 3 characters" in lowered
+    ):
+        return (
+            400,
+            "invalid_request_error",
+            "prompt must contain at least 3 characters",
+        )
+    return None
+
+
+def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | None]:
+    locale = str(
+        data.get("locale")
+        or data.get("video_locale")
+        or data.get("videoLocale")
+        or "en-US"
+    ).strip() or "en-US"
+    if len(locale) > 32:
+        locale = locale[:32]
+
+    timeline_events = (
+        data.get("timeline_events")
+        or data.get("timelineEvents")
+        or data.get("video_timeline_events")
+        or data.get("videoTimelineEvents")
+    )
+    if not isinstance(timeline_events, dict):
+        timeline_events = None
+    elif not timeline_events:
+        timeline_events = None
+
+    audio = data.get("audio") or data.get("video_audio") or data.get("videoAudio")
+    if not isinstance(audio, dict):
+        audio = None
+    elif not audio:
+        audio = None
+
+    return locale, timeline_events, audio
+
+
 def build_generation_router(
     *,
     store,
@@ -82,6 +136,7 @@ def build_generation_router(
                     }
                 },
             )
+        _validate_prompt_length(prompt)
 
         model_id = data.get("model")
         if str(model_id or "").strip() in video_model_catalog:
@@ -259,6 +314,29 @@ def build_generation_router(
                 },
             )
         except Exception as exc:
+            normalized = _normalize_upstream_request_error(exc)
+            if normalized is not None:
+                status_code, err_type, message = normalized
+                error_code = set_request_error_detail(
+                    request,
+                    error=message,
+                    status_code=status_code,
+                    error_type=err_type,
+                    include_traceback=False,
+                )
+                set_request_task_progress(
+                    request, task_status="FAILED", task_progress=0.0, error=message
+                )
+                return JSONResponse(
+                    status_code=status_code,
+                    content={
+                        "error": {
+                            "message": message,
+                            "type": err_type,
+                            "code": error_code,
+                        }
+                    },
+                )
             error_code = set_request_error_detail(
                 request,
                 error=exc,
@@ -292,6 +370,7 @@ def build_generation_router(
         prompt = data.prompt.strip()
         if not prompt:
             raise HTTPException(status_code=400, detail="prompt cannot be empty")
+        _validate_prompt_length(prompt)
 
         ratio = data.aspect_ratio.strip() or "16:9"
         if ratio not in supported_ratios:
@@ -430,6 +509,8 @@ def build_generation_router(
             )
         video_conf = video_model_catalog.get(model_id)
         is_video_model = video_conf is not None
+        if not is_video_model:
+            _validate_prompt_length(prompt)
         resolved_model_id = model_id if is_video_model else None
         ratio = "9:16"
         output_resolution = "2K"
@@ -442,6 +523,9 @@ def build_generation_router(
         video_engine = str(video_conf.get("engine") or "sora2") if video_conf else ""
         generate_audio = True
         negative_prompt = ""
+        video_locale = "en-US"
+        timeline_events = None
+        video_audio = None
         video_reference_mode = (
             str(video_conf.get("reference_mode") or "frame") if video_conf else "frame"
         )
@@ -458,6 +542,7 @@ def build_generation_router(
                     video_reference_mode = requested_reference_mode
             else:
                 generate_audio, negative_prompt = resolved_video_options
+            video_locale, timeline_events, video_audio = _resolve_sora_video_extras(data)
         else:
             ratio, output_resolution, resolved_model_id = resolve_ratio_and_resolution(
                 data, model_id or None
@@ -531,6 +616,9 @@ def build_generation_router(
                         timeout=max(int(client.generate_timeout), 600),
                         negative_prompt=negative_prompt,
                         generate_audio=generate_audio,
+                        locale=video_locale,
+                        timeline_events=timeline_events,
+                        audio=video_audio,
                         reference_mode=video_reference_mode,
                         out_path=tmp_path,
                         progress_cb=_video_progress_cb,
@@ -736,6 +824,29 @@ def build_generation_router(
                 },
             )
         except Exception as exc:
+            normalized = _normalize_upstream_request_error(exc)
+            if normalized is not None:
+                status_code, err_type, message = normalized
+                error_code = set_request_error_detail(
+                    request,
+                    error=message,
+                    status_code=status_code,
+                    error_type=err_type,
+                    include_traceback=False,
+                )
+                set_request_task_progress(
+                    request, task_status="FAILED", task_progress=0.0, error=message
+                )
+                return JSONResponse(
+                    status_code=status_code,
+                    content={
+                        "error": {
+                            "message": message,
+                            "type": err_type,
+                            "code": error_code,
+                        }
+                    },
+                )
             error_code = set_request_error_detail(
                 request,
                 error=exc,

@@ -623,7 +623,11 @@ class AdobeClient:
 
     @staticmethod
     def _build_video_prompt_json(
-        prompt: str, duration: int, negative_prompt: str = ""
+        prompt: str,
+        duration: int,
+        negative_prompt: str = "",
+        timeline_events: Optional[dict] = None,
+        audio: Optional[dict] = None,
     ) -> str:
         payload = {
             "id": 1,
@@ -632,6 +636,10 @@ class AdobeClient:
         }
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
+        if isinstance(timeline_events, dict) and timeline_events:
+            payload["timeline_events"] = timeline_events
+        if isinstance(audio, dict) and audio:
+            payload["audio"] = audio
         return json.dumps(payload, ensure_ascii=False)
 
     def _build_video_payload(
@@ -643,6 +651,9 @@ class AdobeClient:
         source_image_ids: Optional[list[str]] = None,
         negative_prompt: str = "",
         generate_audio: bool = True,
+        locale: str = "en-US",
+        timeline_events: Optional[dict] = None,
+        audio: Optional[dict] = None,
         reference_mode: str = "frame",
     ) -> dict:
         seed_val = int(time.time()) % 999999
@@ -703,7 +714,11 @@ class AdobeClient:
             "duration": int(duration),
             "fps": 24,
             "prompt": self._build_video_prompt_json(
-                prompt=prompt, duration=duration, negative_prompt=negative_prompt
+                prompt=prompt,
+                duration=duration,
+                negative_prompt=negative_prompt,
+                timeline_events=timeline_events,
+                audio=audio,
             ),
             "generationMetadata": {"module": "text2video"},
             "model": upstream_model,
@@ -711,7 +726,7 @@ class AdobeClient:
             "generateLoop": False,
             "transparentBackground": False,
             "seed": str(seed_val),
-            "locale": "en-US",
+            "locale": str(locale or "en-US").strip() or "en-US",
             "camera": {
                 "angle": "none",
                 "shotSize": "none",
@@ -756,6 +771,9 @@ class AdobeClient:
         timeout: int = 600,
         negative_prompt: str = "",
         generate_audio: bool = True,
+        locale: str = "en-US",
+        timeline_events: Optional[dict] = None,
+        audio: Optional[dict] = None,
         reference_mode: str = "frame",
         out_path: Optional[Path] = None,
         progress_cb: Optional[Callable[[dict], None]] = None,
@@ -768,6 +786,9 @@ class AdobeClient:
             source_image_ids=source_image_ids,
             negative_prompt=negative_prompt,
             generate_audio=generate_audio,
+            locale=locale,
+            timeline_events=timeline_events,
+            audio=audio,
             reference_mode=reference_mode,
         )
         submit_resp = self._post_json(

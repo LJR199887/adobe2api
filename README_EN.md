@@ -214,6 +214,33 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   }'
 ```
 
+Optional Sora-only controls:
+
+- `locale`: overrides the default `en-US`
+- `timeline_events`: adds structured timeline hints into the Sora prompt JSON
+- `audio`: adds optional structured audio hints into the Sora prompt JSON
+
+Example:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "firefly-sora2-4s-16x9",
+    "locale": "ja-JP",
+    "audio": {
+      "sfx": "Wind howling softly",
+      "voice_timbre": "Natural, calm voice"
+    },
+    "timeline_events": {
+      "0s-2s": "Camera holds on the snowy forest",
+      "2s-4s": "Drone glides forward slowly"
+    },
+    "messages": [{"role":"user","content":"a drone shot over snowy forest"}]
+  }'
+```
+
 Veo31 single-image semantics:
 
 - `firefly-veo31-*` / `firefly-veo31-fast-*`: frame mode

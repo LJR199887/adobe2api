@@ -835,94 +835,132 @@ class AdobeClient:
                 pass
 
         start = time.time()
+        last_progress = 0.0
+        poll_retry_attempt = 0
         while True:
-            poll_resp = self._get(
-                poll_url, headers=self._poll_headers(token), timeout=60
-            )
-            if poll_resp.status_code in (401, 403):
-                raise AuthError("Token invalid or expired")
-            if poll_resp.status_code != 200:
-                if poll_resp.status_code in (429, 451) or poll_resp.status_code >= 500:
-                    raise UpstreamTemporaryError(
-                        f"video poll failed: {poll_resp.status_code} {poll_resp.text[:300]}",
-                        status_code=poll_resp.status_code,
-                        error_type="status",
-                    )
-                raise AdobeRequestError(
-                    f"video poll failed: {poll_resp.status_code} {poll_resp.text[:300]}"
+            try:
+                poll_resp = self._get(
+                    poll_url, headers=self._poll_headers(token), timeout=60
                 )
-
-            latest = poll_resp.json()
-            status_header = str(poll_resp.headers.get("x-task-status") or "").upper()
-            status_val = str(latest.get("status") or "").upper() or status_header
-            progress_val = self._extract_progress_percent(latest, poll_resp)
-
-            if progress_cb and self._is_in_progress_status(status_val):
-                try:
-                    progress_cb(
-                        {
-                            "task_status": "IN_PROGRESS",
-                            "task_progress": progress_val
-                            if progress_val is not None
-                            else 0.0,
-                            "upstream_job_id": upstream_job_id,
-                            "retry_after": int(
-                                poll_resp.headers.get("retry-after") or 0
-                            )
-                            or None,
-                        }
-                    )
-                except Exception:
-                    pass
-
-            outputs = latest.get("outputs") or []
-            if outputs:
-                video_url = ((outputs[0] or {}).get("video") or {}).get("presignedUrl")
-                if not video_url:
-                    raise AdobeRequestError("video job finished without video url")
-                if out_path is not None:
-                    self._download_to_file(
-                        video_url,
-                        headers={"accept": "*/*"},
-                        out_path=out_path,
-                        timeout=60,
-                    )
-                    video_bytes = None
-                else:
-                    video_resp = self._get(video_url, headers={"accept": "*/*"}, timeout=60)
-                    video_resp.raise_for_status()
-                    video_bytes = video_resp.content
-                if progress_cb:
-                    try:
-                        progress_cb(
-                            {
-                                "task_status": "COMPLETED",
-                                "task_progress": 100.0,
-                                "upstream_job_id": upstream_job_id,
-                                "retry_after": None,
-                            }
+                if poll_resp.status_code in (401, 403):
+                    raise AuthError("Token invalid or expired")
+                if poll_resp.status_code != 200:
+                    if poll_resp.status_code in (429, 451) or poll_resp.status_code >= 500:
+                        raise UpstreamTemporaryError(
+                            f"video poll failed: {poll_resp.status_code} {poll_resp.text[:300]}",
+                            status_code=poll_resp.status_code,
+                            error_type="status",
                         )
-                    except Exception:
-                        pass
-                return video_bytes, latest
+                    raise AdobeRequestError(
+                        f"video poll failed: {poll_resp.status_code} {poll_resp.text[:300]}"
+                    )
 
-            if status_val in {"FAILED", "CANCELLED", "ERROR"}:
-                if progress_cb:
+                latest = poll_resp.json()
+                status_header = str(poll_resp.headers.get("x-task-status") or "").upper()
+                status_val = str(latest.get("status") or "").upper() or status_header
+                progress_val = self._extract_progress_percent(latest, poll_resp)
+                if progress_val is not None:
+                    last_progress = progress_val
+                poll_retry_attempt = 0
+
+                if progress_cb and self._is_in_progress_status(status_val):
                     try:
                         progress_cb(
                             {
-                                "task_status": "FAILED",
+                                "task_status": "IN_PROGRESS",
                                 "task_progress": progress_val
                                 if progress_val is not None
                                 else 0.0,
                                 "upstream_job_id": upstream_job_id,
-                                "retry_after": None,
-                                "error": f"video job failed: {latest}",
+                                "retry_after": int(
+                                    poll_resp.headers.get("retry-after") or 0
+                                )
+                                or None,
                             }
                         )
                     except Exception:
                         pass
-                raise AdobeRequestError(f"video job failed: {latest}")
+
+                outputs = latest.get("outputs") or []
+                if outputs:
+                    video_url = ((outputs[0] or {}).get("video") or {}).get("presignedUrl")
+                    if not video_url:
+                        raise AdobeRequestError("video job finished without video url")
+                    if out_path is not None:
+                        self._download_to_file(
+                            video_url,
+                            headers={"accept": "*/*"},
+                            out_path=out_path,
+                            timeout=60,
+                        )
+                        video_bytes = None
+                    else:
+                        video_resp = self._get(
+                            video_url, headers={"accept": "*/*"}, timeout=60
+                        )
+                        video_resp.raise_for_status()
+                        video_bytes = video_resp.content
+                    if progress_cb:
+                        try:
+                            progress_cb(
+                                {
+                                    "task_status": "COMPLETED",
+                                    "task_progress": 100.0,
+                                    "upstream_job_id": upstream_job_id,
+                                    "retry_after": None,
+                                }
+                            )
+                        except Exception:
+                            pass
+                    return video_bytes, latest
+
+                if status_val in {"FAILED", "CANCELLED", "ERROR"}:
+                    if progress_cb:
+                        try:
+                            progress_cb(
+                                {
+                                    "task_status": "FAILED",
+                                    "task_progress": progress_val
+                                    if progress_val is not None
+                                    else 0.0,
+                                    "upstream_job_id": upstream_job_id,
+                                    "retry_after": None,
+                                    "error": f"video job failed: {latest}",
+                                }
+                            )
+                        except Exception:
+                            pass
+                    raise AdobeRequestError(f"video job failed: {latest}")
+            except UpstreamTemporaryError as exc:
+                can_retry_same_job = self.should_retry_temporary_error(exc) and (
+                    time.time() - start < timeout
+                )
+                if not can_retry_same_job:
+                    raise
+                poll_retry_attempt += 1
+                retry_delay = max(1.0, self._retry_delay_for_attempt(poll_retry_attempt))
+                logger.warning(
+                    "video poll temporary error; retrying same upstream job id=%s attempt=%s delay=%.2fs error=%s",
+                    upstream_job_id,
+                    poll_retry_attempt,
+                    retry_delay,
+                    str(exc),
+                )
+                if progress_cb:
+                    try:
+                        progress_cb(
+                            {
+                                "task_status": "IN_PROGRESS",
+                                "task_progress": last_progress,
+                                "upstream_job_id": upstream_job_id,
+                                "retry_after": int(retry_delay),
+                                "error": f"poll retry {poll_retry_attempt}: {str(exc)[:160]}",
+                            }
+                        )
+                    except Exception:
+                        pass
+                time.sleep(retry_delay)
+                continue
 
             if time.time() - start > timeout:
                 if progress_cb:
@@ -930,10 +968,7 @@ class AdobeClient:
                         progress_cb(
                             {
                                 "task_status": "FAILED",
-                                "task_progress": progress_val
-                                if "progress_val" in locals()
-                                and progress_val is not None
-                                else 0.0,
+                                "task_progress": last_progress,
                                 "upstream_job_id": upstream_job_id,
                                 "retry_after": None,
                                 "error": "video generation timed out",
@@ -1038,97 +1073,135 @@ class AdobeClient:
         start = time.time()
         latest = {}
         sleep_time = 3.0
+        last_progress = 0.0
+        poll_retry_attempt = 0
         while True:
-            poll_resp = self._get(
-                poll_url, headers=self._poll_headers(token), timeout=60
-            )
-            if poll_resp.status_code != 200:
-                logger.error(
-                    "poll failed status=%s body=%s",
-                    poll_resp.status_code,
-                    poll_resp.text[:500],
+            try:
+                poll_resp = self._get(
+                    poll_url, headers=self._poll_headers(token), timeout=60
                 )
-                if poll_resp.status_code in (429, 451) or poll_resp.status_code >= 500:
-                    raise UpstreamTemporaryError(
-                        f"poll failed: {poll_resp.status_code} {poll_resp.text[:300]}",
-                        status_code=poll_resp.status_code,
-                        error_type="status",
+                if poll_resp.status_code != 200:
+                    logger.error(
+                        "poll failed status=%s body=%s",
+                        poll_resp.status_code,
+                        poll_resp.text[:500],
                     )
-                raise AdobeRequestError(
-                    f"poll failed: {poll_resp.status_code} {poll_resp.text[:300]}"
-                )
-
-            latest = poll_resp.json()
-            status_header = str(poll_resp.headers.get("x-task-status") or "").upper()
-            status_val = str(latest.get("status") or "").upper() or status_header
-            progress_val = self._extract_progress_percent(latest, poll_resp)
-
-            if progress_cb and self._is_in_progress_status(status_val):
-                try:
-                    progress_cb(
-                        {
-                            "task_status": "IN_PROGRESS",
-                            "task_progress": progress_val
-                            if progress_val is not None
-                            else 0.0,
-                            "upstream_job_id": upstream_job_id,
-                            "retry_after": int(
-                                poll_resp.headers.get("retry-after") or 0
-                            )
-                            or None,
-                        }
-                    )
-                except Exception:
-                    pass
-
-            outputs = latest.get("outputs") or []
-            if outputs:
-                image_url = ((outputs[0] or {}).get("image") or {}).get("presignedUrl")
-                if not image_url:
-                    raise AdobeRequestError("job finished without image url")
-                if out_path is not None:
-                    self._download_to_file(
-                        image_url,
-                        headers={"accept": "*/*"},
-                        out_path=out_path,
-                        timeout=30,
-                    )
-                    image_bytes = None
-                else:
-                    img_resp = self._get(image_url, headers={"accept": "*/*"}, timeout=30)
-                    img_resp.raise_for_status()
-                    image_bytes = img_resp.content
-                if progress_cb:
-                    try:
-                        progress_cb(
-                            {
-                                "task_status": "COMPLETED",
-                                "task_progress": 100.0,
-                                "upstream_job_id": upstream_job_id,
-                                "retry_after": None,
-                            }
+                    if poll_resp.status_code in (429, 451) or poll_resp.status_code >= 500:
+                        raise UpstreamTemporaryError(
+                            f"poll failed: {poll_resp.status_code} {poll_resp.text[:300]}",
+                            status_code=poll_resp.status_code,
+                            error_type="status",
                         )
-                    except Exception:
-                        pass
-                return image_bytes, latest
+                    raise AdobeRequestError(
+                        f"poll failed: {poll_resp.status_code} {poll_resp.text[:300]}"
+                    )
 
-            if status_val in {"FAILED", "CANCELLED", "ERROR"}:
-                if progress_cb:
+                latest = poll_resp.json()
+                status_header = str(poll_resp.headers.get("x-task-status") or "").upper()
+                status_val = str(latest.get("status") or "").upper() or status_header
+                progress_val = self._extract_progress_percent(latest, poll_resp)
+                if progress_val is not None:
+                    last_progress = progress_val
+                poll_retry_attempt = 0
+
+                if progress_cb and self._is_in_progress_status(status_val):
                     try:
                         progress_cb(
                             {
-                                "task_status": "FAILED",
+                                "task_status": "IN_PROGRESS",
                                 "task_progress": progress_val
                                 if progress_val is not None
                                 else 0.0,
                                 "upstream_job_id": upstream_job_id,
-                                "retry_after": None,
-                                "error": f"image job failed: {latest}",
+                                "retry_after": int(
+                                    poll_resp.headers.get("retry-after") or 0
+                                )
+                                or None,
                             }
                         )
                     except Exception:
                         pass
-                raise AdobeRequestError(f"image job failed: {latest}")
+
+                outputs = latest.get("outputs") or []
+                if outputs:
+                    image_url = ((outputs[0] or {}).get("image") or {}).get("presignedUrl")
+                    if not image_url:
+                        raise AdobeRequestError("job finished without image url")
+                    if out_path is not None:
+                        self._download_to_file(
+                            image_url,
+                            headers={"accept": "*/*"},
+                            out_path=out_path,
+                            timeout=30,
+                        )
+                        image_bytes = None
+                    else:
+                        img_resp = self._get(
+                            image_url, headers={"accept": "*/*"}, timeout=30
+                        )
+                        img_resp.raise_for_status()
+                        image_bytes = img_resp.content
+                    if progress_cb:
+                        try:
+                            progress_cb(
+                                {
+                                    "task_status": "COMPLETED",
+                                    "task_progress": 100.0,
+                                    "upstream_job_id": upstream_job_id,
+                                    "retry_after": None,
+                                }
+                            )
+                        except Exception:
+                            pass
+                    return image_bytes, latest
+
+                if status_val in {"FAILED", "CANCELLED", "ERROR"}:
+                    if progress_cb:
+                        try:
+                            progress_cb(
+                                {
+                                    "task_status": "FAILED",
+                                    "task_progress": progress_val
+                                    if progress_val is not None
+                                    else 0.0,
+                                    "upstream_job_id": upstream_job_id,
+                                    "retry_after": None,
+                                    "error": f"image job failed: {latest}",
+                                }
+                            )
+                        except Exception:
+                            pass
+                    raise AdobeRequestError(f"image job failed: {latest}")
+            except UpstreamTemporaryError as exc:
+                can_retry_same_job = self.should_retry_temporary_error(exc) and (
+                    time.time() - start < timeout
+                )
+                if not can_retry_same_job:
+                    raise
+                poll_retry_attempt += 1
+                retry_delay = max(1.0, self._retry_delay_for_attempt(poll_retry_attempt))
+                logger.warning(
+                    "image poll temporary error; retrying same upstream job id=%s attempt=%s delay=%.2fs error=%s",
+                    upstream_job_id,
+                    poll_retry_attempt,
+                    retry_delay,
+                    str(exc),
+                )
+                if progress_cb:
+                    try:
+                        progress_cb(
+                            {
+                                "task_status": "IN_PROGRESS",
+                                "task_progress": last_progress,
+                                "upstream_job_id": upstream_job_id,
+                                "retry_after": int(retry_delay),
+                                "error": f"poll retry {poll_retry_attempt}: {str(exc)[:160]}",
+                            }
+                        )
+                    except Exception:
+                        pass
+                time.sleep(retry_delay)
+                continue
 
             if time.time() - start > timeout:
                 if progress_cb:
@@ -1136,9 +1209,7 @@ class AdobeClient:
                         progress_cb(
                             {
                                 "task_status": "FAILED",
-                                "task_progress": progress_val
-                                if progress_val is not None
-                                else 0.0,
+                                "task_progress": last_progress,
                                 "upstream_job_id": upstream_job_id,
                                 "retry_after": None,
                                 "error": "image generation timed out",

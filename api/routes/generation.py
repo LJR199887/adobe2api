@@ -210,13 +210,23 @@ def build_generation_router(
         require_service_api_key(request)
         data = []
         for model_id, conf in model_catalog.items():
+            if conf.get("hidden"):
+                continue
+            item = {
+                "id": model_id,
+                "object": "model",
+                "owned_by": "adobe2api",
+                "description": conf["description"],
+            }
+            parameters = {}
+            if conf.get("output_resolution_options"):
+                parameters["output_resolution"] = conf["output_resolution_options"]
+            if conf.get("aspect_ratio_options"):
+                parameters["aspect_ratio"] = conf["aspect_ratio_options"]
+            if parameters:
+                item["parameters"] = parameters
             data.append(
-                {
-                    "id": model_id,
-                    "object": "model",
-                    "owned_by": "adobe2api",
-                    "description": conf["description"],
-                }
+                item
             )
         for model_id, conf in video_model_catalog.items():
             if conf.get("hidden"):
@@ -624,7 +634,7 @@ def build_generation_router(
                 status_code=400,
                 content={
                     "error": {
-                        "message": "Invalid video model. Use /v1/models to get supported firefly-sora2, firefly-sora2-pro, firefly-veo31 or firefly-veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
+                        "message": "Invalid video model. Use /v1/models to get supported firefly-sora2, firefly-sora2-pro, firefly-veo31, firefly-veo31-ref or firefly-veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
                         "type": "invalid_request_error",
                     }
                 },

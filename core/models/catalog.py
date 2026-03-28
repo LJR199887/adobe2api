@@ -12,46 +12,61 @@ RATIO_SUFFIX_MAP = {
 MODEL_CATALOG: dict[str, dict] = {}
 
 
-def _register_nano_banana_family(
-    prefix: str,
+def _register_image_model(
+    model_id: str,
     *,
     upstream_model_id: str,
     upstream_model_version: str,
     family_label: str,
 ) -> None:
+    MODEL_CATALOG[model_id] = {
+        "upstream_model": "google:firefly:colligo:nano-banana-pro",
+        "upstream_model_id": upstream_model_id,
+        "upstream_model_version": upstream_model_version,
+        "output_resolution": "2K",
+        "output_resolution_options": ["1K", "2K", "4K"],
+        "aspect_ratio": "16:9",
+        "aspect_ratio_options": ["1:1", "16:9", "9:16", "4:3", "3:4"],
+        "description": f"{family_label} image model (set output_resolution/aspect_ratio in request)",
+        "allow_request_overrides": True,
+    }
+
     for res in ("1k", "2k", "4k"):
         for ratio, suffix in RATIO_SUFFIX_MAP.items():
-            model_id = f"{prefix}-{res}-{suffix}"
-            MODEL_CATALOG[model_id] = {
+            alias_id = f"{model_id}-{res}-{suffix}"
+            MODEL_CATALOG[alias_id] = {
                 "upstream_model": "google:firefly:colligo:nano-banana-pro",
                 "upstream_model_id": upstream_model_id,
                 "upstream_model_version": upstream_model_version,
                 "output_resolution": res.upper(),
                 "aspect_ratio": ratio,
                 "description": f"{family_label} ({res.upper()} {ratio})",
+                "canonical_model": model_id,
+                "hidden": True,
+                "allow_request_overrides": False,
             }
 
 
-_register_nano_banana_family(
+_register_image_model(
     "firefly-nano-banana-pro",
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-2",
     family_label="Firefly Nano Banana Pro",
 )
-_register_nano_banana_family(
+_register_image_model(
     "firefly-nano-banana",
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-2",
     family_label="Firefly Nano Banana",
 )
-_register_nano_banana_family(
+_register_image_model(
     "firefly-nano-banana2",
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-3",
     family_label="Firefly Nano Banana 2",
 )
 
-DEFAULT_MODEL_ID = "firefly-nano-banana-pro-2k-16x9"
+DEFAULT_MODEL_ID = "firefly-nano-banana-pro"
 
 VIDEO_MODEL_CATALOG: dict[str, dict] = {}
 
@@ -151,6 +166,21 @@ _register_video_model(
 )
 
 _register_video_model(
+    "firefly-veo31-ref",
+    description="Firefly Veo31 Ref video model (set duration/aspect_ratio/resolution in request)",
+    engine="veo31-standard",
+    upstream_model="google:firefly:colligo:veo31",
+    duration=4,
+    duration_options=(4, 6, 8),
+    aspect_ratio="16:9",
+    aspect_ratio_options=("16:9", "9:16"),
+    resolution="720p",
+    resolution_options=("720p", "1080p"),
+    reference_mode="image",
+    reference_mode_options=("image",),
+)
+
+_register_video_model(
     "firefly-veo31-fast",
     description="Firefly Veo31 Fast video model (set duration/aspect_ratio/resolution in request)",
     engine="veo31-fast",
@@ -201,7 +231,7 @@ for dur in (4, 6, 8):
         for res in ("1080p", "720p"):
             _register_video_alias(
                 f"firefly-veo31-ref-{dur}s-{RATIO_SUFFIX_MAP[ratio]}-{res}",
-                canonical_model="firefly-veo31",
+                canonical_model="firefly-veo31-ref",
                 duration=dur,
                 aspect_ratio=ratio,
                 resolution=res,

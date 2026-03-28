@@ -68,40 +68,41 @@ Admin UI and admin APIs require login session cookie via `/api/v1/auth/login`.
 
 Current supported model families are:
 
-- `firefly-nano-banana-*` (image, maps to upstream `nano-banana-2`)
-- `firefly-nano-banana2-*` (image, maps to upstream `nano-banana-3`)
-- `firefly-nano-banana-pro-*` (image)
+- `firefly-nano-banana` (image, maps to upstream `nano-banana-2`)
+- `firefly-nano-banana2` (image, maps to upstream `nano-banana-3`)
+- `firefly-nano-banana-pro` (image)
 - `firefly-sora2` (video)
 - `firefly-sora2-pro` (video)
 - `firefly-veo31` (video)
+- `firefly-veo31-ref` (video, reference-image mode)
 - `firefly-veo31-fast` (video)
 
 Nano Banana image models (`nano-banana-2`):
 
-- Pattern: `firefly-nano-banana-{resolution}-{ratio}`
-- Resolution: `1k` / `2k` / `4k`
-- Ratio suffix: `1x1` / `16x9` / `9x16` / `4x3` / `3x4`
+- Pattern: `model=firefly-nano-banana` with separate request fields
+- Resolution: pass `output_resolution` as `1K` / `2K` / `4K`
+- Ratio: pass `aspect_ratio` as `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
 - Examples:
-  - `firefly-nano-banana-2k-16x9`
-  - `firefly-nano-banana-4k-1x1`
+  - `model=firefly-nano-banana, output_resolution=2K, aspect_ratio=16:9`
+  - `model=firefly-nano-banana, output_resolution=4K, aspect_ratio=1:1`
 
 Nano Banana 2 image models (`nano-banana-3`):
 
-- Pattern: `firefly-nano-banana2-{resolution}-{ratio}`
-- Resolution: `1k` / `2k` / `4k`
-- Ratio suffix: `1x1` / `16x9` / `9x16` / `4x3` / `3x4`
+- Pattern: `model=firefly-nano-banana2` with separate request fields
+- Resolution: pass `output_resolution` as `1K` / `2K` / `4K`
+- Ratio: pass `aspect_ratio` as `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
 - Examples:
-  - `firefly-nano-banana2-2k-16x9`
-  - `firefly-nano-banana2-4k-1x1`
+  - `model=firefly-nano-banana2, output_resolution=2K, aspect_ratio=16:9`
+  - `model=firefly-nano-banana2, output_resolution=4K, aspect_ratio=1:1`
 
 Nano Banana Pro image models (legacy-compatible):
 
-- Pattern: `firefly-nano-banana-pro-{resolution}-{ratio}`
-- Resolution: `1k` / `2k` / `4k`
-- Ratio suffix: `1x1` / `16x9` / `9x16` / `4x3` / `3x4`
+- Pattern: `model=firefly-nano-banana-pro` with separate request fields
+- Resolution: pass `output_resolution` as `1K` / `2K` / `4K`
+- Ratio: pass `aspect_ratio` as `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
 - Examples:
-  - `firefly-nano-banana-pro-2k-16x9`
-  - `firefly-nano-banana-pro-4k-1x1`
+  - `model=firefly-nano-banana-pro, output_resolution=2K, aspect_ratio=16:9`
+  - `model=firefly-nano-banana-pro, output_resolution=4K, aspect_ratio=1:1`
 
 Sora2 video models:
 
@@ -137,6 +138,18 @@ Veo31 video models:
   - `model=firefly-veo31, duration=4, aspect_ratio=16:9, resolution=1080p`
   - `model=firefly-veo31, duration=6, aspect_ratio=9:16, resolution=720p, reference_mode=image`
 
+Veo31 Ref video models:
+
+- Pattern: `model=firefly-veo31-ref` with separate request fields
+- Duration: pass `duration` as `4` / `6` / `8`
+- Ratio: pass `aspect_ratio` as `16:9` / `9:16`
+- Resolution: pass `resolution` as `1080p` / `720p`
+- Always uses reference image mode
+- Supports up to 3 reference images
+- Examples:
+  - `model=firefly-veo31-ref, duration=4, aspect_ratio=9:16, resolution=720p`
+  - `model=firefly-veo31-ref, duration=6, aspect_ratio=16:9, resolution=1080p`
+
 Veo31 Fast video models:
 
 - Pattern: `model=firefly-veo31-fast` with separate request fields
@@ -167,7 +180,9 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-nano-banana-pro-2k-16x9",
+    "model": "firefly-nano-banana-pro",
+    "output_resolution": "2K",
+    "aspect_ratio": "16:9",
     "messages": [{"role":"user","content":"a cinematic mountain sunrise"}]
   }'
 ```
@@ -179,7 +194,9 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-nano-banana-pro-2k-16x9",
+    "model": "firefly-nano-banana-pro",
+    "output_resolution": "2K",
+    "aspect_ratio": "16:9",
     "messages": [{
       "role":"user",
       "content":[
@@ -238,7 +255,7 @@ Veo31 single-image semantics:
 - `firefly-veo31` / `firefly-veo31-fast` with `reference_mode=frame`: frame mode
   - 1 image => first frame
   - 2 images => first frame + last frame
-- `firefly-veo31` with `reference_mode=image`: reference-image mode
+- `firefly-veo31-ref` or `firefly-veo31` with `reference_mode=image`: reference-image mode
   - 1~3 images => reference images
 
 Image-to-video:
@@ -268,7 +285,9 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-nano-banana-pro-4k-16x9",
+    "model": "firefly-nano-banana-pro",
+    "output_resolution": "4K",
+    "aspect_ratio": "16:9",
     "prompt": "futuristic city skyline at dusk"
   }'
 ```

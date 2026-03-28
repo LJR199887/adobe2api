@@ -30,21 +30,40 @@ def ratio_from_size(size: str) -> str:
     return mapping.get(str(size or "").strip(), "1:1")
 
 
+def _normalize_output_resolution(value: str) -> str:
+    normalized = str(value or "").strip().upper()
+    aliases = {
+        "1K": "1K",
+        "HD": "2K",
+        "2K": "2K",
+        "4K": "4K",
+        "ULTRA": "4K",
+    }
+    return aliases.get(normalized, normalized or "2K")
+
+
 def resolve_ratio_and_resolution(
     data: dict, model_id: Optional[str]
 ) -> tuple[str, str, str]:
-    ratio = str(data.get("aspect_ratio") or "").strip() or ratio_from_size(
-        data.get("size", "1024x1024")
-    )
-    if ratio not in SUPPORTED_RATIOS:
-        ratio = "1:1"
-
     resolved_model_id = model_id or DEFAULT_MODEL_ID
     if resolved_model_id not in MODEL_CATALOG:
         resolved_model_id = DEFAULT_MODEL_ID
     model_conf = MODEL_CATALOG[resolved_model_id]
 
-    output_resolution = model_conf["output_resolution"]
+    if not model_conf.get("allow_request_overrides"):
+        ratio = str(model_conf.get("aspect_ratio") or "1:1").strip()
+        output_resolution = str(model_conf.get("output_resolution") or "2K").upper()
+        return ratio, output_resolution, resolved_model_id
+
+    ratio = str(data.get("aspect_ratio") or "").strip() or ratio_from_size(
+        data.get("size", "1024x1024")
+    )
+    if ratio not in SUPPORTED_RATIOS:
+        ratio = str(model_conf.get("aspect_ratio") or "1:1").strip()
+
+    output_resolution = _normalize_output_resolution(
+        data.get("output_resolution") or model_conf.get("output_resolution") or "2K"
+    )
     if not model_id:
         quality = str(data.get("quality", "2k")).lower()
         if quality in ("4k", "ultra"):
@@ -54,8 +73,12 @@ def resolve_ratio_and_resolution(
         else:
             output_resolution = "1K"
 
-    model_ratio = model_conf.get("aspect_ratio")
-    if model_ratio:
-        ratio = model_ratio
+    allowed_resolutions = [
+        str(item).strip().upper()
+        for item in (model_conf.get("output_resolution_options") or [])
+        if str(item).strip()
+    ]
+    if allowed_resolutions and output_resolution not in allowed_resolutions:
+        output_resolution = str(model_conf.get("output_resolution") or "2K").upper()
 
     return ratio, output_resolution, resolved_model_id

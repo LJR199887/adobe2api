@@ -614,7 +614,10 @@ def _run_with_token_retries(
         except QuotaExhaustedError as exc:
             token_manager.report_exhausted(token)
             last_exc = exc
-            retryable = attempt < max_attempts
+            upstream_job_created = bool(
+                str(getattr(request.state, "log_upstream_job_id", "") or "").strip()
+            )
+            retryable = attempt < max_attempts and not upstream_job_created
             retry_reason = "quota_exhausted"
             err_code = report_error(
                 request,
@@ -637,7 +640,10 @@ def _run_with_token_retries(
         except AuthError as exc:
             token_manager.report_invalid(token)
             last_exc = exc
-            retryable = attempt < max_attempts
+            upstream_job_created = bool(
+                str(getattr(request.state, "log_upstream_job_id", "") or "").strip()
+            )
+            retryable = attempt < max_attempts and not upstream_job_created
             retry_reason = "auth"
             err_code = report_error(
                 request,
@@ -659,8 +665,13 @@ def _run_with_token_retries(
             )
         except UpstreamTemporaryError as exc:
             last_exc = exc
-            retryable = attempt < max_attempts and client.should_retry_temporary_error(
-                exc
+            upstream_job_created = bool(
+                str(getattr(request.state, "log_upstream_job_id", "") or "").strip()
+            )
+            retryable = (
+                attempt < max_attempts
+                and client.should_retry_temporary_error(exc)
+                and not upstream_job_created
             )
             status_part = f"status={exc.status_code}" if exc.status_code else "status=?"
             type_part = f"type={exc.error_type or 'temporary'}"

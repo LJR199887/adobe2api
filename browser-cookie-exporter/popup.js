@@ -1,4 +1,5 @@
 const statusText = document.getElementById("statusText");
+const contextText = document.getElementById("contextText");
 const scopeSelect = document.getElementById("scopeSelect");
 const exportJsonBtn = document.getElementById("exportJsonBtn");
 
@@ -30,9 +31,46 @@ function getCurrentTab() {
   });
 }
 
-function getCookies(filter) {
+function getAllCookieStores() {
   return new Promise((resolve, reject) => {
-    chrome.cookies.getAll(filter, (cookies) => {
+    chrome.cookies.getAllCookieStores((stores) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(Array.isArray(stores) ? stores : []);
+    });
+  });
+}
+
+async function getCurrentContext() {
+  const tab = await getCurrentTab();
+  if (!tab || typeof tab.id !== "number") {
+    throw new Error("Unable to find the active tab for cookie export.");
+  }
+
+  const stores = await getAllCookieStores();
+  const matchedStore = stores.find((store) =>
+    Array.isArray(store.tabIds) && store.tabIds.includes(tab.id)
+  );
+  if (!matchedStore || !matchedStore.id) {
+    throw new Error("Unable to resolve the cookie store for the active tab.");
+  }
+
+  return {
+    tab,
+    storeId: matchedStore.id,
+    incognito: Boolean(tab.incognito || chrome.extension.inIncognitoContext)
+  };
+}
+
+function getCookies(filter, storeId) {
+  return new Promise((resolve, reject) => {
+    const nextFilter = { ...(filter || {}) };
+    if (storeId) {
+      nextFilter.storeId = storeId;
+    }
+    chrome.cookies.getAll(nextFilter, (cookies) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
@@ -43,20 +81,22 @@ function getCookies(filter) {
 }
 
 async function collectCookiesByScope(scope) {
+  const context = await getCurrentContext();
+  const { tab, storeId, incognito } = context;
+
   if (scope === "current") {
-    const tab = await getCurrentTab();
     const url = tab && tab.url ? tab.url : "";
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      throw new Error("当前标签页不是网页，无法按当前站点读取 Cookie");
+      throw new Error("The current tab is not a regular web page.");
     }
-    const cookies = await getCookies({ url });
-    return { cookies, sourceUrl: url };
+    const cookies = await getCookies({ url }, storeId);
+    return { cookies, sourceUrl: url, storeId, incognito };
   }
 
   const domains = [".adobe.com", "firefly.adobe.com", "account.adobe.com"];
   const all = [];
   for (const domain of domains) {
-    const cookies = await getCookies({ domain });
+    const cookies = await getCookies({ domain }, storeId);
     all.push(...cookies);
   }
 
@@ -68,7 +108,13 @@ async function collectCookiesByScope(scope) {
     seen.add(key);
     unique.push(item);
   }
-  return { cookies: unique, sourceUrl: "https://firefly.adobe.com/" };
+
+  return {
+    cookies: unique,
+    sourceUrl: "https://firefly.adobe.com/",
+    storeId,
+    incognito
+  };
 }
 
 function toPlaywrightLikeCookies(cookies) {
@@ -107,34 +153,58 @@ function downloadJson(filename, data) {
 
 async function generatePayload() {
   const scope = scopeSelect.value;
-  const { cookies } = await collectCookiesByScope(scope);
+  const { cookies, incognito, storeId } = await collectCookiesByScope(scope);
   const normalizedCookies = toPlaywrightLikeCookies(cookies);
   const cookieHeader = buildCookieHeader(normalizedCookies);
   const now = new Date();
   const fileTs = toTimestampParts(now);
 
   const payload = { cookie: cookieHeader };
-
   const fileName = `cookie_${fileTs}.json`;
   return {
     payload,
     fileName,
     cookieCount: normalizedCookies.length,
-    cookieHeader
+    incognito,
+    storeId
   };
+}
+
+function renderContext(context) {
+  const modeText = context.incognito ? "Incognito" : "Regular";
+  contextText.textContent = `Browser context: ${modeText} window | store: ${context.storeId}`;
+  if (context.incognito) {
+    setStatus("Incognito cookie store detected. Export will use the isolated incognito cookie jar.");
+  } else {
+    setStatus("Regular browser context detected.");
+  }
+}
+
+async function initContext() {
+  try {
+    const context = await getCurrentContext();
+    renderContext(context);
+  } catch (error) {
+    contextText.textContent = "Browser context: unavailable";
+    setStatus(`Unable to detect the cookie store: ${error.message || error}`);
+    exportJsonBtn.disabled = true;
+  }
 }
 
 exportJsonBtn.addEventListener("click", async () => {
   try {
-    setStatus("正在读取 Cookie...");
-    const { payload, fileName, cookieCount, cookieHeader } = await generatePayload();
+    setStatus("Reading cookies...");
+    const { payload, fileName, cookieCount, incognito } = await generatePayload();
     if (!cookieCount) {
-      setStatus("未读取到 Cookie，请先登录 Adobe/Firefly 后重试");
+      setStatus("No cookies were found. Log in to Adobe or Firefly first.");
       return;
     }
     downloadJson(fileName, payload);
-    setStatus(`导出成功：${cookieCount} 条 Cookie`);
+    const modeText = incognito ? "incognito" : "regular";
+    setStatus(`Exported ${cookieCount} cookies from the ${modeText} browser store.`);
   } catch (error) {
-    setStatus(`导出失败：${error.message || error}`);
+    setStatus(`Export failed: ${error.message || error}`);
   }
 });
+
+initContext();

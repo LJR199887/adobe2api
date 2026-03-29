@@ -68,100 +68,158 @@ docker compose up -d --build
 
 当前支持如下模型族：
 
-- `firefly-nano-banana-*`（图像，对应上游 `nano-banana-2`）
-- `firefly-nano-banana2-*`（图像，对应上游 `nano-banana-3`）
-- `firefly-nano-banana-pro-*`（图像）
-- `firefly-sora2-*`（视频）
-- `firefly-sora2-pro-*`（视频）
-- `firefly-veo31-*`（视频）
-- `firefly-veo31-ref-*`（视频，参考图模式）
-- `firefly-veo31-fast-*`（视频）
+- `nano-banana`（图像，对应上游 `nano-banana-2`）
+- `nano-banana-4k`（图像，固定 4K，对应上游 `nano-banana-2`）
+- `nano-banana2`（图像，对应上游 `nano-banana-3`）
+- `nano-banana2-4k`（图像，固定 4K，对应上游 `nano-banana-3`）
+- `nano-banana-pro`（图像）
+- `nano-banana-pro-4k`（图像，固定 4K）
+- `sora2`（视频）
+- `sora2-pro`（视频）
+- `veo31`（视频）
+- `veo31-ref`（视频，参考图模式）
+- `veo31-fast`（视频）
 
 Nano Banana 图像模型（`nano-banana-2`）：
 
-- 命名：`firefly-nano-banana-{resolution}-{ratio}`
-- 分辨率：`1k` / `2k` / `4k`
-- 比例后缀：`1x1` / `16x9` / `9x16` / `4x3` / `3x4`
+- 命名：`model=nano-banana`，尺寸参数单独传
+- 分辨率：通过 `output_resolution` 传 `1K` / `2K`
+- 比例：通过 `aspect_ratio` 传 `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
 - 示例：
-  - `firefly-nano-banana-2k-16x9`
-  - `firefly-nano-banana-4k-1x1`
+  - `model=nano-banana, output_resolution=2K, aspect_ratio=16:9`
+  - `model=nano-banana, output_resolution=1K, aspect_ratio=1:1`
+
+Nano Banana 4K 图像模型（`nano-banana-2`）：
+
+- 命名：`model=nano-banana-4k`
+- 分辨率固定为 `4K`
+- 比例：通过 `aspect_ratio` 传 `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
+- 示例：
+  - `model=nano-banana-4k, aspect_ratio=16:9`
 
 Nano Banana 2 图像模型（`nano-banana-3`）：
 
-- 命名：`firefly-nano-banana2-{resolution}-{ratio}`
-- 分辨率：`1k` / `2k` / `4k`
-- 比例后缀：`1x1` / `16x9` / `9x16` / `4x3` / `3x4`
+- 命名：`model=nano-banana2`，尺寸参数单独传
+- 分辨率：通过 `output_resolution` 传 `1K` / `2K`
+- 比例：通过 `aspect_ratio` 传 `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
 - 示例：
-  - `firefly-nano-banana2-2k-16x9`
-  - `firefly-nano-banana2-4k-1x1`
+  - `model=nano-banana2, output_resolution=2K, aspect_ratio=16:9`
+  - `model=nano-banana2, output_resolution=1K, aspect_ratio=1:1`
+
+Nano Banana 2 4K 图像模型（`nano-banana-3`）：
+
+- 命名：`model=nano-banana2-4k`
+- 分辨率固定为 `4K`
+- 比例：通过 `aspect_ratio` 传 `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
+- 示例：
+  - `model=nano-banana2-4k, aspect_ratio=16:9`
 
 Nano Banana Pro 图像模型（兼容旧命名）：
 
-- 命名：`firefly-nano-banana-pro-{resolution}-{ratio}`
-- 分辨率：`1k` / `2k` / `4k`
-- 比例后缀：`1x1` / `16x9` / `9x16` / `4x3` / `3x4`
+- 命名：`model=nano-banana-pro`，尺寸参数单独传
+- 分辨率：通过 `output_resolution` 传 `1K` / `2K`
+- 比例：通过 `aspect_ratio` 传 `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
 - 示例：
-  - `firefly-nano-banana-pro-2k-16x9`
-  - `firefly-nano-banana-pro-4k-1x1`
+  - `model=nano-banana-pro, output_resolution=2K, aspect_ratio=16:9`
+  - `model=nano-banana-pro, output_resolution=1K, aspect_ratio=1:1`
+
+Nano Banana Pro 4K 图像模型：
+
+- 命名：`model=nano-banana-pro-4k`
+- 分辨率固定为 `4K`
+- 比例：通过 `aspect_ratio` 传 `1:1` / `16:9` / `9:16` / `4:3` / `3:4`
+- 示例：
+  - `model=nano-banana-pro-4k, aspect_ratio=16:9`
+
+Banana 图像尺寸映射规则：
+
+- 这类模型最终不会直接使用你传入的像素宽高，而是根据 `output_resolution` + `aspect_ratio` 自动换算成固定尺寸
+- 如果没有传 `aspect_ratio`，但传了 `size`，服务会先根据 `size` 自动反推出比例，再套用下表
+
+`1K`
+
+- `1:1` -> `1024 x 1024`
+- `16:9` -> `1360 x 768`
+- `9:16` -> `768 x 1360`
+- `4:3` -> `1152 x 864`
+- `3:4` -> `864 x 1152`
+
+`2K`
+
+- `1:1` -> `2048 x 2048`
+- `16:9` -> `2752 x 1536`
+- `9:16` -> `1536 x 2752`
+- `4:3` -> `2048 x 1536`
+- `3:4` -> `1536 x 2048`
+
+`4K`
+
+- `1:1` -> `4096 x 4096`
+- `16:9` -> `5504 x 3072`
+- `9:16` -> `3072 x 5504`
+- `4:3` -> `4096 x 3072`
+- `3:4` -> `3072 x 4096`
 
 Sora2 视频模型：
 
-- 命名：`firefly-sora2-{duration}-{ratio}`
-- 时长：`4s` / `8s` / `12s`
-- 比例：`9x16` / `16x9`
+- 命名：`model=sora2`，参数单独传
+- 时长：通过 `duration` 传 `4` / `8` / `12`
+- 比例：通过 `aspect_ratio` 传 `9:16` / `16:9`
 - 示例：
-  - `firefly-sora2-4s-16x9`
-  - `firefly-sora2-8s-9x16`
+  - `model=sora2, duration=4, aspect_ratio=16:9`
+  - `model=sora2, duration=8, aspect_ratio=9:16`
 
 Sora2 Pro 视频模型：
 
-- 命名：`firefly-sora2-pro-{duration}-{ratio}`
-- 时长：`4s` / `8s` / `12s`
-- 比例：`9x16` / `16x9`
+- 命名：`model=sora2-pro`，参数单独传
+- 时长：通过 `duration` 传 `4` / `8` / `12`
+- 比例：通过 `aspect_ratio` 传 `9:16` / `16:9`
 - 示例：
-  - `firefly-sora2-pro-4s-16x9`
-  - `firefly-sora2-pro-8s-9x16`
+  - `model=sora2-pro, duration=4, aspect_ratio=16:9`
+  - `model=sora2-pro, duration=8, aspect_ratio=9:16`
 
 Veo31 视频模型：
 
-- 命名：`firefly-veo31-{duration}-{ratio}-{resolution}`
-- 时长：`4s` / `6s` / `8s`
-- 比例：`16x9` / `9x16`
-- 分辨率：`1080p` / `720p`
+- 命名：`model=veo31`，参数单独传
+- 时长：通过 `duration` 传 `4` / `6` / `8`
+- 比例：通过 `aspect_ratio` 传 `16:9` / `9:16`
+- 分辨率：通过 `resolution` 传 `1080p` / `720p`
+- 参考模式：通过 `reference_mode` 传 `frame` 或 `image`
 - 最多支持 2 张参考图：
   - 1 张：首帧参考
   - 2 张：首帧 + 尾帧参考
+- 当 `reference_mode=image` 时，最多支持 3 张参考图
 - 音频默认开启
 - 示例：
-  - `firefly-veo31-4s-16x9-1080p`
-  - `firefly-veo31-6s-9x16-720p`
+  - `model=veo31, duration=4, aspect_ratio=16:9, resolution=1080p`
+  - `model=veo31, duration=6, aspect_ratio=9:16, resolution=720p, reference_mode=image`
 
 Veo31 Ref 视频模型（参考图模式）：
 
-- 命名：`firefly-veo31-ref-{duration}-{ratio}-{resolution}`
-- 时长：`4s` / `6s` / `8s`
-- 比例：`16x9` / `9x16`
-- 分辨率：`1080p` / `720p`
+- 命名：`model=veo31-ref`，参数单独传
+- 时长：通过 `duration` 传 `4` / `6` / `8`
+- 比例：通过 `aspect_ratio` 传 `16:9` / `9:16`
+- 分辨率：通过 `resolution` 传 `1080p` / `720p`
 - 始终使用参考图模式（不是首尾帧模式）
 - 最多支持 3 张参考图（映射到上游 `referenceBlobs[].usage="asset"`）
 - 示例：
-  - `firefly-veo31-ref-4s-9x16-720p`
-  - `firefly-veo31-ref-6s-16x9-1080p`
-  - `firefly-veo31-ref-8s-9x16-1080p`
+  - `model=veo31-ref, duration=4, aspect_ratio=9:16, resolution=720p`
+  - `model=veo31-ref, duration=6, aspect_ratio=16:9, resolution=1080p`
+  - `model=veo31-ref, duration=8, aspect_ratio=9:16, resolution=1080p`
 
 Veo31 Fast 视频模型：
 
-- 命名：`firefly-veo31-fast-{duration}-{ratio}-{resolution}`
-- 时长：`4s` / `6s` / `8s`
-- 比例：`16x9` / `9x16`
-- 分辨率：`1080p` / `720p`
+- 命名：`model=veo31-fast`，参数单独传
+- 时长：通过 `duration` 传 `4` / `6` / `8`
+- 比例：通过 `aspect_ratio` 传 `16:9` / `9:16`
+- 分辨率：通过 `resolution` 传 `1080p` / `720p`
 - 最多支持 2 张参考图：
   - 1 张：首帧参考
   - 2 张：首帧 + 尾帧参考
 - 音频默认开启
 - 示例：
-  - `firefly-veo31-fast-4s-16x9-1080p`
-  - `firefly-veo31-fast-6s-9x16-720p`
+  - `model=veo31-fast, duration=4, aspect_ratio=16:9, resolution=1080p`
+  - `model=veo31-fast, duration=6, aspect_ratio=9:16, resolution=720p`
 
 ### 3.1 获取模型列表
 
@@ -179,7 +237,9 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-nano-banana-pro-2k-16x9",
+    "model": "nano-banana-pro",
+    "output_resolution": "2K",
+    "aspect_ratio": "16:9",
     "messages": [{"role":"user","content":"a cinematic mountain sunrise"}]
   }'
 ```
@@ -191,7 +251,9 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-nano-banana-pro-2k-16x9",
+    "model": "nano-banana-pro",
+    "output_resolution": "2K",
+    "aspect_ratio": "16:9",
     "messages": [{
       "role":"user",
       "content":[
@@ -209,17 +271,19 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-sora2-4s-16x9",
+    "model": "sora2",
+    "duration": 4,
+    "aspect_ratio": "16:9",
     "messages": [{"role":"user","content":"a drone shot over snowy forest"}]
   }'
 ```
 
 Veo31 单图语义说明：
 
-- `firefly-veo31-*` / `firefly-veo31-fast-*`：帧模式
+- `veo31` / `veo31-fast` 且 `reference_mode=frame`：帧模式
   - 1 张图 => 首帧
   - 2 张图 => 首帧 + 尾帧
-- `firefly-veo31-ref-*`：参考图模式
+- `veo31-ref`，或 `veo31` 且 `reference_mode=image`：参考图模式
   - 1~3 张图 => 参考图
 
 图生视频：
@@ -229,7 +293,9 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-sora2-8s-9x16",
+    "model": "sora2",
+    "duration": 8,
+    "aspect_ratio": "9:16",
     "messages": [{
       "role":"user",
       "content":[
@@ -247,7 +313,8 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-nano-banana-pro-4k-16x9",
+    "model": "nano-banana-pro-4k",
+    "aspect_ratio": "16:9",
     "prompt": "futuristic city skyline at dusk"
   }'
 ```

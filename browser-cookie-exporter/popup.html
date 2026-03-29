@@ -8,22 +8,23 @@
   </head>
   <body>
     <main class="app">
-      <h1>Adobe Cookie 导出</h1>
+      <h1>Adobe Cookie Export</h1>
+      <p id="contextText" class="context">Checking browser context...</p>
 
       <label class="field">
-        <span>导出范围</span>
+        <span>Export Scope</span>
         <select id="scopeSelect">
-          <option value="adobe">Adobe 全域（推荐）</option>
-          <option value="current">当前站点</option>
+          <option value="adobe">Adobe domains (recommended)</option>
+          <option value="current">Current site</option>
         </select>
       </label>
 
       <div class="actions">
-        <button id="exportJsonBtn" type="button">导出最简 JSON</button>
+        <button id="exportJsonBtn" type="button">Export Minimal JSON</button>
       </div>
 
       <section class="result">
-        <p id="statusText" class="status">等待导出…</p>
+        <p id="statusText" class="status">Ready to export.</p>
       </section>
     </main>
 

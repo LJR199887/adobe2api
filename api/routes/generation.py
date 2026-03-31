@@ -233,6 +233,7 @@ def build_generation_router(
         error_code = str(item.get("error_code") or "").strip() or None
         operation = str(item.get("operation") or "").strip() or None
         model = str(item.get("model") or "").strip() or None
+        model_params = str(item.get("model_params") or "").strip() or None
         prompt_preview = str(item.get("prompt_preview") or "").strip() or None
         upstream_job_id = str(item.get("upstream_job_id") or "").strip() or None
         attempt_id = str(item.get("id") or "").strip() or None
@@ -271,6 +272,7 @@ def build_generation_router(
             "error_code": error_code,
             "operation": operation,
             "model": model,
+            "model_params": model_params,
             "prompt_preview": prompt_preview,
             "status_code": status_code,
             "source": source,

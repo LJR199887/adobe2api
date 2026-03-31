@@ -539,9 +539,23 @@ table {
 }
 
 .log-model-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   font-family: "IBM Plex Mono", monospace;
   font-size: 12px;
   color: #8fb0d3;
+  word-break: break-word;
+}
+
+.log-model-name {
+  color: #8fb0d3;
+}
+
+.log-model-meta {
+  color: #7f96ad;
+  font-size: 11px;
+  line-height: 1.35;
   word-break: break-word;
 }
 

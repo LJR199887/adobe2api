@@ -129,15 +129,85 @@ client = AdobeClient()
 refresh_manager.start()
 
 
+def _extract_model_params(data: dict[str, Any]) -> Optional[str]:
+    if not isinstance(data, dict):
+        return None
+
+    def _pick(*keys: str) -> str:
+        for key in keys:
+            value = data.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
+    parts: list[str] = []
+    duration = _pick("duration", "video_duration", "videoDuration")
+    if duration:
+        duration_text = duration.rstrip("sS")
+        if duration_text:
+            parts.append(f"{duration_text}s")
+
+    aspect_ratio = _pick("aspect_ratio", "aspectRatio")
+    if aspect_ratio:
+        parts.append(aspect_ratio)
+
+    resolution = _pick("resolution", "video_resolution", "videoResolution")
+    if resolution:
+        parts.append(resolution)
+    else:
+        output_resolution = _pick("output_resolution", "outputResolution")
+        if output_resolution:
+            parts.append(output_resolution)
+
+    size_val = data.get("size")
+    if size_val is not None:
+        if isinstance(size_val, str):
+            size_text = size_val.strip()
+        elif isinstance(size_val, dict):
+            width = str(size_val.get("width") or "").strip()
+            height = str(size_val.get("height") or "").strip()
+            size_text = f"{width}x{height}" if width and height else ""
+        else:
+            size_text = ""
+        if size_text and size_text not in parts:
+            parts.append(size_text)
+
+    reference_mode = _pick(
+        "reference_mode",
+        "referenceMode",
+        "video_reference_mode",
+        "videoReferenceMode",
+    )
+    if reference_mode:
+        parts.append(f"ref:{reference_mode}")
+
+    if not parts:
+        return None
+    return " | ".join(parts[:5])
+
+
 def _extract_logging_fields(raw_body: bytes) -> dict[str, Optional[str]]:
     if not raw_body:
-        return {"model": None, "prompt_preview": None, "request_id": None}
+        return {
+            "model": None,
+            "model_params": None,
+            "prompt_preview": None,
+            "request_id": None,
+        }
     try:
         import json
 
         data: Any = json.loads(raw_body.decode("utf-8"))
         if not isinstance(data, dict):
-            return {"model": None, "prompt_preview": None, "request_id": None}
+            return {
+                "model": None,
+                "model_params": None,
+                "prompt_preview": None,
+                "request_id": None,
+            }
 
         model = str(data.get("model") or "").strip() or None
         prompt = str(data.get("prompt") or "").strip()
@@ -151,11 +221,17 @@ def _extract_logging_fields(raw_body: bytes) -> dict[str, Optional[str]]:
         )
         return {
             "model": model,
+            "model_params": _extract_model_params(data),
             "prompt_preview": prompt or None,
             "request_id": request_id or None,
         }
     except Exception:
-        return {"model": None, "prompt_preview": None, "request_id": None}
+        return {
+            "model": None,
+            "model_params": None,
+            "prompt_preview": None,
+            "request_id": None,
+        }
 
 
 def _normalize_request_id(value: Any) -> str:
@@ -321,6 +397,7 @@ def _set_request_task_progress(
                 "error": patch.get("error"),
                 "error_code": getattr(request.state, "log_error_code", None),
                 "model": getattr(request.state, "log_model", None),
+                "model_params": getattr(request.state, "log_model_params", None),
                 "prompt_preview": getattr(request.state, "log_prompt_preview", None),
                 "ts": time.time(),
             },
@@ -374,6 +451,7 @@ def _append_attempt_log(
         method = str(getattr(request, "method", "POST") or "POST").upper()
         path = str(getattr(getattr(request, "url", None), "path", "") or "")
         model = getattr(request.state, "log_model", None)
+        model_params = getattr(request.state, "log_model_params", None)
         prompt_preview = getattr(request.state, "log_prompt_preview", None)
         preview_url = getattr(request.state, "log_preview_url", None)
         preview_kind = getattr(request.state, "log_preview_kind", None)
@@ -398,6 +476,7 @@ def _append_attempt_log(
                 preview_url=preview_url,
                 preview_kind=preview_kind,
                 model=model,
+                model_params=model_params,
                 prompt_preview=prompt_preview,
                 error=(str(error)[:240] if error else None),
                 error_code=(str(error_code or "") or None),
@@ -434,7 +513,12 @@ async def request_logger(request: Request, call_next):
     preview_url = None
     preview_kind = None
     raw_body = b""
-    body_meta = {"model": None, "prompt_preview": None, "request_id": None}
+    body_meta = {
+        "model": None,
+        "model_params": None,
+        "prompt_preview": None,
+        "request_id": None,
+    }
     error_text = None
     status_code = 500
 
@@ -456,6 +540,7 @@ async def request_logger(request: Request, call_next):
             }:
                 body_meta = _extract_logging_fields(raw_body)
                 request.state.log_model = body_meta.get("model")
+                request.state.log_model_params = body_meta.get("model_params")
                 request.state.log_prompt_preview = body_meta.get("prompt_preview")
             header_request_id = _normalize_request_id(
                 request.headers.get("x-request-id")
@@ -479,6 +564,7 @@ async def request_logger(request: Request, call_next):
                         "duration_sec": 0,
                         "operation": operation,
                         "model": body_meta.get("model"),
+                        "model_params": body_meta.get("model_params"),
                         "prompt_preview": body_meta.get("prompt_preview"),
                         "task_status": "IN_PROGRESS",
                         "task_progress": 0.0,
@@ -576,6 +662,7 @@ async def request_logger(request: Request, call_next):
                             preview_url=preview_url,
                             preview_kind=preview_kind,
                             model=body_meta.get("model"),
+                            model_params=body_meta.get("model_params"),
                             prompt_preview=body_meta.get("prompt_preview"),
                             error=error_final,
                             error_code=error_code,

@@ -113,6 +113,8 @@ class RequestProgressApiTests(unittest.TestCase):
                 headers={"Authorization": f"Bearer {self.api_key}"},
                 json={
                     "model": "nano-banana-pro",
+                    "output_resolution": "2K",
+                    "aspect_ratio": "16:9",
                     "prompt": "a cinematic mountain sunrise",
                     "request_id": self.request_id,
                 },
@@ -161,6 +163,7 @@ class RequestProgressApiTests(unittest.TestCase):
             self.assertEqual(running_data["task_status"], "IN_PROGRESS")
             self.assertEqual(running_data["task_progress"], 42.0)
             self.assertEqual(running_data["upstream_job_id"], "up-job-123")
+            self.assertEqual(running_data["model_params"], "16:9 | 2K")
             self.assertEqual(running_data["source"], "live")
             self.assertFalse(running_data["done"])
 
@@ -188,6 +191,7 @@ class RequestProgressApiTests(unittest.TestCase):
             self.assertEqual(finished_data["task_status"], "COMPLETED")
             self.assertEqual(finished_data["task_progress"], 100.0)
             self.assertEqual(finished_data["upstream_job_id"], "up-job-123")
+            self.assertEqual(finished_data["model_params"], "16:9 | 2K")
             self.assertEqual(finished_data["source"], "log")
             self.assertTrue(finished_data["done"])
             self.assertTrue(str(finished_data.get("preview_url") or "").endswith(".png"))

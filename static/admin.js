@@ -1321,17 +1321,25 @@ document.addEventListener("DOMContentLoaded", async () => {
         : `<span class="log-account-email">-</span>`
     );
     const modelText = String(item.model || "-");
+    const modelParamsText = String(item.model_params || "").trim();
     const tokenCell = `<div class="log-account-cell">${accountParts.join("<br>")}</div>`;
     const previewCell = previewUrl
       ? `<button class="small preview-btn" data-url="${encodeURIComponent(previewUrl)}" data-kind="${previewKind || ""}">查看</button>`
       : `<span style="color:#7f96ad;">-</span>`;
+    const modelTitle = escapeHtml([modelText, modelParamsText].filter(Boolean).join(" | "));
+    const modelCell = `
+      <div class="log-model-cell">
+        <span class="log-model-name">${escapeHtml(modelText)}</span>
+        ${modelParamsText ? `<span class="log-model-meta">${escapeHtml(modelParamsText)}</span>` : ""}
+      </div>
+    `;
     tr.innerHTML = `
       <td class="log-time-cell"><span class="date">${dateText}</span><span class="time">${timeText}</span></td>
       <td>${statusCell}</td>
       <td style="color:#a8bfd8;">${t}</td>
       <td>${progressCell}</td>
       <td title="${tokenTitle}">${tokenCell}</td>
-      <td class="log-model-cell" title="${escapeHtml(modelText)}">${escapeHtml(modelText)}</td>
+      <td title="${modelTitle || escapeHtml(modelText)}">${modelCell}</td>
       <td class="log-prompt-cell" title="${(item.prompt_preview || "").replace(/"/g, "&quot;")}">${item.prompt_preview || "-"}</td>
       <td>${previewCell}</td>
     `;

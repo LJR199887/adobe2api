@@ -70,6 +70,7 @@ class RequestLogRecord:
     status_code: int
     duration_sec: int
     operation: str
+    request_id: Optional[str] = None
     preview_url: Optional[str] = None
     preview_kind: Optional[str] = None
     model: Optional[str] = None
@@ -173,6 +174,41 @@ class RequestLogStore:
             except Exception:
                 continue
         return data, total
+
+    def get(self, request_id: str) -> Optional[dict]:
+        target = str(request_id or "").strip()
+        if not target:
+            return None
+        with self._lock:
+            with self._file_path.open("r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+        fallback = None
+        attempt_prefix = f"{target}-a"
+        for line in reversed(lines):
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                item = json.loads(raw)
+            except Exception:
+                continue
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "").strip()
+            item_request_id = str(item.get("request_id") or "").strip()
+            if item_id == target:
+                payload = dict(item)
+                payload.setdefault("request_id", target)
+                return payload
+            if item_request_id == target:
+                return dict(item)
+            if fallback is None and item_id.startswith(attempt_prefix):
+                payload = dict(item)
+                payload.setdefault("request_id", target)
+                payload.setdefault("attempt_id", item_id)
+                fallback = payload
+        return fallback
 
     def stats(
         self,
@@ -347,6 +383,16 @@ class LiveRequestStore:
             return
         with self._lock:
             self._items.pop(iid, None)
+
+    def get(self, item_id: str) -> Optional[dict]:
+        iid = str(item_id or "").strip()
+        if not iid:
+            return None
+        with self._lock:
+            item = self._items.get(iid)
+            if not isinstance(item, dict):
+                return None
+            return dict(item)
 
     def list(self, limit: int = 200) -> list[dict]:
         safe_limit = min(max(int(limit or 200), 1), 1000)

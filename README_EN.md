@@ -292,6 +292,70 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   }'
 ```
 
+### 3.4 `request_id` Progress Polling
+
+Regular external API calls now support polling task status and progress by `request_id`.
+
+- Works with: `/v1/chat/completions` and `/v1/images/generations`
+- Recommended usage: generate a client-side `request_id` and send it with the request
+- Polling endpoint: `GET /v1/requests/{request_id}`
+- Authentication: same as generation endpoints, using `Authorization: Bearer <service_api_key>` or `X-API-Key`
+- The service also echoes `X-Request-Id` in the response headers and includes `request_id` in the JSON response body
+
+Notes:
+
+- If you want to start polling before the generation request returns, you must provide your own `request_id`
+- If you omit it, the service will generate one for you, but you can only read it after the response finishes
+
+Example: submit a generation request
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id": "demo-req-001",
+    "model": "firefly-nano-banana-pro",
+    "output_resolution": "2K",
+    "aspect_ratio": "16:9",
+    "prompt": "a cinematic mountain sunrise"
+  }'
+```
+
+Example: poll progress
+
+```bash
+curl -X GET "http://127.0.0.1:6001/v1/requests/demo-req-001" \
+  -H "Authorization: Bearer <service_api_key>"
+```
+
+Response example:
+
+```json
+{
+  "request_id": "demo-req-001",
+  "task_status": "IN_PROGRESS",
+  "task_progress": 42.0,
+  "upstream_job_id": "upstream-job-id",
+  "retry_after": null,
+  "preview_url": null,
+  "preview_kind": null,
+  "error": null,
+  "error_code": null,
+  "operation": "images.generations",
+  "model": "firefly-nano-banana-pro",
+  "prompt_preview": "a cinematic mountain sunrise",
+  "status_code": 102,
+  "source": "live",
+  "done": false
+}
+```
+
+- `task_status` can be `IN_PROGRESS`, `COMPLETED`, or `FAILED`
+- `task_progress` ranges from `0` to `100`
+- `source=live` means the payload comes from in-memory live state; `source=log` means the task already finished and the data comes from final logs
+- Once the task completes, `preview_url` will be populated when a preview is available
+
 ## 4) Cookie Import
 
 ### Step 1: Export using the Browser Extension (Recommended)

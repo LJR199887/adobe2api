@@ -319,6 +319,70 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   }'
 ```
 
+### 3.4 `request_id` 进度查询
+
+普通外部 API 调用现在支持按 `request_id` 轮询任务状态与进度。
+
+- 可用于：`/v1/chat/completions` 和 `/v1/images/generations`
+- 建议用法：客户端自己生成一个 `request_id`，并随请求一起传入
+- 查询接口：`GET /v1/requests/{request_id}`
+- 认证方式：与生成接口一致，使用 `Authorization: Bearer <service_api_key>` 或 `X-API-Key`
+- 服务会在响应头中回写 `X-Request-Id`，同时在 JSON 响应体中也会包含 `request_id`
+
+说明：
+
+- 如果你想在请求还未返回时就开始轮询，请务必自己传入 `request_id`
+- 如果不传，服务会自动生成一个 ID，但只能在响应完成后从响应头或响应体里拿到
+
+示例：提交生成请求
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id": "demo-req-001",
+    "model": "nano-banana-pro",
+    "output_resolution": "2K",
+    "aspect_ratio": "16:9",
+    "prompt": "a cinematic mountain sunrise"
+  }'
+```
+
+示例：轮询任务进度
+
+```bash
+curl -X GET "http://127.0.0.1:6001/v1/requests/demo-req-001" \
+  -H "Authorization: Bearer <service_api_key>"
+```
+
+返回示例：
+
+```json
+{
+  "request_id": "demo-req-001",
+  "task_status": "IN_PROGRESS",
+  "task_progress": 42.0,
+  "upstream_job_id": "upstream-job-id",
+  "retry_after": null,
+  "preview_url": null,
+  "preview_kind": null,
+  "error": null,
+  "error_code": null,
+  "operation": "images.generations",
+  "model": "nano-banana-pro",
+  "prompt_preview": "a cinematic mountain sunrise",
+  "status_code": 102,
+  "source": "live",
+  "done": false
+}
+```
+
+- `task_status` 可能为 `IN_PROGRESS` / `COMPLETED` / `FAILED`
+- `task_progress` 范围为 `0` 到 `100`
+- `source=live` 表示来自运行中的内存状态，`source=log` 表示任务已结束，数据来自最终日志
+- 任务完成后，如果有预览地址，会在 `preview_url` 中返回
+
 ## 4）Cookie 导入
 
 ### 第一步：使用浏览器插件导出（推荐）

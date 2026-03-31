@@ -176,6 +176,8 @@ def _resolve_video_request_config(model_id: str, data: dict, video_conf: dict) -
 def build_generation_router(
     *,
     store,
+    request_log_store,
+    live_request_store,
     token_manager,
     client,
     generated_dir: Path,
@@ -204,6 +206,79 @@ def build_generation_router(
     logger,
 ) -> APIRouter:
     router = APIRouter()
+
+    def _current_request_id(request: Request) -> str:
+        return str(getattr(request.state, "log_id", "") or "").strip()
+
+    def _attach_request_id(payload: dict, request: Request) -> dict:
+        content = dict(payload or {})
+        request_id = _current_request_id(request)
+        if request_id:
+            content["request_id"] = request_id
+        return content
+
+    def _json_response(status_code: int, content: dict, request: Request) -> JSONResponse:
+        return JSONResponse(
+            status_code=status_code,
+            content=_attach_request_id(content, request),
+        )
+
+    def _build_request_status_payload(
+        request_id: str, item: dict, source: str
+    ) -> dict:
+        task_status = str(item.get("task_status") or "").upper() or None
+        preview_url = str(item.get("preview_url") or "").strip() or None
+        preview_kind = str(item.get("preview_kind") or "").strip() or None
+        error_text = str(item.get("error") or "").strip() or None
+        error_code = str(item.get("error_code") or "").strip() or None
+        operation = str(item.get("operation") or "").strip() or None
+        model = str(item.get("model") or "").strip() or None
+        prompt_preview = str(item.get("prompt_preview") or "").strip() or None
+        upstream_job_id = str(item.get("upstream_job_id") or "").strip() or None
+        attempt_id = str(item.get("id") or "").strip() or None
+        if attempt_id == request_id:
+            attempt_id = None
+        retry_after = item.get("retry_after")
+        status_code = item.get("status_code")
+        try:
+            task_progress = (
+                round(float(item.get("task_progress")), 2)
+                if item.get("task_progress") is not None
+                else None
+            )
+        except Exception:
+            task_progress = None
+        try:
+            status_code = int(status_code) if status_code is not None else None
+        except Exception:
+            status_code = None
+        try:
+            retry_after = int(retry_after) if retry_after is not None else None
+        except Exception:
+            retry_after = None
+        done = task_status in {"COMPLETED", "FAILED"} or bool(
+            status_code is not None and status_code >= 400
+        )
+        payload = {
+            "request_id": request_id,
+            "task_status": task_status,
+            "task_progress": task_progress,
+            "upstream_job_id": upstream_job_id,
+            "retry_after": retry_after,
+            "preview_url": preview_url,
+            "preview_kind": preview_kind,
+            "error": error_text,
+            "error_code": error_code,
+            "operation": operation,
+            "model": model,
+            "prompt_preview": prompt_preview,
+            "status_code": status_code,
+            "source": source,
+            "done": done,
+        }
+        if attempt_id:
+            payload["attempt_id"] = attempt_id
+        return payload
 
     @router.get("/v1/models")
     def list_models(request: Request):
@@ -253,13 +328,39 @@ def build_generation_router(
             )
         return {"object": "list", "data": data}
 
+    @router.get("/v1/requests/{request_id}")
+    def get_request_status(request_id: str, request: Request):
+        require_service_api_key(request)
+
+        normalized_id = str(request_id or "").strip()
+        if not normalized_id:
+            raise HTTPException(status_code=400, detail="request_id is required")
+
+        live_item = live_request_store.get(normalized_id)
+        if isinstance(live_item, dict):
+            return _build_request_status_payload(
+                normalized_id,
+                live_item,
+                source="live",
+            )
+
+        log_item = request_log_store.get(normalized_id)
+        if isinstance(log_item, dict):
+            return _build_request_status_payload(
+                normalized_id,
+                log_item,
+                source="log",
+            )
+
+        raise HTTPException(status_code=404, detail="request not found")
+
     @router.post("/v1/images/generations")
     def openai_generate(data: dict, request: Request):
         require_service_api_key(request)
 
         prompt = data.get("prompt", "").strip()
         if not prompt:
-            return JSONResponse(
+            return _json_response(
                 status_code=400,
                 content={
                     "error": {
@@ -267,12 +368,13 @@ def build_generation_router(
                         "type": "invalid_request_error",
                     }
                 },
+                request=request,
             )
         _validate_prompt_length(prompt)
 
         model_id = data.get("model")
         if str(model_id or "").strip() in video_model_catalog:
-            return JSONResponse(
+            return _json_response(
                 status_code=400,
                 content={
                     "error": {
@@ -280,6 +382,7 @@ def build_generation_router(
                         "type": "invalid_request_error",
                     }
                 },
+                request=request,
             )
         ratio, output_resolution, resolved_model_id = resolve_ratio_and_resolution(
             data, model_id
@@ -332,11 +435,11 @@ def build_generation_router(
                 on_generated_file_written(out_path, old_size, new_size)
                 image_url = public_image_url(request, job_id)
                 set_request_preview(request, image_url, kind="image")
-                return {
+                return _attach_request_id({
                     "created": int(time.time()),
                     "model": resolved_model_id,
                     "data": [{"url": image_url}],
-                }
+                }, request)
 
             return run_with_token_retries(
                 request=request,
@@ -360,7 +463,7 @@ def build_generation_router(
                 task_progress=0.0,
                 error="Token quota exhausted",
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=429,
                 content={
                     "error": {
@@ -369,6 +472,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except auth_error_cls:
             error_code = str(
@@ -386,7 +490,7 @@ def build_generation_router(
                 task_progress=0.0,
                 error="Token invalid or expired",
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=401,
                 content={
                     "error": {
@@ -395,6 +499,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except upstream_temp_error_cls as exc:
             error_code = str(
@@ -409,7 +514,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=503,
                 content={
                     "error": {
@@ -418,6 +523,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except HTTPException as exc:
             err_type = (
@@ -435,7 +541,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc.detail)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=exc.status_code,
                 content={
                     "error": {
@@ -444,6 +550,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except Exception as exc:
             normalized = _normalize_upstream_request_error(exc)
@@ -459,7 +566,7 @@ def build_generation_router(
                 set_request_task_progress(
                     request, task_status="FAILED", task_progress=0.0, error=message
                 )
-                return JSONResponse(
+                return _json_response(
                     status_code=status_code,
                     content={
                         "error": {
@@ -468,6 +575,7 @@ def build_generation_router(
                             "code": error_code,
                         }
                     },
+                    request=request,
                 )
             error_code = set_request_error_detail(
                 request,
@@ -484,7 +592,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=500,
                 content={
                     "error": {
@@ -493,6 +601,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
 
     @router.post("/api/v1/generate")
@@ -595,7 +704,7 @@ def build_generation_router(
 
         threading.Thread(target=runner, args=(job.id,), daemon=True).start()
 
-        return {"task_id": job.id, "status": job.status}
+        return _attach_request_id({"task_id": job.id, "status": job.status}, request)
 
     @router.get("/api/v1/generate/{task_id}")
     def get_job(task_id: str, request: Request):
@@ -614,7 +723,7 @@ def build_generation_router(
         if not prompt:
             prompt = str(data.get("prompt") or "").strip()
         if not prompt:
-            return JSONResponse(
+            return _json_response(
                 status_code=400,
                 content={
                     "error": {
@@ -622,6 +731,7 @@ def build_generation_router(
                         "type": "invalid_request_error",
                     }
                 },
+                request=request,
             )
 
         model_id = str(data.get("model") or "").strip()
@@ -633,7 +743,7 @@ def build_generation_router(
             or model_id.startswith("firefly-veo31-fast")
             or model_id.startswith("firefly-veo31-")
         ) and model_id not in video_model_catalog:
-            return JSONResponse(
+            return _json_response(
                 status_code=400,
                 content={
                     "error": {
@@ -641,6 +751,7 @@ def build_generation_router(
                         "type": "invalid_request_error",
                     }
                 },
+                request=request,
             )
         video_conf = video_model_catalog.get(model_id)
         is_video_model = video_conf is not None
@@ -865,7 +976,7 @@ def build_generation_router(
                         sse_chat_stream(response_payload),
                         media_type="text/event-stream",
                     )
-                return response_payload
+                return _attach_request_id(response_payload, request)
 
             return run_with_token_retries(
                 request=request,
@@ -888,7 +999,7 @@ def build_generation_router(
                 task_progress=0.0,
                 error="Token quota exhausted",
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=429,
                 content={
                     "error": {
@@ -897,6 +1008,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except auth_error_cls:
             error_code = str(
@@ -914,7 +1026,7 @@ def build_generation_router(
                 task_progress=0.0,
                 error="Token invalid or expired",
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=401,
                 content={
                     "error": {
@@ -923,6 +1035,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except upstream_temp_error_cls as exc:
             error_code = str(
@@ -937,7 +1050,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=503,
                 content={
                     "error": {
@@ -946,6 +1059,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except HTTPException as exc:
             err_type = (
@@ -963,7 +1077,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc.detail)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=exc.status_code,
                 content={
                     "error": {
@@ -972,6 +1086,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except Exception as exc:
             normalized = _normalize_upstream_request_error(exc)
@@ -987,7 +1102,7 @@ def build_generation_router(
                 set_request_task_progress(
                     request, task_status="FAILED", task_progress=0.0, error=message
                 )
-                return JSONResponse(
+                return _json_response(
                     status_code=status_code,
                     content={
                         "error": {
@@ -996,6 +1111,7 @@ def build_generation_router(
                             "code": error_code,
                         }
                     },
+                    request=request,
                 )
             error_code = set_request_error_detail(
                 request,
@@ -1014,7 +1130,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=500,
                 content={
                     "error": {
@@ -1023,6 +1139,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
 
     return router

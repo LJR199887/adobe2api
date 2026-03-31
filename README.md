@@ -244,58 +244,6 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   }'
 ```
 
-### 3.7 `request_id` 进度查询
-
-普通外部 API 调用支持按 `request_id` 轮询任务状态与进度。
-
-- 可用于：`/v1/chat/completions` 和 `/v1/images/generations`
-- 查询接口：`GET /v1/requests/{request_id}`
-- 服务会在响应头回写 `X-Request-Id`，同时在 JSON 响应体里也包含 `request_id`
-
-提交示例：
-
-```bash
-curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
-  -H "Authorization: Bearer <service_api_key>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "request_id": "demo-req-001",
-    "model": "nano-banana-pro",
-    "output_resolution": "2K",
-    "aspect_ratio": "16:9",
-    "prompt": "a cinematic mountain sunrise"
-  }'
-```
-
-查询示例：
-
-```bash
-curl -X GET "http://127.0.0.1:6001/v1/requests/demo-req-001" \
-  -H "Authorization: Bearer <service_api_key>"
-```
-
-返回示例：
-
-```json
-{
-  "request_id": "demo-req-001",
-  "task_status": "IN_PROGRESS",
-  "task_progress": 42.0,
-  "upstream_job_id": "upstream-job-id",
-  "retry_after": null,
-  "preview_url": null,
-  "preview_kind": null,
-  "error": null,
-  "error_code": null,
-  "operation": "images.generations",
-  "model": "nano-banana-pro",
-  "prompt_preview": "a cinematic mountain sunrise",
-  "status_code": 102,
-  "source": "live",
-  "done": false
-}
-```
-
 ## 4. Cookie 导入
 
 项目自带浏览器插件目录：`browser-cookie-exporter/`

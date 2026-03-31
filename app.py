@@ -1,7 +1,6 @@
 import os
 import json
 import logging
-import re
 import time
 import uuid
 import threading
@@ -70,10 +69,6 @@ _generated_prune_lock = threading.Lock()
 _generated_usage_bytes = 0
 _generated_file_count = 0
 _generated_last_reconcile_ts = 0.0
-_REQUEST_ID_MAX_LEN = 120
-_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
-
-
 def _drop_generated_file_cache(file_path: Path) -> None:
     if not hasattr(os, "posix_fadvise"):
         return
@@ -195,7 +190,6 @@ def _extract_logging_fields(raw_body: bytes) -> dict[str, Optional[str]]:
             "model": None,
             "model_params": None,
             "prompt_preview": None,
-            "request_id": None,
         }
     try:
         import json
@@ -206,7 +200,6 @@ def _extract_logging_fields(raw_body: bytes) -> dict[str, Optional[str]]:
                 "model": None,
                 "model_params": None,
                 "prompt_preview": None,
-                "request_id": None,
             }
 
         model = str(data.get("model") or "").strip() or None
@@ -216,33 +209,17 @@ def _extract_logging_fields(raw_body: bytes) -> dict[str, Optional[str]]:
         if prompt:
             prompt = prompt.replace("\r", " ").replace("\n", " ").strip()
             prompt = prompt[:180]
-        request_id = _normalize_request_id(
-            data.get("request_id") or data.get("requestId")
-        )
         return {
             "model": model,
             "model_params": _extract_model_params(data),
             "prompt_preview": prompt or None,
-            "request_id": request_id or None,
         }
     except Exception:
         return {
             "model": None,
             "model_params": None,
             "prompt_preview": None,
-            "request_id": None,
         }
-
-
-def _normalize_request_id(value: Any) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    if len(text) > _REQUEST_ID_MAX_LEN:
-        text = text[:_REQUEST_ID_MAX_LEN]
-    if not _REQUEST_ID_PATTERN.fullmatch(text):
-        return ""
-    return text
 
 
 def _upsert_live_request(request: Request, patch: dict) -> None:
@@ -517,7 +494,6 @@ async def request_logger(request: Request, call_next):
         "model": None,
         "model_params": None,
         "prompt_preview": None,
-        "request_id": None,
     }
     error_text = None
     status_code = 500
@@ -542,21 +518,13 @@ async def request_logger(request: Request, call_next):
                 request.state.log_model = body_meta.get("model")
                 request.state.log_model_params = body_meta.get("model_params")
                 request.state.log_prompt_preview = body_meta.get("prompt_preview")
-            header_request_id = _normalize_request_id(
-                request.headers.get("x-request-id")
-            )
-            request.state.log_id = (
-                header_request_id
-                or str(body_meta.get("request_id") or "").strip()
-                or uuid.uuid4().hex[:12]
-            )
+            request.state.log_id = uuid.uuid4().hex[:12]
             log_id = str(getattr(request.state, "log_id", "") or "")
             if log_id:
                 live_log_store.upsert(
                     log_id,
                     {
                         "id": log_id,
-                        "request_id": log_id,
                         "ts": time.time(),
                         "method": method,
                         "path": path,
@@ -577,9 +545,6 @@ async def request_logger(request: Request, call_next):
     try:
         response = await call_next(request)
         status_code = response.status_code
-        log_id = str(getattr(request.state, "log_id", "") or "").strip()
-        if response is not None and log_id:
-            response.headers["X-Request-Id"] = log_id
     except Exception as exc:
         _set_request_error_detail(
             request,

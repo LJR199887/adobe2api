@@ -207,80 +207,8 @@ def build_generation_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    def _current_request_id(request: Request) -> str:
-        return str(getattr(request.state, "log_id", "") or "").strip()
-
-    def _attach_request_id(payload: dict, request: Request) -> dict:
-        content = dict(payload or {})
-        request_id = _current_request_id(request)
-        if request_id:
-            content["request_id"] = request_id
-        return content
-
     def _json_response(status_code: int, content: dict, request: Request) -> JSONResponse:
-        return JSONResponse(
-            status_code=status_code,
-            content=_attach_request_id(content, request),
-        )
-
-    def _build_request_status_payload(
-        request_id: str, item: dict, source: str
-    ) -> dict:
-        task_status = str(item.get("task_status") or "").upper() or None
-        preview_url = str(item.get("preview_url") or "").strip() or None
-        preview_kind = str(item.get("preview_kind") or "").strip() or None
-        error_text = str(item.get("error") or "").strip() or None
-        error_code = str(item.get("error_code") or "").strip() or None
-        operation = str(item.get("operation") or "").strip() or None
-        model = str(item.get("model") or "").strip() or None
-        model_params = str(item.get("model_params") or "").strip() or None
-        prompt_preview = str(item.get("prompt_preview") or "").strip() or None
-        upstream_job_id = str(item.get("upstream_job_id") or "").strip() or None
-        attempt_id = str(item.get("id") or "").strip() or None
-        if attempt_id == request_id:
-            attempt_id = None
-        retry_after = item.get("retry_after")
-        status_code = item.get("status_code")
-        try:
-            task_progress = (
-                round(float(item.get("task_progress")), 2)
-                if item.get("task_progress") is not None
-                else None
-            )
-        except Exception:
-            task_progress = None
-        try:
-            status_code = int(status_code) if status_code is not None else None
-        except Exception:
-            status_code = None
-        try:
-            retry_after = int(retry_after) if retry_after is not None else None
-        except Exception:
-            retry_after = None
-        done = task_status in {"COMPLETED", "FAILED"} or bool(
-            status_code is not None and status_code >= 400
-        )
-        payload = {
-            "request_id": request_id,
-            "task_status": task_status,
-            "task_progress": task_progress,
-            "upstream_job_id": upstream_job_id,
-            "retry_after": retry_after,
-            "preview_url": preview_url,
-            "preview_kind": preview_kind,
-            "error": error_text,
-            "error_code": error_code,
-            "operation": operation,
-            "model": model,
-            "model_params": model_params,
-            "prompt_preview": prompt_preview,
-            "status_code": status_code,
-            "source": source,
-            "done": done,
-        }
-        if attempt_id:
-            payload["attempt_id"] = attempt_id
-        return payload
+        return JSONResponse(status_code=status_code, content=content)
 
     @router.get("/v1/models")
     def list_models(request: Request):
@@ -329,32 +257,6 @@ def build_generation_router(
                 item
             )
         return {"object": "list", "data": data}
-
-    @router.get("/v1/requests/{request_id}")
-    def get_request_status(request_id: str, request: Request):
-        require_service_api_key(request)
-
-        normalized_id = str(request_id or "").strip()
-        if not normalized_id:
-            raise HTTPException(status_code=400, detail="request_id is required")
-
-        live_item = live_request_store.get(normalized_id)
-        if isinstance(live_item, dict):
-            return _build_request_status_payload(
-                normalized_id,
-                live_item,
-                source="live",
-            )
-
-        log_item = request_log_store.get(normalized_id)
-        if isinstance(log_item, dict):
-            return _build_request_status_payload(
-                normalized_id,
-                log_item,
-                source="log",
-            )
-
-        raise HTTPException(status_code=404, detail="request not found")
 
     @router.post("/v1/images/generations")
     def openai_generate(data: dict, request: Request):
@@ -437,11 +339,11 @@ def build_generation_router(
                 on_generated_file_written(out_path, old_size, new_size)
                 image_url = public_image_url(request, job_id)
                 set_request_preview(request, image_url, kind="image")
-                return _attach_request_id({
+                return {
                     "created": int(time.time()),
                     "model": resolved_model_id,
                     "data": [{"url": image_url}],
-                }, request)
+                }
 
             return run_with_token_retries(
                 request=request,
@@ -706,7 +608,7 @@ def build_generation_router(
 
         threading.Thread(target=runner, args=(job.id,), daemon=True).start()
 
-        return _attach_request_id({"task_id": job.id, "status": job.status}, request)
+        return {"task_id": job.id, "status": job.status}
 
     @router.get("/api/v1/generate/{task_id}")
     def get_job(task_id: str, request: Request):
@@ -978,7 +880,7 @@ def build_generation_router(
                         sse_chat_stream(response_payload),
                         media_type="text/event-stream",
                     )
-                return _attach_request_id(response_payload, request)
+                return response_payload
 
             return run_with_token_retries(
                 request=request,

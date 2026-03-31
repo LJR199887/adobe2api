@@ -48,7 +48,7 @@ body {
 }
 
 .shell {
-  max-width: 1000px;
+  max-width: 1180px;
   margin: 40px auto;
   padding: 0 20px;
   display: flex;
@@ -457,7 +457,7 @@ table {
 #logsTable td:nth-child(1),
 #runningLogsTable th:nth-child(1),
 #runningLogsTable td:nth-child(1) {
-  width: 70px;
+  width: 84px;
 }
 
 #logsTable th:nth-child(2),
@@ -493,13 +493,13 @@ table {
 
 #logsTable td:nth-child(5),
 #runningLogsTable td:nth-child(5) {
-  width: 440px;
-  min-width: 260px;
+  width: 340px;
+  min-width: 240px;
 }
 
 #logsTable td:nth-child(6),
 #runningLogsTable td:nth-child(6) {
-  width: 300px;
+  width: 250px;
   min-width: 220px;
   white-space: normal;
 }
@@ -508,8 +508,17 @@ table {
 #logsTable td:nth-child(7),
 #runningLogsTable th:nth-child(7),
 #runningLogsTable td:nth-child(7) {
-  min-width: 320px;
-  width: 42%;
+  min-width: 200px;
+  width: 26%;
+}
+
+#logsTable th:nth-child(8),
+#logsTable td:nth-child(8),
+#runningLogsTable th:nth-child(8),
+#runningLogsTable td:nth-child(8) {
+  width: 116px;
+  min-width: 116px;
+  white-space: nowrap;
 }
 
 #logsTable td,
@@ -522,7 +531,7 @@ table {
   display: block;
   color: #a8bfd8;
   line-height: 1.35;
-  max-width: 420px;
+  max-width: 340px;
   overflow-wrap: anywhere;
 }
 
@@ -578,7 +587,44 @@ table {
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
-  padding-left: 22px !important;
+  padding-left: 10px !important;
+}
+
+.log-prompt-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+.log-prompt-btn:hover {
+  color: #d6e7f9;
+}
+
+.log-prompt-btn:focus-visible {
+  outline: 2px solid rgba(44, 199, 170, 0.55);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+
+.prompt-detail-content {
+  border: 1px solid rgba(142, 181, 221, 0.25);
+  border-radius: 8px;
+  background: #091321;
+  padding: 14px 16px;
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+  color: #cfe3f8;
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 th {

@@ -700,6 +700,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const errorDetailCode = document.getElementById("errorDetailCode");
   const errorDetailContent = document.getElementById("errorDetailContent");
   const errorDetailCloseBtn = document.getElementById("errorDetailCloseBtn");
+  const promptDetailModal = document.getElementById("promptDetailModal");
+  const promptDetailContent = document.getElementById("promptDetailContent");
+  const promptDetailCloseBtn = document.getElementById("promptDetailCloseBtn");
   const appToast = document.getElementById("appToast");
   const LOGS_PAGE_SIZE = 20;
   let logsCurrentPage = 1;
@@ -869,6 +872,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function buildPromptSummary(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "-";
+    const chars = Array.from(raw);
+    if (chars.length <= 4) return raw;
+    return `${chars.slice(0, 4).join("")}...`;
   }
 
   function truncateText(value, maxLen) {
@@ -1322,6 +1333,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     );
     const modelText = String(item.model || "-");
     const modelParamsText = String(item.model_params || "").trim();
+    const promptText = String(item.prompt_preview || "").trim();
+    const promptSummary = buildPromptSummary(promptText);
     const tokenCell = `<div class="log-account-cell">${accountParts.join("<br>")}</div>`;
     const previewCell = previewUrl
       ? `<button class="small preview-btn" data-url="${encodeURIComponent(previewUrl)}" data-kind="${previewKind || ""}">查看</button>`
@@ -1340,7 +1353,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       <td>${progressCell}</td>
       <td title="${tokenTitle}">${tokenCell}</td>
       <td title="${modelTitle || escapeHtml(modelText)}">${modelCell}</td>
-      <td class="log-prompt-cell" title="${(item.prompt_preview || "").replace(/"/g, "&quot;")}">${item.prompt_preview || "-"}</td>
+      <td class="log-prompt-cell">${promptText ? `<button class="log-prompt-btn" data-full-prompt="${encodeURIComponent(promptText)}" type="button">${escapeHtml(promptSummary)}</button>` : "-"}</td>
       <td>${previewCell}</td>
     `;
     if (isRunning) tr.classList.add("log-row-running");
@@ -1426,6 +1439,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     errorDetailContent.innerHTML = "";
   }
 
+  function closePromptDetail() {
+    if (!promptDetailModal || !promptDetailContent) return;
+    promptDetailModal.classList.remove("open");
+    promptDetailModal.setAttribute("aria-hidden", "true");
+    promptDetailContent.textContent = "";
+  }
+
   async function openErrorDetailByCode(code) {
     const errCode = String(code || "").trim();
     if (!errCode || !errorDetailModal || !errorDetailCode || !errorDetailContent) return;
@@ -1475,10 +1495,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     previewModal.setAttribute("aria-hidden", "false");
   }
 
+  function openPromptDetail(text) {
+    if (!promptDetailModal || !promptDetailContent) return;
+    promptDetailContent.textContent = String(text || "").trim() || "暂无提示词";
+    promptDetailModal.classList.add("open");
+    promptDetailModal.setAttribute("aria-hidden", "false");
+  }
+
   if (logsTbody) {
     logsTbody.addEventListener("click", (event) => {
       const target = event.target;
       if (!(target instanceof HTMLElement)) return;
+      const promptBtn = target.closest("[data-full-prompt]");
+      if (promptBtn instanceof HTMLElement) {
+        const fullPrompt = String(promptBtn.getAttribute("data-full-prompt") || "").trim();
+        openPromptDetail(decodeURIComponent(fullPrompt));
+        return;
+      }
       if (target.classList.contains("preview-btn")) {
         const encodedUrl = target.getAttribute("data-url") || "";
         const kind = (target.getAttribute("data-kind") || "").trim();
@@ -1515,10 +1548,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  if (promptDetailCloseBtn) {
+    promptDetailCloseBtn.addEventListener("click", closePromptDetail);
+  }
+
+  if (promptDetailModal) {
+    promptDetailModal.addEventListener("click", (event) => {
+      if (event.target === promptDetailModal) closePromptDetail();
+    });
+  }
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
       closePreview();
       closeErrorDetail();
+      closePromptDetail();
       closeDialog(tokenModal);
       closeDialog(refreshModal);
     }

@@ -154,15 +154,26 @@ def build_admin_router(
         key = str(range_key or "today").strip().lower()
         if key == "today":
             start_dt = datetime(now_dt.year, now_dt.month, now_dt.day)
+            end_ts = now_ts
+        elif key == "yesterday":
+            today_start = datetime(now_dt.year, now_dt.month, now_dt.day)
+            start_dt = today_start - timedelta(days=1)
+            end_ts = today_start.timestamp()
+        elif key == "3d":
+            start_dt = now_dt - timedelta(days=3)
+            end_ts = now_ts
         elif key == "7d":
             start_dt = now_dt - timedelta(days=7)
+            end_ts = now_ts
         elif key == "30d":
             start_dt = now_dt - timedelta(days=30)
+            end_ts = now_ts
         else:
             raise HTTPException(
-                status_code=400, detail="range must be one of: today, 7d, 30d"
+                status_code=400,
+                detail="range must be one of: today, yesterday, 3d, 7d, 30d",
             )
-        return key, start_dt.timestamp(), now_ts
+        return key, start_dt.timestamp(), end_ts
 
     @router.get("/api/v1/logs/stats")
     def logs_stats(request: Request, range: str = "today"):

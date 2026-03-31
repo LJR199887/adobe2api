@@ -1330,7 +1330,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const modelCell = `
       <div class="log-model-cell">
         <span class="log-model-name">${escapeHtml(modelText)}</span>
-        ${modelParamsText ? `<span class="log-model-meta">| ${escapeHtml(modelParamsText)}</span>` : ""}
+        ${modelParamsText ? `<span class="log-model-meta">${escapeHtml(modelParamsText)}</span>` : ""}
       </div>
     `;
     tr.innerHTML = `

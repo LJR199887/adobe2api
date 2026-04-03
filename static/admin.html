@@ -209,9 +209,9 @@
             <div class="form-group" style="margin-top: 12px;">
               <label class="checkbox-label" style="user-select: none;">
                 <input type="checkbox" id="confUseUpstreamResultUrl" />
-                Direct upstream result URL (skip local download)
+                直接使用上游结果链接（不下载到本地）
               </label>
-              <p class="help">Use the upstream presignedUrl directly to save local disk and memory. Older previews may stop working after the signed URL expires.</p>
+              <p class="help">开启后将直接返回上游的 presignedUrl，可减少服务器磁盘占用和本地缓存压力；但该链接通常会过期，历史预览或旧结果可能失效。</p>
             </div>
           </section>
 

@@ -587,6 +587,10 @@ def build_admin_router(
                     detail="generated_prune_size_mb must be between 10 and 10240",
                 )
             update_data["generated_prune_size_mb"] = generated_prune_size_mb
+        if "use_upstream_result_url" in incoming:
+            update_data["use_upstream_result_url"] = bool(
+                incoming["use_upstream_result_url"]
+            )
         effective_max = int(
             update_data.get(
                 "generated_max_size_mb",

@@ -33,6 +33,7 @@ class ConfigManager:
             "batch_concurrency": 5,
             "generated_max_size_mb": 1024,
             "generated_prune_size_mb": 200,
+            "use_upstream_result_url": False,
         }
         self.load()
 

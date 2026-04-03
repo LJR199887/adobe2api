@@ -777,6 +777,7 @@ class AdobeClient:
         reference_mode: str = "frame",
         out_path: Optional[Path] = None,
         progress_cb: Optional[Callable[[dict], None]] = None,
+        return_upstream_url: bool = False,
     ) -> tuple[Optional[bytes], dict]:
         payload = self._build_video_payload(
             video_conf=video_conf,
@@ -886,7 +887,9 @@ class AdobeClient:
                     video_url = ((outputs[0] or {}).get("video") or {}).get("presignedUrl")
                     if not video_url:
                         raise AdobeRequestError("video job finished without video url")
-                    if out_path is not None:
+                    if return_upstream_url:
+                        video_bytes = None
+                    elif out_path is not None:
                         self._download_to_file(
                             video_url,
                             headers={"accept": "*/*"},
@@ -991,6 +994,7 @@ class AdobeClient:
         timeout: int = 180,
         out_path: Optional[Path] = None,
         progress_cb: Optional[Callable[[dict], None]] = None,
+        return_upstream_url: bool = False,
     ) -> tuple[Optional[bytes], dict]:
         submit_resp = None
         last_error = ""
@@ -1127,7 +1131,9 @@ class AdobeClient:
                     image_url = ((outputs[0] or {}).get("image") or {}).get("presignedUrl")
                     if not image_url:
                         raise AdobeRequestError("job finished without image url")
-                    if out_path is not None:
+                    if return_upstream_url:
+                        image_bytes = None
+                    elif out_path is not None:
                         self._download_to_file(
                             image_url,
                             headers={"accept": "*/*"},

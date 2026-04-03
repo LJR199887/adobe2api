@@ -1066,6 +1066,10 @@ def _public_image_url(request: Request, job_id: str) -> str:
     return _public_generated_url(request, f"{job_id}.png")
 
 
+def _use_upstream_result_url() -> bool:
+    return bool(config_manager.get("use_upstream_result_url", False))
+
+
 def _public_generated_url(request: Request, filename: str) -> str:
     safe_name = str(filename or "").lstrip("/")
     path = f"/generated/{safe_name}"
@@ -1324,6 +1328,7 @@ app.include_router(
         set_request_preview=_set_request_preview,
         public_image_url=_public_image_url,
         public_generated_url=_public_generated_url,
+        use_upstream_result_url=_use_upstream_result_url,
         resolve_video_options=_resolve_video_options,
         load_input_images=_load_input_images,
         prepare_video_source_image=_prepare_video_source_image,

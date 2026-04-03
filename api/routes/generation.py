@@ -35,6 +35,14 @@ def _normalize_upstream_request_error(exc: Exception) -> tuple[int, str, str] | 
     return None
 
 
+def _extract_upstream_asset_url(meta: dict, asset_kind: str) -> str:
+    outputs = meta.get("outputs") or []
+    if not outputs:
+        return ""
+    asset = (outputs[0] or {}).get(asset_kind) or {}
+    return str(asset.get("presignedUrl") or "").strip()
+
+
 def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | None]:
     locale = str(
         data.get("locale")
@@ -193,6 +201,7 @@ def build_generation_router(
     set_request_preview: Callable[[Request, str, str], None],
     public_image_url: Callable[[Request, str], str],
     public_generated_url: Callable[[Request, str], str],
+    use_upstream_result_url: Callable[[], bool],
     resolve_video_options: Callable[[dict], tuple[bool, str, str]],
     load_input_images: Callable[[Any], list[tuple[bytes, str]]],
     prepare_video_source_image: Callable[[bytes, str, str], tuple[bytes, str]],
@@ -309,16 +318,18 @@ def build_generation_router(
                         error=update.get("error"),
                     )
 
+                direct_result_url = bool(use_upstream_result_url())
                 job_id = uuid.uuid4().hex
                 out_path = generated_dir / f"{job_id}.png"
                 old_size = 0
-                try:
-                    if out_path.exists():
-                        old_size = int(out_path.stat().st_size)
-                except Exception:
-                    old_size = 0
+                if not direct_result_url:
+                    try:
+                        if out_path.exists():
+                            old_size = int(out_path.stat().st_size)
+                    except Exception:
+                        old_size = 0
 
-                image_bytes, _meta = client.generate(
+                image_bytes, meta = client.generate(
                     token=token,
                     prompt=prompt,
                     aspect_ratio=ratio,
@@ -330,14 +341,23 @@ def build_generation_router(
                         model_conf.get("upstream_model_version") or "nano-banana-2"
                     ),
                     timeout=client.generate_timeout,
-                    out_path=out_path,
+                    out_path=None if direct_result_url else out_path,
                     progress_cb=_image_progress_cb,
+                    return_upstream_url=direct_result_url,
                 )
-                if image_bytes is not None:
-                    out_path.write_bytes(image_bytes)
-                new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                on_generated_file_written(out_path, old_size, new_size)
-                image_url = public_image_url(request, job_id)
+                if direct_result_url:
+                    image_url = _extract_upstream_asset_url(meta, "image")
+                    if not image_url:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="upstream result url missing",
+                        )
+                else:
+                    if image_bytes is not None:
+                        out_path.write_bytes(image_bytes)
+                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
+                    on_generated_file_written(out_path, old_size, new_size)
+                    image_url = public_image_url(request, job_id)
                 set_request_preview(request, image_url, kind="image")
                 return {
                     "created": int(time.time()),
@@ -545,13 +565,15 @@ def build_generation_router(
                     break
 
                 try:
+                    direct_result_url = bool(use_upstream_result_url())
                     out_path = generated_dir / f"{job_id}.png"
                     old_size = 0
-                    try:
-                        if out_path.exists():
-                            old_size = int(out_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                    if not direct_result_url:
+                        try:
+                            if out_path.exists():
+                                old_size = int(out_path.stat().st_size)
+                        except Exception:
+                            old_size = 0
 
                     image_bytes, meta = client.generate(
                         token=token,
@@ -564,14 +586,22 @@ def build_generation_router(
                         upstream_model_version=str(
                             model_conf.get("upstream_model_version") or "nano-banana-2"
                         ),
-                        out_path=out_path,
+                        out_path=None if direct_result_url else out_path,
+                        return_upstream_url=direct_result_url,
                     )
-                    if image_bytes is not None:
-                        out_path.write_bytes(image_bytes)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
+                    if direct_result_url:
+                        image_url = _extract_upstream_asset_url(meta, "image")
+                        if not image_url:
+                            raise RuntimeError("upstream result url missing")
+                    else:
+                        if image_bytes is not None:
+                            out_path.write_bytes(image_bytes)
+                        new_size = (
+                            int(out_path.stat().st_size) if out_path.exists() else 0
+                        )
+                        on_generated_file_written(out_path, old_size, new_size)
+                        image_url = public_image_url(request, job_id)
                     progress = float(meta.get("progress") or 100.0)
-                    image_url = public_image_url(request, job_id)
                     store.update(
                         job_id,
                         status="succeeded",
@@ -762,14 +792,16 @@ def build_generation_router(
                             error=update.get("error"),
                         )
 
+                    direct_result_url = bool(use_upstream_result_url())
                     job_id = uuid.uuid4().hex
                     tmp_path = generated_dir / f"{job_id}.video.tmp"
                     old_size = 0
-                    try:
-                        if tmp_path.exists():
-                            old_size = int(tmp_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                    if not direct_result_url:
+                        try:
+                            if tmp_path.exists():
+                                old_size = int(tmp_path.stat().st_size)
+                        except Exception:
+                            old_size = 0
 
                     video_bytes, video_meta = client.generate_video(
                         token=token,
@@ -785,19 +817,30 @@ def build_generation_router(
                         timeline_events=timeline_events,
                         audio=video_audio,
                         reference_mode=video_reference_mode,
-                        out_path=tmp_path,
+                        out_path=None if direct_result_url else tmp_path,
                         progress_cb=_video_progress_cb,
+                        return_upstream_url=direct_result_url,
                     )
-                    video_ext = video_ext_from_meta(video_meta)
-                    filename = f"{job_id}.{video_ext}"
-                    out_path = generated_dir / filename
-                    if video_bytes is not None:
-                        out_path.write_bytes(video_bytes)
-                    elif tmp_path.exists():
-                        tmp_path.replace(out_path)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
-                    image_url = public_generated_url(request, filename)
+                    if direct_result_url:
+                        image_url = _extract_upstream_asset_url(video_meta, "video")
+                        if not image_url:
+                            raise HTTPException(
+                                status_code=502,
+                                detail="upstream result url missing",
+                            )
+                    else:
+                        video_ext = video_ext_from_meta(video_meta)
+                        filename = f"{job_id}.{video_ext}"
+                        out_path = generated_dir / filename
+                        if video_bytes is not None:
+                            out_path.write_bytes(video_bytes)
+                        elif tmp_path.exists():
+                            tmp_path.replace(out_path)
+                        new_size = (
+                            int(out_path.stat().st_size) if out_path.exists() else 0
+                        )
+                        on_generated_file_written(out_path, old_size, new_size)
+                        image_url = public_generated_url(request, filename)
                     set_request_preview(request, image_url, kind="video")
                     response_content = (
                         f"```html\n<video src='{image_url}' controls></video>\n```"
@@ -820,16 +863,18 @@ def build_generation_router(
                             error=update.get("error"),
                         )
 
+                    direct_result_url = bool(use_upstream_result_url())
                     job_id = uuid.uuid4().hex
                     out_path = generated_dir / f"{job_id}.png"
                     old_size = 0
-                    try:
-                        if out_path.exists():
-                            old_size = int(out_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                    if not direct_result_url:
+                        try:
+                            if out_path.exists():
+                                old_size = int(out_path.stat().st_size)
+                        except Exception:
+                            old_size = 0
 
-                    image_bytes, _meta = client.generate(
+                    image_bytes, meta = client.generate(
                         token=token,
                         prompt=prompt,
                         aspect_ratio=ratio,
@@ -843,14 +888,23 @@ def build_generation_router(
                         ),
                         source_image_ids=source_image_ids,
                         timeout=client.generate_timeout,
-                        out_path=out_path,
+                        out_path=None if direct_result_url else out_path,
                         progress_cb=_image_progress_cb,
+                        return_upstream_url=direct_result_url,
                     )
-                    if image_bytes is not None:
-                        out_path.write_bytes(image_bytes)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
-                    image_url = public_image_url(request, job_id)
+                    if direct_result_url:
+                        image_url = _extract_upstream_asset_url(meta, "image")
+                        if not image_url:
+                            raise HTTPException(
+                                status_code=502,
+                                detail="upstream result url missing",
+                            )
+                    else:
+                        if image_bytes is not None:
+                            out_path.write_bytes(image_bytes)
+                        new_size = int(out_path.stat().st_size) if out_path.exists() else 0
+                        on_generated_file_written(out_path, old_size, new_size)
+                        image_url = public_image_url(request, job_id)
                     set_request_preview(request, image_url, kind="image")
                     response_content = f"![Generated Image]({image_url})"
 

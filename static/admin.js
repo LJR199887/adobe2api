@@ -669,6 +669,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confBatchConcurrency = document.getElementById("confBatchConcurrency");
   const confGeneratedMaxSizeMb = document.getElementById("confGeneratedMaxSizeMb");
   const confGeneratedPruneSizeMb = document.getElementById("confGeneratedPruneSizeMb");
+  const confUseUpstreamResultUrl = document.getElementById("confUseUpstreamResultUrl");
   const generatedUsageInfo = document.getElementById("generatedUsageInfo");
   const configCatBtns = document.querySelectorAll(".config-cat-btn");
   const configCatPanes = document.querySelectorAll(".config-cat-pane");
@@ -761,6 +762,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         confBatchConcurrency.value = currentBatchConcurrency;
         confGeneratedMaxSizeMb.value = Number(data.generated_max_size_mb || 1024);
         confGeneratedPruneSizeMb.value = Number(data.generated_prune_size_mb || 200);
+        confUseUpstreamResultUrl.checked = Boolean(data.use_upstream_result_url || false);
         if (generatedUsageInfo) {
           const usageMb = Number(data.generated_usage_mb || 0);
           const fileCount = Number(data.generated_file_count || 0);
@@ -804,6 +806,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         batch_concurrency: Math.max(1, Math.min(100, Number(confBatchConcurrency.value || 5))),
         generated_max_size_mb: Math.max(100, Math.min(102400, Number(confGeneratedMaxSizeMb.value || 1024))),
         generated_prune_size_mb: Math.max(10, Math.min(10240, Number(confGeneratedPruneSizeMb.value || 200))),
+        use_upstream_result_url: confUseUpstreamResultUrl.checked,
       };
 
       if (!payload.admin_username) {

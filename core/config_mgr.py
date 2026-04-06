@@ -34,6 +34,9 @@ class ConfigManager:
             "generated_max_size_mb": 1024,
             "generated_prune_size_mb": 200,
             "use_upstream_result_url": False,
+            "imgbed_enabled": False,
+            "imgbed_api_url": "",
+            "imgbed_api_key": "",
         }
         self.load()
 

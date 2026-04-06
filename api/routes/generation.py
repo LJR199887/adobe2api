@@ -43,6 +43,15 @@ def _extract_upstream_asset_url(meta: dict, asset_kind: str) -> str:
     return str(asset.get("presignedUrl") or "").strip()
 
 
+def _video_mime_type(video_ext: str) -> str:
+    normalized = str(video_ext or "").strip().lower()
+    if normalized == "mov":
+        return "video/quicktime"
+    if normalized == "webm":
+        return "video/webm"
+    return "video/mp4"
+
+
 def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | None]:
     locale = str(
         data.get("locale")
@@ -202,6 +211,8 @@ def build_generation_router(
     public_image_url: Callable[[Request, str], str],
     public_generated_url: Callable[[Request, str], str],
     use_upstream_result_url: Callable[[], bool],
+    use_imgbed_upload: Callable[[], bool],
+    upload_generated_asset_to_imgbed: Callable[[str, str, str | None], str],
     resolve_video_options: Callable[[dict], tuple[bool, str, str]],
     load_input_images: Callable[[Any], list[tuple[bytes, str]]],
     prepare_video_source_image: Callable[[bytes, str, str], tuple[bytes, str]],
@@ -318,7 +329,8 @@ def build_generation_router(
                         error=update.get("error"),
                     )
 
-                direct_result_url = bool(use_upstream_result_url())
+                imgbed_upload_enabled = bool(use_imgbed_upload())
+                direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                 job_id = uuid.uuid4().hex
                 out_path = generated_dir / f"{job_id}.png"
                 old_size = 0
@@ -345,8 +357,20 @@ def build_generation_router(
                     progress_cb=_image_progress_cb,
                     return_upstream_url=direct_result_url,
                 )
-                if direct_result_url:
-                    image_url = _extract_upstream_asset_url(meta, "image")
+                upstream_image_url = _extract_upstream_asset_url(meta, "image")
+                if imgbed_upload_enabled:
+                    if not upstream_image_url:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="upstream result url missing",
+                        )
+                    image_url = upload_generated_asset_to_imgbed(
+                        upstream_image_url,
+                        filename=f"{job_id}.png",
+                        mime_type="image/png",
+                    )
+                elif direct_result_url:
+                    image_url = upstream_image_url
                     if not image_url:
                         raise HTTPException(
                             status_code=502,
@@ -565,7 +589,8 @@ def build_generation_router(
                     break
 
                 try:
-                    direct_result_url = bool(use_upstream_result_url())
+                    imgbed_upload_enabled = bool(use_imgbed_upload())
+                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                     out_path = generated_dir / f"{job_id}.png"
                     old_size = 0
                     if not direct_result_url:
@@ -589,8 +614,17 @@ def build_generation_router(
                         out_path=None if direct_result_url else out_path,
                         return_upstream_url=direct_result_url,
                     )
-                    if direct_result_url:
-                        image_url = _extract_upstream_asset_url(meta, "image")
+                    upstream_image_url = _extract_upstream_asset_url(meta, "image")
+                    if imgbed_upload_enabled:
+                        if not upstream_image_url:
+                            raise RuntimeError("upstream result url missing")
+                        image_url = upload_generated_asset_to_imgbed(
+                            upstream_image_url,
+                            filename=f"{job_id}.png",
+                            mime_type="image/png",
+                        )
+                    elif direct_result_url:
+                        image_url = upstream_image_url
                         if not image_url:
                             raise RuntimeError("upstream result url missing")
                     else:
@@ -792,7 +826,8 @@ def build_generation_router(
                             error=update.get("error"),
                         )
 
-                    direct_result_url = bool(use_upstream_result_url())
+                    imgbed_upload_enabled = bool(use_imgbed_upload())
+                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                     job_id = uuid.uuid4().hex
                     tmp_path = generated_dir / f"{job_id}.video.tmp"
                     old_size = 0
@@ -821,15 +856,27 @@ def build_generation_router(
                         progress_cb=_video_progress_cb,
                         return_upstream_url=direct_result_url,
                     )
-                    if direct_result_url:
-                        image_url = _extract_upstream_asset_url(video_meta, "video")
+                    upstream_video_url = _extract_upstream_asset_url(video_meta, "video")
+                    video_ext = video_ext_from_meta(video_meta)
+                    if imgbed_upload_enabled:
+                        if not upstream_video_url:
+                            raise HTTPException(
+                                status_code=502,
+                                detail="upstream result url missing",
+                            )
+                        image_url = upload_generated_asset_to_imgbed(
+                            upstream_video_url,
+                            filename=f"{job_id}.{video_ext}",
+                            mime_type=_video_mime_type(video_ext),
+                        )
+                    elif direct_result_url:
+                        image_url = upstream_video_url
                         if not image_url:
                             raise HTTPException(
                                 status_code=502,
                                 detail="upstream result url missing",
                             )
                     else:
-                        video_ext = video_ext_from_meta(video_meta)
                         filename = f"{job_id}.{video_ext}"
                         out_path = generated_dir / filename
                         if video_bytes is not None:
@@ -863,7 +910,8 @@ def build_generation_router(
                             error=update.get("error"),
                         )
 
-                    direct_result_url = bool(use_upstream_result_url())
+                    imgbed_upload_enabled = bool(use_imgbed_upload())
+                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                     job_id = uuid.uuid4().hex
                     out_path = generated_dir / f"{job_id}.png"
                     old_size = 0
@@ -892,8 +940,20 @@ def build_generation_router(
                         progress_cb=_image_progress_cb,
                         return_upstream_url=direct_result_url,
                     )
-                    if direct_result_url:
-                        image_url = _extract_upstream_asset_url(meta, "image")
+                    upstream_image_url = _extract_upstream_asset_url(meta, "image")
+                    if imgbed_upload_enabled:
+                        if not upstream_image_url:
+                            raise HTTPException(
+                                status_code=502,
+                                detail="upstream result url missing",
+                            )
+                        image_url = upload_generated_asset_to_imgbed(
+                            upstream_image_url,
+                            filename=f"{job_id}.png",
+                            mime_type="image/png",
+                        )
+                    elif direct_result_url:
+                        image_url = upstream_image_url
                         if not image_url:
                             raise HTTPException(
                                 status_code=502,

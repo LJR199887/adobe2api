@@ -45,6 +45,9 @@ class ConfigUpdateRequest(BaseModel):
     generated_max_size_mb: Optional[int] = None
     generated_prune_size_mb: Optional[int] = None
     use_upstream_result_url: Optional[bool] = None
+    imgbed_enabled: Optional[bool] = None
+    imgbed_api_url: Optional[str] = None
+    imgbed_api_key: Optional[str] = None
 
 
 class RefreshCookieImportRequest(BaseModel):

@@ -215,6 +215,25 @@
             </div>
           </section>
 
+          <section style="padding-top:0;">
+            <div class="form-group" style="margin-top: 12px;">
+              <label class="checkbox-label" style="user-select: none;">
+                <input type="checkbox" id="confImgBedEnabled" />
+                开启图传模式（生成后自动上传图床）
+              </label>
+              <p class="help">开启后图片和视频会先上传到图床，再返回图床链接；此模式优先于上游直链和本地文件回链。</p>
+            </div>
+            <div class="form-group">
+              <label for="confImgBedApiUrl">图床上传 API 地址</label>
+              <input type="text" id="confImgBedApiUrl" class="input-text" placeholder="例如：https://your-domain/upload 或 https://your-domain/api/upload" />
+              <p class="help">参考 CloudFlare ImgBed 上传接口，建议填写完整上传地址。程序会自动追加 authCode 和 returnFormat=full。</p>
+            </div>
+            <div class="form-group">
+              <label for="confImgBedApiKey">图床密钥 / 认证码</label>
+              <input type="password" id="confImgBedApiKey" class="input-text" placeholder="填写上传 authCode 或对应密钥" />
+            </div>
+          </section>
+
           <div class="actions" style="margin-top: 24px;">
             <button id="saveConfigBtn">保存配置</button>
             <span id="configMsg" class="msg"></span>

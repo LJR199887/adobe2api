@@ -670,6 +670,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confGeneratedMaxSizeMb = document.getElementById("confGeneratedMaxSizeMb");
   const confGeneratedPruneSizeMb = document.getElementById("confGeneratedPruneSizeMb");
   const confUseUpstreamResultUrl = document.getElementById("confUseUpstreamResultUrl");
+  const confImgBedEnabled = document.getElementById("confImgBedEnabled");
+  const confImgBedApiUrl = document.getElementById("confImgBedApiUrl");
+  const confImgBedApiKey = document.getElementById("confImgBedApiKey");
   const generatedUsageInfo = document.getElementById("generatedUsageInfo");
   const configCatBtns = document.querySelectorAll(".config-cat-btn");
   const configCatPanes = document.querySelectorAll(".config-cat-pane");
@@ -763,6 +766,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         confGeneratedMaxSizeMb.value = Number(data.generated_max_size_mb || 1024);
         confGeneratedPruneSizeMb.value = Number(data.generated_prune_size_mb || 200);
         confUseUpstreamResultUrl.checked = Boolean(data.use_upstream_result_url || false);
+        confImgBedEnabled.checked = Boolean(data.imgbed_enabled || false);
+        confImgBedApiUrl.value = data.imgbed_api_url || "";
+        confImgBedApiKey.value = data.imgbed_api_key || "";
         if (generatedUsageInfo) {
           const usageMb = Number(data.generated_usage_mb || 0);
           const fileCount = Number(data.generated_file_count || 0);
@@ -807,6 +813,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         generated_max_size_mb: Math.max(100, Math.min(102400, Number(confGeneratedMaxSizeMb.value || 1024))),
         generated_prune_size_mb: Math.max(10, Math.min(10240, Number(confGeneratedPruneSizeMb.value || 200))),
         use_upstream_result_url: confUseUpstreamResultUrl.checked,
+        imgbed_enabled: confImgBedEnabled.checked,
+        imgbed_api_url: confImgBedApiUrl.value.trim(),
+        imgbed_api_key: confImgBedApiKey.value.trim(),
       };
 
       if (!payload.admin_username) {
@@ -830,6 +839,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       if (payload.generated_prune_size_mb >= payload.generated_max_size_mb) {
         throw new Error("触发后清理量必须小于生成文件空间上限");
+      }
+      if (payload.imgbed_enabled) {
+        if (!/^https?:\/\//i.test(payload.imgbed_api_url)) {
+          throw new Error("图床 API 地址必须以 http:// 或 https:// 开头");
+        }
+        if (!payload.imgbed_api_key) {
+          throw new Error("开启图传模式时，图床密钥不能为空");
+        }
       }
       if (!Number.isInteger(payload.retry_max_attempts) || payload.retry_max_attempts < 1 || payload.retry_max_attempts > 10) {
         throw new Error("最大尝试次数必须是 1-10 的整数");

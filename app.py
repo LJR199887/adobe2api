@@ -37,6 +37,7 @@ from core.adobe_client import (
 from core.token_mgr import token_manager
 from core.config_mgr import config_manager
 from core.refresh_mgr import refresh_manager
+from core.imgbed_client import ImgBedClient
 from core.stores import (
     ErrorDetailRecord,
     ErrorDetailStore,
@@ -55,6 +56,7 @@ from core.models import (
 
 
 logger = logging.getLogger("adobe2api")
+imgbed_client = ImgBedClient()
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1060,6 +1062,10 @@ def _require_admin_auth(request: Request) -> None:
 
 def _apply_client_config() -> None:
     client.apply_config(config_manager.get_all())
+    imgbed_client.apply_config(config_manager.get_all())
+
+
+_apply_client_config()
 
 
 def _public_image_url(request: Request, job_id: str) -> str:
@@ -1068,6 +1074,16 @@ def _public_image_url(request: Request, job_id: str) -> str:
 
 def _use_upstream_result_url() -> bool:
     return bool(config_manager.get("use_upstream_result_url", False))
+
+
+def _use_imgbed_upload() -> bool:
+    return bool(config_manager.get("imgbed_enabled", False))
+
+
+def _upload_generated_asset_to_imgbed(
+    source_url: str, filename: str, mime_type: str | None = None
+) -> str:
+    return imgbed_client.upload_from_url(source_url, filename=filename, mime_type=mime_type)
 
 
 def _public_generated_url(request: Request, filename: str) -> str:
@@ -1329,6 +1345,8 @@ app.include_router(
         public_image_url=_public_image_url,
         public_generated_url=_public_generated_url,
         use_upstream_result_url=_use_upstream_result_url,
+        use_imgbed_upload=_use_imgbed_upload,
+        upload_generated_asset_to_imgbed=_upload_generated_asset_to_imgbed,
         resolve_video_options=_resolve_video_options,
         load_input_images=_load_input_images,
         prepare_video_source_image=_prepare_video_source_image,

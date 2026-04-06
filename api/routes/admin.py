@@ -154,15 +154,26 @@ def build_admin_router(
         key = str(range_key or "today").strip().lower()
         if key == "today":
             start_dt = datetime(now_dt.year, now_dt.month, now_dt.day)
+            end_ts = now_ts
+        elif key == "yesterday":
+            today_start = datetime(now_dt.year, now_dt.month, now_dt.day)
+            start_dt = today_start - timedelta(days=1)
+            end_ts = today_start.timestamp()
+        elif key == "3d":
+            start_dt = now_dt - timedelta(days=3)
+            end_ts = now_ts
         elif key == "7d":
             start_dt = now_dt - timedelta(days=7)
+            end_ts = now_ts
         elif key == "30d":
             start_dt = now_dt - timedelta(days=30)
+            end_ts = now_ts
         else:
             raise HTTPException(
-                status_code=400, detail="range must be one of: today, 7d, 30d"
+                status_code=400,
+                detail="range must be one of: today, yesterday, 3d, 7d, 30d",
             )
-        return key, start_dt.timestamp(), now_ts
+        return key, start_dt.timestamp(), end_ts
 
     @router.get("/api/v1/logs/stats")
     def logs_stats(request: Request, range: str = "today"):
@@ -576,6 +587,38 @@ def build_admin_router(
                     detail="generated_prune_size_mb must be between 10 and 10240",
                 )
             update_data["generated_prune_size_mb"] = generated_prune_size_mb
+        if "use_upstream_result_url" in incoming:
+            update_data["use_upstream_result_url"] = bool(
+                incoming["use_upstream_result_url"]
+            )
+        if "imgbed_enabled" in incoming:
+            update_data["imgbed_enabled"] = bool(incoming["imgbed_enabled"])
+        if "imgbed_api_url" in incoming:
+            update_data["imgbed_api_url"] = str(incoming["imgbed_api_url"] or "").strip()
+        if "imgbed_api_key" in incoming:
+            update_data["imgbed_api_key"] = str(incoming["imgbed_api_key"] or "").strip()
+        effective_imgbed_enabled = bool(
+            update_data.get("imgbed_enabled", config_manager.get("imgbed_enabled", False))
+        )
+        effective_imgbed_api_url = str(
+            update_data.get("imgbed_api_url", config_manager.get("imgbed_api_url", ""))
+            or ""
+        ).strip()
+        effective_imgbed_api_key = str(
+            update_data.get("imgbed_api_key", config_manager.get("imgbed_api_key", ""))
+            or ""
+        ).strip()
+        if effective_imgbed_enabled:
+            if not effective_imgbed_api_url.startswith(("http://", "https://")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="imgbed_api_url must start with http:// or https:// when imgbed is enabled",
+                )
+            if not effective_imgbed_api_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail="imgbed_api_key cannot be empty when imgbed is enabled",
+                )
         effective_max = int(
             update_data.get(
                 "generated_max_size_mb",

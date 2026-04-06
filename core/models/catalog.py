@@ -23,7 +23,7 @@ def _register_image_model(
     resolution_options = (
         [fixed_output_resolution]
         if fixed_output_resolution
-        else ["1K", "2K"]
+        else ["1K", "2K", "4K"]
     )
     MODEL_CATALOG[model_id] = {
         "upstream_model": "google:firefly:colligo:nano-banana-pro",
@@ -69,18 +69,27 @@ def _register_image_family_alias(alias_id: str, canonical_model: str) -> None:
     MODEL_CATALOG[alias_id] = base
 
 
+def _register_image_fixed_resolution_alias(
+    alias_id: str, canonical_model: str, output_resolution: str
+) -> None:
+    base = dict(MODEL_CATALOG[canonical_model])
+    base.update(
+        {
+            "canonical_model": canonical_model,
+            "output_resolution": output_resolution,
+            "output_resolution_options": [output_resolution],
+            "hidden": True,
+            "allow_request_overrides": True,
+        }
+    )
+    MODEL_CATALOG[alias_id] = base
+
+
 _register_image_model(
     "nano-banana-pro",
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-2",
     family_label="Nano Banana Pro",
-)
-_register_image_model(
-    "nano-banana-pro-4k",
-    upstream_model_id="gemini-flash",
-    upstream_model_version="nano-banana-2",
-    family_label="Nano Banana Pro",
-    fixed_output_resolution="4K",
 )
 _register_image_model(
     "nano-banana",
@@ -89,35 +98,27 @@ _register_image_model(
     family_label="Nano Banana",
 )
 _register_image_model(
-    "nano-banana-4k",
-    upstream_model_id="gemini-flash",
-    upstream_model_version="nano-banana-2",
-    family_label="Nano Banana",
-    fixed_output_resolution="4K",
-)
-_register_image_model(
     "nano-banana2",
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-3",
     family_label="Nano Banana 2",
-)
-_register_image_model(
-    "nano-banana2-4k",
-    upstream_model_id="gemini-flash",
-    upstream_model_version="nano-banana-3",
-    family_label="Nano Banana 2",
-    fixed_output_resolution="4K",
 )
 
 for canonical_id in (
     "nano-banana",
-    "nano-banana-4k",
     "nano-banana-pro",
-    "nano-banana-pro-4k",
     "nano-banana2",
-    "nano-banana2-4k",
 ):
     _register_image_family_alias(f"firefly-{canonical_id}", canonical_id)
+
+_register_image_fixed_resolution_alias("nano-banana-4k", "nano-banana", "4K")
+_register_image_fixed_resolution_alias("firefly-nano-banana-4k", "nano-banana", "4K")
+_register_image_fixed_resolution_alias("nano-banana-pro-4k", "nano-banana-pro", "4K")
+_register_image_fixed_resolution_alias(
+    "firefly-nano-banana-pro-4k", "nano-banana-pro", "4K"
+)
+_register_image_fixed_resolution_alias("nano-banana2-4k", "nano-banana2", "4K")
+_register_image_fixed_resolution_alias("firefly-nano-banana2-4k", "nano-banana2", "4K")
 
 DEFAULT_MODEL_ID = "nano-banana-pro"
 

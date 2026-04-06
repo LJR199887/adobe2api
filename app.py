@@ -37,6 +37,7 @@ from core.adobe_client import (
 from core.token_mgr import token_manager
 from core.config_mgr import config_manager
 from core.refresh_mgr import refresh_manager
+from core.imgbed_client import ImgBedClient
 from core.stores import (
     ErrorDetailRecord,
     ErrorDetailStore,
@@ -55,6 +56,7 @@ from core.models import (
 
 
 logger = logging.getLogger("adobe2api")
+imgbed_client = ImgBedClient()
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -69,8 +71,6 @@ _generated_prune_lock = threading.Lock()
 _generated_usage_bytes = 0
 _generated_file_count = 0
 _generated_last_reconcile_ts = 0.0
-
-
 def _drop_generated_file_cache(file_path: Path) -> None:
     if not hasattr(os, "posix_fadvise"):
         return
@@ -126,15 +126,83 @@ client = AdobeClient()
 refresh_manager.start()
 
 
+def _extract_model_params(data: dict[str, Any]) -> Optional[str]:
+    if not isinstance(data, dict):
+        return None
+
+    def _pick(*keys: str) -> str:
+        for key in keys:
+            value = data.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
+    parts: list[str] = []
+    duration = _pick("duration", "video_duration", "videoDuration")
+    if duration:
+        duration_text = duration.rstrip("sS")
+        if duration_text:
+            parts.append(f"{duration_text}s")
+
+    aspect_ratio = _pick("aspect_ratio", "aspectRatio")
+    if aspect_ratio:
+        parts.append(aspect_ratio)
+
+    resolution = _pick("resolution", "video_resolution", "videoResolution")
+    if resolution:
+        parts.append(resolution)
+    else:
+        output_resolution = _pick("output_resolution", "outputResolution")
+        if output_resolution:
+            parts.append(output_resolution)
+
+    size_val = data.get("size")
+    if size_val is not None:
+        if isinstance(size_val, str):
+            size_text = size_val.strip()
+        elif isinstance(size_val, dict):
+            width = str(size_val.get("width") or "").strip()
+            height = str(size_val.get("height") or "").strip()
+            size_text = f"{width}x{height}" if width and height else ""
+        else:
+            size_text = ""
+        if size_text and size_text not in parts:
+            parts.append(size_text)
+
+    reference_mode = _pick(
+        "reference_mode",
+        "referenceMode",
+        "video_reference_mode",
+        "videoReferenceMode",
+    )
+    if reference_mode:
+        parts.append(f"ref:{reference_mode}")
+
+    if not parts:
+        return None
+    return " | ".join(parts[:5])
+
+
 def _extract_logging_fields(raw_body: bytes) -> dict[str, Optional[str]]:
     if not raw_body:
-        return {"model": None, "prompt_preview": None}
+        return {
+            "model": None,
+            "model_params": None,
+            "prompt_preview": None,
+        }
     try:
         import json
 
         data: Any = json.loads(raw_body.decode("utf-8"))
         if not isinstance(data, dict):
-            return {"model": None, "prompt_preview": None}
+            return {
+                "model": None,
+                "model_params": None,
+                "prompt_preview": None,
+            }
 
         model = str(data.get("model") or "").strip() or None
         prompt = str(data.get("prompt") or "").strip()
@@ -143,9 +211,17 @@ def _extract_logging_fields(raw_body: bytes) -> dict[str, Optional[str]]:
         if prompt:
             prompt = prompt.replace("\r", " ").replace("\n", " ").strip()
             prompt = prompt[:180]
-        return {"model": model, "prompt_preview": prompt or None}
+        return {
+            "model": model,
+            "model_params": _extract_model_params(data),
+            "prompt_preview": prompt or None,
+        }
     except Exception:
-        return {"model": None, "prompt_preview": None}
+        return {
+            "model": None,
+            "model_params": None,
+            "prompt_preview": None,
+        }
 
 
 def _upsert_live_request(request: Request, patch: dict) -> None:
@@ -300,6 +376,7 @@ def _set_request_task_progress(
                 "error": patch.get("error"),
                 "error_code": getattr(request.state, "log_error_code", None),
                 "model": getattr(request.state, "log_model", None),
+                "model_params": getattr(request.state, "log_model_params", None),
                 "prompt_preview": getattr(request.state, "log_prompt_preview", None),
                 "ts": time.time(),
             },
@@ -353,6 +430,7 @@ def _append_attempt_log(
         method = str(getattr(request, "method", "POST") or "POST").upper()
         path = str(getattr(getattr(request, "url", None), "path", "") or "")
         model = getattr(request.state, "log_model", None)
+        model_params = getattr(request.state, "log_model_params", None)
         prompt_preview = getattr(request.state, "log_prompt_preview", None)
         preview_url = getattr(request.state, "log_preview_url", None)
         preview_kind = getattr(request.state, "log_preview_kind", None)
@@ -373,9 +451,11 @@ def _append_attempt_log(
                 status_code=int(status_code),
                 duration_sec=duration_sec,
                 operation=operation,
+                request_id=root_log_id,
                 preview_url=preview_url,
                 preview_kind=preview_kind,
                 model=model,
+                model_params=model_params,
                 prompt_preview=prompt_preview,
                 error=(str(error)[:240] if error else None),
                 error_code=(str(error_code or "") or None),
@@ -412,7 +492,11 @@ async def request_logger(request: Request, call_next):
     preview_url = None
     preview_kind = None
     raw_body = b""
-    body_meta = {"model": None, "prompt_preview": None}
+    body_meta = {
+        "model": None,
+        "model_params": None,
+        "prompt_preview": None,
+    }
     error_text = None
     status_code = 500
 
@@ -434,6 +518,7 @@ async def request_logger(request: Request, call_next):
             }:
                 body_meta = _extract_logging_fields(raw_body)
                 request.state.log_model = body_meta.get("model")
+                request.state.log_model_params = body_meta.get("model_params")
                 request.state.log_prompt_preview = body_meta.get("prompt_preview")
             request.state.log_id = uuid.uuid4().hex[:12]
             log_id = str(getattr(request.state, "log_id", "") or "")
@@ -449,6 +534,7 @@ async def request_logger(request: Request, call_next):
                         "duration_sec": 0,
                         "operation": operation,
                         "model": body_meta.get("model"),
+                        "model_params": body_meta.get("model_params"),
                         "prompt_preview": body_meta.get("prompt_preview"),
                         "task_status": "IN_PROGRESS",
                         "task_progress": 0.0,
@@ -539,9 +625,11 @@ async def request_logger(request: Request, call_next):
                             status_code=status_code,
                             duration_sec=duration_sec,
                             operation=operation,
+                            request_id=log_id,
                             preview_url=preview_url,
                             preview_kind=preview_kind,
                             model=body_meta.get("model"),
+                            model_params=body_meta.get("model_params"),
                             prompt_preview=body_meta.get("prompt_preview"),
                             error=error_final,
                             error_code=error_code,
@@ -974,10 +1062,28 @@ def _require_admin_auth(request: Request) -> None:
 
 def _apply_client_config() -> None:
     client.apply_config(config_manager.get_all())
+    imgbed_client.apply_config(config_manager.get_all())
+
+
+_apply_client_config()
 
 
 def _public_image_url(request: Request, job_id: str) -> str:
     return _public_generated_url(request, f"{job_id}.png")
+
+
+def _use_upstream_result_url() -> bool:
+    return bool(config_manager.get("use_upstream_result_url", False))
+
+
+def _use_imgbed_upload() -> bool:
+    return bool(config_manager.get("imgbed_enabled", False))
+
+
+def _upload_generated_asset_to_imgbed(
+    source_url: str, filename: str, mime_type: str | None = None
+) -> str:
+    return imgbed_client.upload_from_url(source_url, filename=filename, mime_type=mime_type)
 
 
 def _public_generated_url(request: Request, filename: str) -> str:
@@ -1221,6 +1327,8 @@ app.include_router(
 app.include_router(
     build_generation_router(
         store=store,
+        request_log_store=log_store,
+        live_request_store=live_log_store,
         token_manager=token_manager,
         client=client,
         generated_dir=GENERATED_DIR,
@@ -1236,6 +1344,9 @@ app.include_router(
         set_request_preview=_set_request_preview,
         public_image_url=_public_image_url,
         public_generated_url=_public_generated_url,
+        use_upstream_result_url=_use_upstream_result_url,
+        use_imgbed_upload=_use_imgbed_upload,
+        upload_generated_asset_to_imgbed=_upload_generated_asset_to_imgbed,
         resolve_video_options=_resolve_video_options,
         load_input_images=_load_input_images,
         prepare_video_source_image=_prepare_video_source_image,

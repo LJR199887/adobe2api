@@ -35,6 +35,23 @@ def _normalize_upstream_request_error(exc: Exception) -> tuple[int, str, str] | 
     return None
 
 
+def _extract_upstream_asset_url(meta: dict, asset_kind: str) -> str:
+    outputs = meta.get("outputs") or []
+    if not outputs:
+        return ""
+    asset = (outputs[0] or {}).get(asset_kind) or {}
+    return str(asset.get("presignedUrl") or "").strip()
+
+
+def _video_mime_type(video_ext: str) -> str:
+    normalized = str(video_ext or "").strip().lower()
+    if normalized == "mov":
+        return "video/quicktime"
+    if normalized == "webm":
+        return "video/webm"
+    return "video/mp4"
+
+
 def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | None]:
     locale = str(
         data.get("locale")
@@ -176,6 +193,8 @@ def _resolve_video_request_config(model_id: str, data: dict, video_conf: dict) -
 def build_generation_router(
     *,
     store,
+    request_log_store,
+    live_request_store,
     token_manager,
     client,
     generated_dir: Path,
@@ -191,6 +210,9 @@ def build_generation_router(
     set_request_preview: Callable[[Request, str, str], None],
     public_image_url: Callable[[Request, str], str],
     public_generated_url: Callable[[Request, str], str],
+    use_upstream_result_url: Callable[[], bool],
+    use_imgbed_upload: Callable[[], bool],
+    upload_generated_asset_to_imgbed: Callable[[str, str, str | None], str],
     resolve_video_options: Callable[[dict], tuple[bool, str, str]],
     load_input_images: Callable[[Any], list[tuple[bytes, str]]],
     prepare_video_source_image: Callable[[bytes, str, str], tuple[bytes, str]],
@@ -204,6 +226,9 @@ def build_generation_router(
     logger,
 ) -> APIRouter:
     router = APIRouter()
+
+    def _json_response(status_code: int, content: dict, request: Request) -> JSONResponse:
+        return JSONResponse(status_code=status_code, content=content)
 
     @router.get("/v1/models")
     def list_models(request: Request):
@@ -259,7 +284,7 @@ def build_generation_router(
 
         prompt = data.get("prompt", "").strip()
         if not prompt:
-            return JSONResponse(
+            return _json_response(
                 status_code=400,
                 content={
                     "error": {
@@ -267,12 +292,13 @@ def build_generation_router(
                         "type": "invalid_request_error",
                     }
                 },
+                request=request,
             )
         _validate_prompt_length(prompt)
 
         model_id = data.get("model")
         if str(model_id or "").strip() in video_model_catalog:
-            return JSONResponse(
+            return _json_response(
                 status_code=400,
                 content={
                     "error": {
@@ -280,6 +306,7 @@ def build_generation_router(
                         "type": "invalid_request_error",
                     }
                 },
+                request=request,
             )
         ratio, output_resolution, resolved_model_id = resolve_ratio_and_resolution(
             data, model_id
@@ -302,16 +329,19 @@ def build_generation_router(
                         error=update.get("error"),
                     )
 
+                imgbed_upload_enabled = bool(use_imgbed_upload())
+                direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                 job_id = uuid.uuid4().hex
                 out_path = generated_dir / f"{job_id}.png"
                 old_size = 0
-                try:
-                    if out_path.exists():
-                        old_size = int(out_path.stat().st_size)
-                except Exception:
-                    old_size = 0
+                if not direct_result_url:
+                    try:
+                        if out_path.exists():
+                            old_size = int(out_path.stat().st_size)
+                    except Exception:
+                        old_size = 0
 
-                image_bytes, _meta = client.generate(
+                image_bytes, meta = client.generate(
                     token=token,
                     prompt=prompt,
                     aspect_ratio=ratio,
@@ -323,14 +353,35 @@ def build_generation_router(
                         model_conf.get("upstream_model_version") or "nano-banana-2"
                     ),
                     timeout=client.generate_timeout,
-                    out_path=out_path,
+                    out_path=None if direct_result_url else out_path,
                     progress_cb=_image_progress_cb,
+                    return_upstream_url=direct_result_url,
                 )
-                if image_bytes is not None:
-                    out_path.write_bytes(image_bytes)
-                new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                on_generated_file_written(out_path, old_size, new_size)
-                image_url = public_image_url(request, job_id)
+                upstream_image_url = _extract_upstream_asset_url(meta, "image")
+                if imgbed_upload_enabled:
+                    if not upstream_image_url:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="upstream result url missing",
+                        )
+                    image_url = upload_generated_asset_to_imgbed(
+                        upstream_image_url,
+                        filename=f"{job_id}.png",
+                        mime_type="image/png",
+                    )
+                elif direct_result_url:
+                    image_url = upstream_image_url
+                    if not image_url:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="upstream result url missing",
+                        )
+                else:
+                    if image_bytes is not None:
+                        out_path.write_bytes(image_bytes)
+                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
+                    on_generated_file_written(out_path, old_size, new_size)
+                    image_url = public_image_url(request, job_id)
                 set_request_preview(request, image_url, kind="image")
                 return {
                     "created": int(time.time()),
@@ -360,7 +411,7 @@ def build_generation_router(
                 task_progress=0.0,
                 error="Token quota exhausted",
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=429,
                 content={
                     "error": {
@@ -369,6 +420,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except auth_error_cls:
             error_code = str(
@@ -386,7 +438,7 @@ def build_generation_router(
                 task_progress=0.0,
                 error="Token invalid or expired",
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=401,
                 content={
                     "error": {
@@ -395,6 +447,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except upstream_temp_error_cls as exc:
             error_code = str(
@@ -409,7 +462,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=503,
                 content={
                     "error": {
@@ -418,6 +471,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except HTTPException as exc:
             err_type = (
@@ -435,7 +489,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc.detail)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=exc.status_code,
                 content={
                     "error": {
@@ -444,6 +498,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except Exception as exc:
             normalized = _normalize_upstream_request_error(exc)
@@ -459,7 +514,7 @@ def build_generation_router(
                 set_request_task_progress(
                     request, task_status="FAILED", task_progress=0.0, error=message
                 )
-                return JSONResponse(
+                return _json_response(
                     status_code=status_code,
                     content={
                         "error": {
@@ -468,6 +523,7 @@ def build_generation_router(
                             "code": error_code,
                         }
                     },
+                    request=request,
                 )
             error_code = set_request_error_detail(
                 request,
@@ -484,7 +540,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=500,
                 content={
                     "error": {
@@ -493,6 +549,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
 
     @router.post("/api/v1/generate")
@@ -532,13 +589,16 @@ def build_generation_router(
                     break
 
                 try:
+                    imgbed_upload_enabled = bool(use_imgbed_upload())
+                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                     out_path = generated_dir / f"{job_id}.png"
                     old_size = 0
-                    try:
-                        if out_path.exists():
-                            old_size = int(out_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                    if not direct_result_url:
+                        try:
+                            if out_path.exists():
+                                old_size = int(out_path.stat().st_size)
+                        except Exception:
+                            old_size = 0
 
                     image_bytes, meta = client.generate(
                         token=token,
@@ -551,14 +611,31 @@ def build_generation_router(
                         upstream_model_version=str(
                             model_conf.get("upstream_model_version") or "nano-banana-2"
                         ),
-                        out_path=out_path,
+                        out_path=None if direct_result_url else out_path,
+                        return_upstream_url=direct_result_url,
                     )
-                    if image_bytes is not None:
-                        out_path.write_bytes(image_bytes)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
+                    upstream_image_url = _extract_upstream_asset_url(meta, "image")
+                    if imgbed_upload_enabled:
+                        if not upstream_image_url:
+                            raise RuntimeError("upstream result url missing")
+                        image_url = upload_generated_asset_to_imgbed(
+                            upstream_image_url,
+                            filename=f"{job_id}.png",
+                            mime_type="image/png",
+                        )
+                    elif direct_result_url:
+                        image_url = upstream_image_url
+                        if not image_url:
+                            raise RuntimeError("upstream result url missing")
+                    else:
+                        if image_bytes is not None:
+                            out_path.write_bytes(image_bytes)
+                        new_size = (
+                            int(out_path.stat().st_size) if out_path.exists() else 0
+                        )
+                        on_generated_file_written(out_path, old_size, new_size)
+                        image_url = public_image_url(request, job_id)
                     progress = float(meta.get("progress") or 100.0)
-                    image_url = public_image_url(request, job_id)
                     store.update(
                         job_id,
                         status="succeeded",
@@ -614,7 +691,7 @@ def build_generation_router(
         if not prompt:
             prompt = str(data.get("prompt") or "").strip()
         if not prompt:
-            return JSONResponse(
+            return _json_response(
                 status_code=400,
                 content={
                     "error": {
@@ -622,6 +699,7 @@ def build_generation_router(
                         "type": "invalid_request_error",
                     }
                 },
+                request=request,
             )
 
         model_id = str(data.get("model") or "").strip()
@@ -633,7 +711,7 @@ def build_generation_router(
             or model_id.startswith("firefly-veo31-fast")
             or model_id.startswith("firefly-veo31-")
         ) and model_id not in video_model_catalog:
-            return JSONResponse(
+            return _json_response(
                 status_code=400,
                 content={
                     "error": {
@@ -641,6 +719,7 @@ def build_generation_router(
                         "type": "invalid_request_error",
                     }
                 },
+                request=request,
             )
         video_conf = video_model_catalog.get(model_id)
         is_video_model = video_conf is not None
@@ -747,14 +826,17 @@ def build_generation_router(
                             error=update.get("error"),
                         )
 
+                    imgbed_upload_enabled = bool(use_imgbed_upload())
+                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                     job_id = uuid.uuid4().hex
                     tmp_path = generated_dir / f"{job_id}.video.tmp"
                     old_size = 0
-                    try:
-                        if tmp_path.exists():
-                            old_size = int(tmp_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                    if not direct_result_url:
+                        try:
+                            if tmp_path.exists():
+                                old_size = int(tmp_path.stat().st_size)
+                        except Exception:
+                            old_size = 0
 
                     video_bytes, video_meta = client.generate_video(
                         token=token,
@@ -770,19 +852,42 @@ def build_generation_router(
                         timeline_events=timeline_events,
                         audio=video_audio,
                         reference_mode=video_reference_mode,
-                        out_path=tmp_path,
+                        out_path=None if direct_result_url else tmp_path,
                         progress_cb=_video_progress_cb,
+                        return_upstream_url=direct_result_url,
                     )
+                    upstream_video_url = _extract_upstream_asset_url(video_meta, "video")
                     video_ext = video_ext_from_meta(video_meta)
-                    filename = f"{job_id}.{video_ext}"
-                    out_path = generated_dir / filename
-                    if video_bytes is not None:
-                        out_path.write_bytes(video_bytes)
-                    elif tmp_path.exists():
-                        tmp_path.replace(out_path)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
-                    image_url = public_generated_url(request, filename)
+                    if imgbed_upload_enabled:
+                        if not upstream_video_url:
+                            raise HTTPException(
+                                status_code=502,
+                                detail="upstream result url missing",
+                            )
+                        image_url = upload_generated_asset_to_imgbed(
+                            upstream_video_url,
+                            filename=f"{job_id}.{video_ext}",
+                            mime_type=_video_mime_type(video_ext),
+                        )
+                    elif direct_result_url:
+                        image_url = upstream_video_url
+                        if not image_url:
+                            raise HTTPException(
+                                status_code=502,
+                                detail="upstream result url missing",
+                            )
+                    else:
+                        filename = f"{job_id}.{video_ext}"
+                        out_path = generated_dir / filename
+                        if video_bytes is not None:
+                            out_path.write_bytes(video_bytes)
+                        elif tmp_path.exists():
+                            tmp_path.replace(out_path)
+                        new_size = (
+                            int(out_path.stat().st_size) if out_path.exists() else 0
+                        )
+                        on_generated_file_written(out_path, old_size, new_size)
+                        image_url = public_generated_url(request, filename)
                     set_request_preview(request, image_url, kind="video")
                     response_content = (
                         f"```html\n<video src='{image_url}' controls></video>\n```"
@@ -805,16 +910,19 @@ def build_generation_router(
                             error=update.get("error"),
                         )
 
+                    imgbed_upload_enabled = bool(use_imgbed_upload())
+                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                     job_id = uuid.uuid4().hex
                     out_path = generated_dir / f"{job_id}.png"
                     old_size = 0
-                    try:
-                        if out_path.exists():
-                            old_size = int(out_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                    if not direct_result_url:
+                        try:
+                            if out_path.exists():
+                                old_size = int(out_path.stat().st_size)
+                        except Exception:
+                            old_size = 0
 
-                    image_bytes, _meta = client.generate(
+                    image_bytes, meta = client.generate(
                         token=token,
                         prompt=prompt,
                         aspect_ratio=ratio,
@@ -828,14 +936,35 @@ def build_generation_router(
                         ),
                         source_image_ids=source_image_ids,
                         timeout=client.generate_timeout,
-                        out_path=out_path,
+                        out_path=None if direct_result_url else out_path,
                         progress_cb=_image_progress_cb,
+                        return_upstream_url=direct_result_url,
                     )
-                    if image_bytes is not None:
-                        out_path.write_bytes(image_bytes)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
-                    image_url = public_image_url(request, job_id)
+                    upstream_image_url = _extract_upstream_asset_url(meta, "image")
+                    if imgbed_upload_enabled:
+                        if not upstream_image_url:
+                            raise HTTPException(
+                                status_code=502,
+                                detail="upstream result url missing",
+                            )
+                        image_url = upload_generated_asset_to_imgbed(
+                            upstream_image_url,
+                            filename=f"{job_id}.png",
+                            mime_type="image/png",
+                        )
+                    elif direct_result_url:
+                        image_url = upstream_image_url
+                        if not image_url:
+                            raise HTTPException(
+                                status_code=502,
+                                detail="upstream result url missing",
+                            )
+                    else:
+                        if image_bytes is not None:
+                            out_path.write_bytes(image_bytes)
+                        new_size = int(out_path.stat().st_size) if out_path.exists() else 0
+                        on_generated_file_written(out_path, old_size, new_size)
+                        image_url = public_image_url(request, job_id)
                     set_request_preview(request, image_url, kind="image")
                     response_content = f"![Generated Image]({image_url})"
 
@@ -888,7 +1017,7 @@ def build_generation_router(
                 task_progress=0.0,
                 error="Token quota exhausted",
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=429,
                 content={
                     "error": {
@@ -897,6 +1026,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except auth_error_cls:
             error_code = str(
@@ -914,7 +1044,7 @@ def build_generation_router(
                 task_progress=0.0,
                 error="Token invalid or expired",
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=401,
                 content={
                     "error": {
@@ -923,6 +1053,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except upstream_temp_error_cls as exc:
             error_code = str(
@@ -937,7 +1068,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=503,
                 content={
                     "error": {
@@ -946,6 +1077,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except HTTPException as exc:
             err_type = (
@@ -963,7 +1095,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc.detail)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=exc.status_code,
                 content={
                     "error": {
@@ -972,6 +1104,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
         except Exception as exc:
             normalized = _normalize_upstream_request_error(exc)
@@ -987,7 +1120,7 @@ def build_generation_router(
                 set_request_task_progress(
                     request, task_status="FAILED", task_progress=0.0, error=message
                 )
-                return JSONResponse(
+                return _json_response(
                     status_code=status_code,
                     content={
                         "error": {
@@ -996,6 +1129,7 @@ def build_generation_router(
                             "code": error_code,
                         }
                     },
+                    request=request,
                 )
             error_code = set_request_error_detail(
                 request,
@@ -1014,7 +1148,7 @@ def build_generation_router(
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)
             )
-            return JSONResponse(
+            return _json_response(
                 status_code=500,
                 content={
                     "error": {
@@ -1023,6 +1157,7 @@ def build_generation_router(
                         "code": error_code,
                     }
                 },
+                request=request,
             )
 
     return router

@@ -205,6 +205,35 @@
             <p class="help">超过上限后按最旧文件优先清理；最新生成文件会被保护，不会被立即删掉。</p>
           </section>
 
+          <section style="padding-top:0;">
+            <div class="form-group" style="margin-top: 12px;">
+              <label class="checkbox-label" style="user-select: none;">
+                <input type="checkbox" id="confUseUpstreamResultUrl" />
+                直接使用上游结果链接（不下载到本地）
+              </label>
+              <p class="help">开启后将直接返回上游的 presignedUrl，可减少服务器磁盘占用和本地缓存压力；但该链接通常会过期，历史预览或旧结果可能失效。</p>
+            </div>
+          </section>
+
+          <section style="padding-top:0;">
+            <div class="form-group" style="margin-top: 12px;">
+              <label class="checkbox-label" style="user-select: none;">
+                <input type="checkbox" id="confImgBedEnabled" />
+                开启图传模式（生成后自动上传图床）
+              </label>
+              <p class="help">开启后图片和视频会先上传到图床，再返回图床链接；此模式优先于上游直链和本地文件回链。</p>
+            </div>
+            <div class="form-group">
+              <label for="confImgBedApiUrl">图床上传 API 地址</label>
+              <input type="text" id="confImgBedApiUrl" class="input-text" placeholder="例如：https://your-domain/upload 或 https://your-domain/api/upload" />
+              <p class="help">参考 CloudFlare ImgBed 上传接口，建议填写完整上传地址。程序会自动追加 authCode 和 returnFormat=full。</p>
+            </div>
+            <div class="form-group">
+              <label for="confImgBedApiKey">图床密钥 / 认证码</label>
+              <input type="password" id="confImgBedApiKey" class="input-text" placeholder="填写上传 authCode 或对应密钥" />
+            </div>
+          </section>
+
           <div class="actions" style="margin-top: 24px;">
             <button id="saveConfigBtn">保存配置</button>
             <span id="configMsg" class="msg"></span>
@@ -222,6 +251,8 @@
             <label for="logStatsRange" class="help">统计范围</label>
             <select id="logStatsRange" class="input-select" aria-label="日志统计范围">
               <option value="today">今日</option>
+              <option value="yesterday">昨天</option>
+              <option value="3d">近 3 天</option>
               <option value="7d">近 7 天</option>
               <option value="30d">近 30 天</option>
             </select>
@@ -259,7 +290,7 @@
                 <th>耗时/秒</th>
                 <th>进度</th>
                 <th>账号</th>
-                <th>模型</th>
+                <th>模型/参数</th>
                 <th>提示词摘要</th>
                 <th>预览</th>
               </tr>
@@ -345,6 +376,16 @@
         <h3 id="errorDetailCode">错误信息</h3>
       </div>
       <div id="errorDetailContent" class="error-detail-content"></div>
+    </div>
+  </div>
+
+  <div id="promptDetailModal" class="preview-modal" aria-hidden="true">
+    <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="提示词详情">
+      <button id="promptDetailCloseBtn" class="preview-close" type="button">关闭</button>
+      <div class="error-detail-head">
+        <h3>提示词详情</h3>
+      </div>
+      <div id="promptDetailContent" class="prompt-detail-content"></div>
     </div>
   </div>
 

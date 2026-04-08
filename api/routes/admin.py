@@ -34,6 +34,7 @@ def build_admin_router(
     is_admin_authenticated: Callable[[Request], bool],
     apply_client_config: Callable[[], None],
     get_generated_storage_stats: Callable[[], dict[str, Any]],
+    get_redis_health: Callable[[], dict[str, Any]],
 ) -> APIRouter:
     router = APIRouter()
 
@@ -61,7 +62,15 @@ def build_admin_router(
 
     @router.get("/api/v1/health")
     def health():
-        return {"status": "ok", "pool_size": len(token_manager.list_all())}
+        return {
+            "status": "ok",
+            "pool_size": len(token_manager.list_all()),
+            "redis": get_redis_health(),
+        }
+
+    @router.get("/api/v1/health/redis")
+    def health_redis():
+        return get_redis_health()
 
     @router.get("/login", include_in_schema=False)
     def page_login(request: Request):

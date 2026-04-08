@@ -38,6 +38,7 @@ from core.token_mgr import token_manager
 from core.config_mgr import config_manager
 from core.refresh_mgr import refresh_manager
 from core.imgbed_client import ImgBedClient
+from core.redis_health import check_redis_connection
 from core.stores import (
     ErrorDetailRecord,
     ErrorDetailStore,
@@ -1067,6 +1068,59 @@ def _apply_client_config() -> None:
 
 _apply_client_config()
 
+_redis_health_lock = threading.Lock()
+_REDIS_HEALTH_CACHE_TTL_SEC = 30
+_redis_health_state: dict[str, Any] = {
+    "configured": False,
+    "ok": False,
+    "host": None,
+    "port": None,
+    "db": None,
+    "ssl": False,
+    "checked_at": None,
+    "error": "redis not checked yet",
+}
+
+
+def _refresh_redis_health() -> dict[str, Any]:
+    health = check_redis_connection()
+    with _redis_health_lock:
+        _redis_health_state.clear()
+        _redis_health_state.update(health)
+    return dict(health)
+
+
+def _get_redis_health() -> dict[str, Any]:
+    with _redis_health_lock:
+        checked_at = _redis_health_state.get("checked_at")
+        if checked_at and (time.time() - float(checked_at)) < _REDIS_HEALTH_CACHE_TTL_SEC:
+            return dict(_redis_health_state)
+    return _refresh_redis_health()
+
+
+@app.on_event("startup")
+def _startup_connectivity_checks() -> None:
+    redis_health = _refresh_redis_health()
+    if not redis_health.get("configured"):
+        logger.info("redis check skipped: %s", redis_health.get("error"))
+        return
+    if redis_health.get("ok"):
+        logger.info(
+            "redis connected host=%s port=%s db=%s ssl=%s",
+            redis_health.get("host"),
+            redis_health.get("port"),
+            redis_health.get("db"),
+            redis_health.get("ssl"),
+        )
+    else:
+        logger.warning(
+            "redis connection failed host=%s port=%s db=%s error=%s",
+            redis_health.get("host"),
+            redis_health.get("port"),
+            redis_health.get("db"),
+            redis_health.get("error"),
+        )
+
 
 def _public_image_url(request: Request, job_id: str) -> str:
     return _public_generated_url(request, f"{job_id}.png")
@@ -1321,6 +1375,7 @@ app.include_router(
         is_admin_authenticated=_is_admin_authenticated,
         apply_client_config=_apply_client_config,
         get_generated_storage_stats=_get_generated_storage_stats,
+        get_redis_health=_get_redis_health,
     )
 )
 

@@ -745,8 +745,35 @@ document.addEventListener("DOMContentLoaded", async () => {
   function matchesLogMediaKind(item, mediaKind) {
     const target = String(mediaKind || "").trim().toLowerCase();
     if (!target) return true;
+    return resolveLogMediaKind(item) === target;
+  }
+
+  function resolveLogMediaKind(item) {
     const previewKind = String(item?.preview_kind || "").trim().toLowerCase();
-    return previewKind === target;
+    if (previewKind === "image" || previewKind === "video") return previewKind;
+
+    const model = String(item?.model || "").trim().toLowerCase();
+    if (model) {
+      if (
+        model.includes("sora") ||
+        model.includes("veo") ||
+        model.includes("video") ||
+        model.includes("text2video")
+      ) {
+        return "video";
+      }
+      return "image";
+    }
+
+    const path = String(item?.path || "").trim().toLowerCase();
+    const operation = String(item?.operation || "").trim().toLowerCase();
+    if (path.endsWith("/v1/images/generations") || operation === "images.generations") {
+      return "image";
+    }
+    if (path.endsWith("/v1/chat/completions") || operation === "chat.completions") {
+      return "image";
+    }
+    return "";
   }
 
   if (testProxyBtn) {

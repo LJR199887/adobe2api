@@ -158,6 +158,34 @@ class RequestLogStore:
                 return True
         return False
 
+    @staticmethod
+    def _resolve_media_kind(item: dict) -> str:
+        if not isinstance(item, dict):
+            return ""
+
+        preview_kind = str(item.get("preview_kind") or "").strip().lower()
+        if preview_kind in {"image", "video"}:
+            return preview_kind
+
+        model = str(item.get("model") or "").strip().lower()
+        if model:
+            if (
+                "sora" in model
+                or "veo" in model
+                or "video" in model
+                or "text2video" in model
+            ):
+                return "video"
+            return "image"
+
+        path = str(item.get("path") or "").strip().lower()
+        operation = str(item.get("operation") or "").strip().lower()
+        if path.endswith("/v1/images/generations") or operation == "images.generations":
+            return "image"
+        if path.endswith("/v1/chat/completions") or operation == "chat.completions":
+            return "image"
+        return ""
+
     @classmethod
     def _apply_filters(
         cls,
@@ -192,8 +220,7 @@ class RequestLogStore:
             if account and not cls._match_account_filter(item, account):
                 continue
             if normalized_media_kind:
-                preview_kind = str(item.get("preview_kind") or "").strip().lower()
-                if preview_kind != normalized_media_kind:
+                if cls._resolve_media_kind(item) != normalized_media_kind:
                     continue
             filtered.append(item)
         return filtered

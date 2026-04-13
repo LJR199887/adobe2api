@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import threading
 import time
@@ -120,6 +122,109 @@ class RequestLogStore:
             self._truncate_to_max_locked()
             self._append_since_truncate = 0
 
+    def _read_payloads_locked(self) -> list[dict]:
+        items: list[dict] = []
+        with self._file_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    item = json.loads(raw)
+                except Exception:
+                    continue
+                if isinstance(item, dict):
+                    items.append(item)
+        return items
+
+    @staticmethod
+    def _get_account_values(item: dict) -> list[str]:
+        values: list[str] = []
+        if not isinstance(item, dict):
+            return values
+        for key in ("token_account_email", "token_account_name", "token_id"):
+            text = str(item.get(key) or "").strip()
+            if text:
+                values.append(text)
+        return values
+
+    @classmethod
+    def _match_account_filter(cls, item: dict, account: str) -> bool:
+        target = str(account or "").strip().casefold()
+        if not target:
+            return True
+        for value in cls._get_account_values(item):
+            if value.casefold() == target:
+                return True
+        return False
+
+    @staticmethod
+    def _resolve_media_kind(item: dict) -> str:
+        if not isinstance(item, dict):
+            return ""
+
+        preview_kind = str(item.get("preview_kind") or "").strip().lower()
+        if preview_kind in {"image", "video"}:
+            return preview_kind
+
+        model = str(item.get("model") or "").strip().lower()
+        if model:
+            if (
+                "sora" in model
+                or "veo" in model
+                or "video" in model
+                or "text2video" in model
+            ):
+                return "video"
+            return "image"
+
+        path = str(item.get("path") or "").strip().lower()
+        operation = str(item.get("operation") or "").strip().lower()
+        if path.endswith("/v1/images/generations") or operation == "images.generations":
+            return "image"
+        if path.endswith("/v1/chat/completions") or operation == "chat.completions":
+            return "image"
+        return ""
+
+    @classmethod
+    def _apply_filters(
+        cls,
+        items: list[dict],
+        *,
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
+        failed_only: bool = False,
+        account: str = "",
+        media_kind: str = "",
+    ) -> list[dict]:
+        filtered: list[dict] = []
+        normalized_media_kind = str(media_kind or "").strip().lower()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                ts_val = float(item.get("ts") or 0)
+            except Exception:
+                ts_val = 0.0
+            if start_ts is not None and ts_val < float(start_ts):
+                continue
+            if end_ts is not None and ts_val > float(end_ts):
+                continue
+
+            try:
+                status_code = int(item.get("status_code") or 0)
+            except Exception:
+                status_code = 0
+            if failed_only and status_code < 400:
+                continue
+            if account and not cls._match_account_filter(item, account):
+                continue
+            if normalized_media_kind:
+                if cls._resolve_media_kind(item) != normalized_media_kind:
+                    continue
+            filtered.append(item)
+        return filtered
+
     def add(self, item: RequestLogRecord) -> None:
         payload = asdict(item)
         self.add_payload(payload)
@@ -140,41 +245,101 @@ class RequestLogStore:
         with self._lock:
             self._append_payload_locked(item)
 
-    def list(self, limit: int = 20, page: int = 1) -> tuple[list[dict], int]:
+    def list(
+        self,
+        limit: int = 20,
+        page: int = 1,
+        *,
+        failed_only: bool = False,
+        account: str = "",
+        media_kind: str = "",
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
+    ) -> tuple[list[dict], int]:
         safe_limit = min(max(int(limit or 20), 1), 100)
         safe_page = max(int(page or 1), 1)
-        window_size = safe_limit * safe_page
-        tail: deque[str] = deque(maxlen=window_size)
-        total = 0
         with self._lock:
-            with self._file_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    total += 1
-                    tail.append(line)
+            items = self._read_payloads_locked()
+
+        filtered = self._apply_filters(
+            items,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            failed_only=failed_only,
+            account=account,
+            media_kind=media_kind,
+        )
+        total = len(filtered)
         if total <= 0:
             return [], 0
 
-        tail_lines = list(tail)
-        available = len(tail_lines)
-        start_from_end = (safe_page - 1) * safe_limit
-        if start_from_end >= available:
+        end_idx = total - ((safe_page - 1) * safe_limit)
+        if end_idx <= 0:
             return [], total
 
-        end_idx = available - start_from_end
         start_idx = max(0, end_idx - safe_limit)
-        selected = tail_lines[start_idx:end_idx]
-        data: list[dict] = []
-        for line in reversed(selected):
-            line = line.strip()
-            if not line:
+        selected = filtered[start_idx:end_idx]
+        return list(reversed(selected)), total
+
+    def list_failed_accounts(
+        self,
+        *,
+        limit: int = 200,
+        start_ts: Optional[float] = None,
+        end_ts: Optional[float] = None,
+    ) -> list[dict]:
+        safe_limit = min(max(int(limit or 200), 1), 500)
+        with self._lock:
+            items = self._read_payloads_locked()
+
+        filtered = self._apply_filters(
+            items,
+            start_ts=start_ts,
+            end_ts=end_ts,
+            failed_only=True,
+        )
+        grouped: dict[str, dict] = {}
+        for item in filtered:
+            email = str(item.get("token_account_email") or "").strip()
+            name = str(item.get("token_account_name") or "").strip()
+            token_id = str(item.get("token_id") or "").strip()
+            account_key = email or name or token_id
+            if not account_key:
                 continue
             try:
-                item = json.loads(line)
-                if isinstance(item, dict):
-                    data.append(item)
+                ts_val = float(item.get("ts") or 0)
             except Exception:
+                ts_val = 0.0
+            bucket = grouped.get(account_key)
+            if bucket is None:
+                grouped[account_key] = {
+                    "account_key": account_key,
+                    "token_account_email": email or None,
+                    "token_account_name": name or None,
+                    "token_id": token_id or None,
+                    "failed_count": 1,
+                    "last_ts": ts_val,
+                }
                 continue
-        return data, total
+            bucket["failed_count"] = int(bucket.get("failed_count") or 0) + 1
+            if ts_val > float(bucket.get("last_ts") or 0):
+                bucket["last_ts"] = ts_val
+            if email and not bucket.get("token_account_email"):
+                bucket["token_account_email"] = email
+            if name and not bucket.get("token_account_name"):
+                bucket["token_account_name"] = name
+            if token_id and not bucket.get("token_id"):
+                bucket["token_id"] = token_id
+
+        items_out = list(grouped.values())
+        items_out.sort(
+            key=lambda x: (
+                -int(x.get("failed_count") or 0),
+                -float(x.get("last_ts") or 0),
+                str(x.get("account_key") or "").casefold(),
+            )
+        )
+        return items_out[:safe_limit]
 
     def get(self, request_id: str) -> Optional[dict]:
         target = str(request_id or "").strip()
@@ -223,46 +388,32 @@ class RequestLogStore:
         in_progress_requests = 0
 
         with self._lock:
-            with self._file_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    raw = line.strip()
-                    if not raw:
-                        continue
-                    try:
-                        item = json.loads(raw)
-                    except Exception:
-                        continue
-                    if not isinstance(item, dict):
-                        continue
+            items = self._read_payloads_locked()
 
-                    try:
-                        ts_val = float(item.get("ts") or 0)
-                    except Exception:
-                        ts_val = 0.0
-                    if start_ts is not None and ts_val < float(start_ts):
-                        continue
-                    if end_ts is not None and ts_val > float(end_ts):
-                        continue
+        filtered = self._apply_filters(items, start_ts=start_ts, end_ts=end_ts)
+        for item in filtered:
+            if not isinstance(item, dict):
+                continue
 
-                    total_requests += 1
+            total_requests += 1
 
-                    try:
-                        status_code = int(item.get("status_code") or 0)
-                    except Exception:
-                        status_code = 0
-                    if status_code >= 400:
-                        failed_requests += 1
+            try:
+                status_code = int(item.get("status_code") or 0)
+            except Exception:
+                status_code = 0
+            if status_code >= 400:
+                failed_requests += 1
 
-                    task_status = str(item.get("task_status") or "").upper()
-                    if task_status == "IN_PROGRESS":
-                        in_progress_requests += 1
+            task_status = str(item.get("task_status") or "").upper()
+            if task_status == "IN_PROGRESS":
+                in_progress_requests += 1
 
-                    preview_kind = str(item.get("preview_kind") or "").strip().lower()
-                    if 200 <= status_code < 300:
-                        if preview_kind == "image":
-                            generated_images += 1
-                        elif preview_kind == "video":
-                            generated_videos += 1
+            preview_kind = str(item.get("preview_kind") or "").strip().lower()
+            if 200 <= status_code < 300:
+                if preview_kind == "image":
+                    generated_images += 1
+                elif preview_kind == "video":
+                    generated_videos += 1
 
         return {
             "total_requests": total_requests,

@@ -700,6 +700,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const logsPrevBtn = document.getElementById("logsPrevBtn");
   const logsNextBtn = document.getElementById("logsNextBtn");
   const logsPageInfo = document.getElementById("logsPageInfo");
+  const logsFailedOnly = document.getElementById("logsFailedOnly");
+  const logsMediaKind = document.getElementById("logsMediaKind");
+  const clearLogFiltersBtn = document.getElementById("clearLogFiltersBtn");
   const previewModal = document.getElementById("previewModal");
   const previewContent = document.getElementById("previewContent");
   const previewCloseBtn = document.getElementById("previewCloseBtn");
@@ -716,6 +719,62 @@ document.addEventListener("DOMContentLoaded", async () => {
   let logsCurrentPage = 1;
   let logsTotalPages = 1;
   let logsRunningTotal = 0;
+
+  function getSelectedLogMediaKind() {
+    return String(logsMediaKind?.value || "").trim().toLowerCase();
+  }
+
+  function isFailedOnlyFilterEnabled() {
+    return Boolean(logsFailedOnly?.checked);
+  }
+
+  function getLogsQueryParams() {
+    const params = new URLSearchParams();
+    params.set("limit", String(LOGS_PAGE_SIZE));
+    params.set("page", String(logsCurrentPage));
+    if (isFailedOnlyFilterEnabled()) {
+      params.set("failed_only", "true");
+    }
+    const mediaKind = getSelectedLogMediaKind();
+    if (mediaKind) {
+      params.set("media_kind", mediaKind);
+    }
+    return params;
+  }
+
+  function matchesLogMediaKind(item, mediaKind) {
+    const target = String(mediaKind || "").trim().toLowerCase();
+    if (!target) return true;
+    return resolveLogMediaKind(item) === target;
+  }
+
+  function resolveLogMediaKind(item) {
+    const previewKind = String(item?.preview_kind || "").trim().toLowerCase();
+    if (previewKind === "image" || previewKind === "video") return previewKind;
+
+    const model = String(item?.model || "").trim().toLowerCase();
+    if (model) {
+      if (
+        model.includes("sora") ||
+        model.includes("veo") ||
+        model.includes("video") ||
+        model.includes("text2video")
+      ) {
+        return "video";
+      }
+      return "image";
+    }
+
+    const path = String(item?.path || "").trim().toLowerCase();
+    const operation = String(item?.operation || "").trim().toLowerCase();
+    if (path.endsWith("/v1/images/generations") || operation === "images.generations") {
+      return "image";
+    }
+    if (path.endsWith("/v1/chat/completions") || operation === "chat.completions") {
+      return "image";
+    }
+    return "";
+  }
 
   if (testProxyBtn) {
     testProxyBtn.textContent = "检测代理与业务权限";
@@ -1398,9 +1457,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!logsTbody) return;
     try {
       const rangeValue = logStatsRange ? String(logStatsRange.value || "today") : "today";
+      const logParams = getLogsQueryParams();
       const [runningResult, logsResult, statsResult] = await Promise.allSettled([
         fetch("/api/v1/logs/running?limit=200"),
-        fetch(`/api/v1/logs?limit=${LOGS_PAGE_SIZE}&page=${logsCurrentPage}`),
+        fetch(`/api/v1/logs?${logParams.toString()}`),
         fetch(`/api/v1/logs/stats?range=${encodeURIComponent(rangeValue)}`),
       ]);
 
@@ -1559,7 +1619,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearTimeout(logsAutoTimer);
       logsAutoTimer = null;
     }
-    const runningRows = Array.isArray(runningItems) ? runningItems : [];
+    const selectedMediaKind = getSelectedLogMediaKind();
+    const runningRows = isFailedOnlyFilterEnabled()
+      ? []
+      : (Array.isArray(runningItems) ? runningItems : []).filter((item) =>
+          matchesLogMediaKind(item, selectedMediaKind)
+        );
     logsRunningTotal = runningRows.length;
     const allRows = [
       ...runningRows,
@@ -1764,6 +1829,29 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (refreshLogsBtn) {
     refreshLogsBtn.addEventListener("click", () => {
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
+  if (logsFailedOnly) {
+    logsFailedOnly.addEventListener("change", () => {
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
+  if (logsMediaKind) {
+    logsMediaKind.addEventListener("change", () => {
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
+  if (clearLogFiltersBtn) {
+    clearLogFiltersBtn.addEventListener("click", () => {
+      if (logsFailedOnly) logsFailedOnly.checked = false;
+      if (logsMediaKind) logsMediaKind.value = "";
       logsCurrentPage = 1;
       loadLogs();
     });

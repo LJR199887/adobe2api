@@ -700,6 +700,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const logsPrevBtn = document.getElementById("logsPrevBtn");
   const logsNextBtn = document.getElementById("logsNextBtn");
   const logsPageInfo = document.getElementById("logsPageInfo");
+  const logsFailedOnly = document.getElementById("logsFailedOnly");
+  const logsFailedAccount = document.getElementById("logsFailedAccount");
+  const clearLogFiltersBtn = document.getElementById("clearLogFiltersBtn");
   const previewModal = document.getElementById("previewModal");
   const previewContent = document.getElementById("previewContent");
   const previewCloseBtn = document.getElementById("previewCloseBtn");
@@ -716,6 +719,83 @@ document.addEventListener("DOMContentLoaded", async () => {
   let logsCurrentPage = 1;
   let logsTotalPages = 1;
   let logsRunningTotal = 0;
+
+  function getSelectedLogAccount() {
+    return String(logsFailedAccount?.value || "").trim();
+  }
+
+  function isFailedOnlyFilterEnabled() {
+    return Boolean(logsFailedOnly?.checked);
+  }
+
+  function getLogsQueryParams() {
+    const params = new URLSearchParams();
+    params.set("limit", String(LOGS_PAGE_SIZE));
+    params.set("page", String(logsCurrentPage));
+    if (isFailedOnlyFilterEnabled()) {
+      params.set("failed_only", "true");
+    }
+    const account = getSelectedLogAccount();
+    if (account) {
+      params.set("account", account);
+    }
+    return params;
+  }
+
+  function matchesLogAccount(item, account) {
+    const target = String(account || "").trim().toLowerCase();
+    if (!target) return true;
+    const values = [
+      item?.token_account_email,
+      item?.token_account_name,
+      item?.token_id,
+    ];
+    return values.some((value) => String(value || "").trim().toLowerCase() === target);
+  }
+
+  function buildFailedAccountOptionLabel(item) {
+    const email = String(item?.token_account_email || "").trim();
+    const name = String(item?.token_account_name || "").trim();
+    const tokenId = String(item?.token_id || "").trim();
+    const failedCount = Number(item?.failed_count || 0);
+    const primary = email || name || tokenId || "Unknown account";
+    const extra = [];
+    if (name && name !== primary) extra.push(name);
+    if (email && email !== primary) extra.push(email);
+    if (tokenId && tokenId !== primary) extra.push(`ID ${tokenId}`);
+    const suffix = failedCount > 0 ? ` (${failedCount})` : "";
+    return `${primary}${extra.length ? ` - ${extra.join(" | ")}` : ""}${suffix}`;
+  }
+
+  async function loadFailedAccounts() {
+    if (!logsFailedAccount) return;
+    const previousValue = getSelectedLogAccount();
+    try {
+      const res = await fetch("/api/v1/logs/failed-accounts?limit=200");
+      if (!res.ok) {
+        throw new Error("failed to load failed accounts");
+      }
+      const data = await res.json();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      logsFailedAccount.innerHTML = '<option value="">全部账号</option>';
+      items.forEach((item) => {
+        const accountKey = String(item?.account_key || "").trim();
+        if (!accountKey) return;
+        const option = document.createElement("option");
+        option.value = accountKey;
+        option.textContent = buildFailedAccountOptionLabel(item);
+        logsFailedAccount.appendChild(option);
+      });
+      if (previousValue) {
+        const hasOption = Array.from(logsFailedAccount.options).some(
+          (option) => String(option.value || "").trim() === previousValue
+        );
+        logsFailedAccount.value = hasOption ? previousValue : "";
+      }
+    } catch (_) {
+      logsFailedAccount.innerHTML = '<option value="">全部账号</option>';
+    }
+  }
 
   if (testProxyBtn) {
     testProxyBtn.textContent = "检测代理与业务权限";
@@ -1398,9 +1478,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!logsTbody) return;
     try {
       const rangeValue = logStatsRange ? String(logStatsRange.value || "today") : "today";
+      const logParams = getLogsQueryParams();
       const [runningResult, logsResult, statsResult] = await Promise.allSettled([
         fetch("/api/v1/logs/running?limit=200"),
-        fetch(`/api/v1/logs?limit=${LOGS_PAGE_SIZE}&page=${logsCurrentPage}`),
+        fetch(`/api/v1/logs?${logParams.toString()}`),
         fetch(`/api/v1/logs/stats?range=${encodeURIComponent(rangeValue)}`),
       ]);
 
@@ -1418,6 +1499,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       logsCurrentPage = Math.max(1, Number(logsData.page || logsCurrentPage || 1));
       logsTotalPages = Math.max(1, Number(logsData.total_pages || 1));
       renderLogsPagination();
+      await loadFailedAccounts();
       renderLogs(logsData.logs || [], runningItems);
 
       if (statsResult.status === "fulfilled" && statsResult.value.ok) {
@@ -1559,7 +1641,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearTimeout(logsAutoTimer);
       logsAutoTimer = null;
     }
-    const runningRows = Array.isArray(runningItems) ? runningItems : [];
+    const selectedAccount = getSelectedLogAccount();
+    const runningRows = isFailedOnlyFilterEnabled()
+      ? []
+      : (Array.isArray(runningItems) ? runningItems : []).filter((item) =>
+          matchesLogAccount(item, selectedAccount)
+        );
     logsRunningTotal = runningRows.length;
     const allRows = [
       ...runningRows,
@@ -1764,6 +1851,29 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (refreshLogsBtn) {
     refreshLogsBtn.addEventListener("click", () => {
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
+  if (logsFailedOnly) {
+    logsFailedOnly.addEventListener("change", () => {
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
+  if (logsFailedAccount) {
+    logsFailedAccount.addEventListener("change", () => {
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
+  if (clearLogFiltersBtn) {
+    clearLogFiltersBtn.addEventListener("click", () => {
+      if (logsFailedOnly) logsFailedOnly.checked = false;
+      if (logsFailedAccount) logsFailedAccount.value = "";
       logsCurrentPage = 1;
       loadLogs();
     });

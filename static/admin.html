@@ -280,6 +280,17 @@
           </div>
         </div>
         <p class="help" style="margin-bottom: 16px;">仅展示外部 OpenAI 风格请求日志。失败状态中的状态码可点击查看错误信息。</p>
+        <div class="logs-filter-bar">
+          <label class="checkbox-label logs-filter-checkbox">
+            <input id="logsFailedOnly" type="checkbox" />
+            <span>只看失败</span>
+          </label>
+          <label for="logsFailedAccount" class="help">失败账号</label>
+          <select id="logsFailedAccount" class="input-select" aria-label="失败账号筛选">
+            <option value="">全部账号</option>
+          </select>
+          <button id="clearLogFiltersBtn" class="secondary small" type="button">清空筛选</button>
+        </div>
         <div class="stats-grid" id="logsStatsGrid">
           <div class="stat-card">
             <div class="stat-label">图片生成数</div>

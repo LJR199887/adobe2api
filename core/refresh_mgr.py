@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 import requests
 
 from core.config_mgr import config_manager
+from core.proxy_utils import build_requests_proxies, resolve_basic_proxy
 from core.token_mgr import token_manager
 
 
@@ -187,11 +188,7 @@ class RefreshManager:
         return cls._refresh_interval_hours() * 3600
 
     def _requests_proxies(self):
-        proxy = str(config_manager.get("proxy", "") or "").strip()
-        use_proxy = bool(config_manager.get("use_proxy", False))
-        if not (use_proxy and proxy):
-            return None
-        return {"http": proxy, "https": proxy}
+        return build_requests_proxies(resolve_basic_proxy(config_manager.get_all()))
 
     def _summary_locked(self, profile: Dict) -> Dict:
         endpoint = profile.get("endpoint", {})

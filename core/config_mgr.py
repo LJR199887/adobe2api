@@ -22,6 +22,8 @@ class ConfigManager:
             "public_base_url": "http://127.0.0.1:6001/",
             "proxy": "",
             "use_proxy": False,
+            "resource_proxy": "",
+            "resource_use_proxy": False,
             "generate_timeout": 300,
             "refresh_interval_hours": 15,
             "retry_enabled": True,
@@ -49,6 +51,16 @@ class ConfigManager:
                     for k, v in data.items():
                         if k in self.config:
                             self.config[k] = v
+                    if (
+                        isinstance(data, dict)
+                        and "resource_proxy" not in data
+                        and "resource_use_proxy" not in data
+                    ):
+                        legacy_proxy = str(data.get("proxy", "") or "").strip()
+                        legacy_use_proxy = bool(data.get("use_proxy", False))
+                        if legacy_proxy and legacy_use_proxy:
+                            self.config["resource_proxy"] = legacy_proxy
+                            self.config["resource_use_proxy"] = True
                     if source == LEGACY_CONFIG_FILE and not CONFIG_FILE.exists():
                         CONFIG_FILE.write_text(
                             json.dumps(self.config, indent=2), encoding="utf-8"

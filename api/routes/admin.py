@@ -12,6 +12,7 @@ from api.schemas import (
     AdminLoginRequest,
     ConfigUpdateRequest,
     ExportSelectionRequest,
+    ProxyTestRequest,
     RefreshCookieBatchImportRequest,
     RefreshCookieImportRequest,
     RefreshProfileEnabledRequest,
@@ -19,6 +20,7 @@ from api.schemas import (
     TokenBatchAddRequest,
     TokenCreditsBatchRefreshRequest,
 )
+from core.proxy_utils import resolve_basic_proxy, resolve_resource_proxy, test_proxy_endpoint
 
 
 def build_admin_router(
@@ -71,6 +73,30 @@ def build_admin_router(
     @router.get("/api/v1/health/redis")
     def health_redis():
         return get_redis_health()
+
+    @router.post("/api/v1/proxy/test")
+    def test_proxy(req: ProxyTestRequest, request: Request):
+        require_admin_auth(request)
+        cfg = config_manager.get_all()
+        incoming = req.model_dump(exclude_unset=True)
+        cfg.update(incoming)
+        basic_proxy = resolve_basic_proxy(cfg)
+        resource_proxy = resolve_resource_proxy(cfg)
+        basic_result = test_proxy_endpoint(
+            proxy_label="basic",
+            proxy=basic_proxy,
+            target_url="https://firefly.adobe.io/v1/credits/balance",
+        )
+        resource_result = test_proxy_endpoint(
+            proxy_label="resource",
+            proxy=resource_proxy,
+            target_url="https://firefly-3p.ff.adobe.io/v2/storage/image",
+        )
+        return {
+            "status": "ok",
+            "basic": basic_result,
+            "resource": resource_result,
+        }
 
     @router.get("/login", include_in_schema=False)
     def page_login(request: Request):
@@ -463,6 +489,21 @@ def build_admin_router(
             update_data["proxy"] = str(incoming["proxy"] or "").strip()
         if "use_proxy" in incoming:
             update_data["use_proxy"] = bool(incoming["use_proxy"])
+        if "resource_proxy" in incoming:
+            update_data["resource_proxy"] = str(incoming["resource_proxy"] or "").strip()
+        if "resource_use_proxy" in incoming:
+            update_data["resource_use_proxy"] = bool(incoming["resource_use_proxy"])
+        effective_basic_use_proxy = bool(
+            update_data.get("use_proxy", config_manager.get("use_proxy", False))
+        )
+        effective_basic_proxy = str(
+            update_data.get("proxy", config_manager.get("proxy", "")) or ""
+        ).strip()
+        if effective_basic_use_proxy and not effective_basic_proxy.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="proxy must start with http:// or https:// when basic proxy is enabled",
+            )
         if "generate_timeout" in incoming:
             try:
                 timeout_val = int(incoming["generate_timeout"])
@@ -606,6 +647,20 @@ def build_admin_router(
             update_data["imgbed_api_url"] = str(incoming["imgbed_api_url"] or "").strip()
         if "imgbed_api_key" in incoming:
             update_data["imgbed_api_key"] = str(incoming["imgbed_api_key"] or "").strip()
+        effective_resource_use_proxy = bool(
+            update_data.get(
+                "resource_use_proxy", config_manager.get("resource_use_proxy", False)
+            )
+        )
+        effective_resource_proxy = str(
+            update_data.get("resource_proxy", config_manager.get("resource_proxy", ""))
+            or ""
+        ).strip()
+        if effective_resource_use_proxy and not effective_resource_proxy.startswith(("http://", "https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="resource_proxy must start with http:// or https:// when resource proxy is enabled",
+            )
         effective_imgbed_enabled = bool(
             update_data.get("imgbed_enabled", config_manager.get("imgbed_enabled", False))
         )

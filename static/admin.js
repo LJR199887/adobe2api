@@ -658,6 +658,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confPublicBaseUrl = document.getElementById("confPublicBaseUrl");
   const confUseProxy = document.getElementById("confUseProxy");
   const confProxy = document.getElementById("confProxy");
+  const confResourceUseProxy = document.getElementById("confResourceUseProxy");
+  const confResourceProxy = document.getElementById("confResourceProxy");
+  const testProxyBtn = document.getElementById("testProxyBtn");
+  const proxyTestResult = document.getElementById("proxyTestResult");
   const confGenerateTimeout = document.getElementById("confGenerateTimeout");
   const confRetryEnabled = document.getElementById("confRetryEnabled");
   const confRetryMaxAttempts = document.getElementById("confRetryMaxAttempts");
@@ -713,6 +717,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   let logsTotalPages = 1;
   let logsRunningTotal = 0;
 
+  if (testProxyBtn) {
+    testProxyBtn.textContent = "检测代理连通性";
+    const proxyHelp = testProxyBtn.nextElementSibling;
+    if (proxyHelp && proxyHelp.classList.contains("help")) {
+      proxyHelp.textContent = "会分别检测基础代理和资源代理，并显示是否成功、耗时、HTTP 状态码和详细错误信息。检测时会直接使用你当前表单里的值，不需要先保存配置。";
+    }
+  }
+  if (proxyTestResult && !String(proxyTestResult.textContent || "").trim()) {
+    proxyTestResult.textContent = "点击上方按钮后，会在这里显示检测结果。";
+  }
+
   function switchConfigPane(targetId) {
     if (!targetId) return;
     configCatBtns.forEach((btn) => {
@@ -749,6 +764,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         confPublicBaseUrl.value = data.public_base_url || "";
         confUseProxy.checked = data.use_proxy || false;
         confProxy.value = data.proxy || "";
+        confResourceUseProxy.checked = data.resource_use_proxy || false;
+        confResourceProxy.value = data.resource_proxy || "";
         confGenerateTimeout.value = Number(data.generate_timeout || 300);
         confRetryEnabled.checked = Boolean(data.retry_enabled ?? true);
         confRetryMaxAttempts.value = Number(data.retry_max_attempts || 3);
@@ -795,6 +812,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         public_base_url: confPublicBaseUrl.value.trim(),
         use_proxy: confUseProxy.checked,
         proxy: confProxy.value.trim(),
+        resource_use_proxy: confResourceUseProxy.checked,
+        resource_proxy: confResourceProxy.value.trim(),
         generate_timeout: Math.max(1, Number(confGenerateTimeout.value || 300)),
         retry_enabled: confRetryEnabled.checked,
         retry_max_attempts: Math.max(1, Math.min(10, Number(confRetryMaxAttempts.value || 3))),
@@ -840,6 +859,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (payload.generated_prune_size_mb >= payload.generated_max_size_mb) {
         throw new Error("触发后清理量必须小于生成文件空间上限");
       }
+      if (payload.use_proxy && !/^https?:\/\//i.test(payload.proxy)) {
+        throw new Error("基础代理地址必须以 http:// 或 https:// 开头");
+      }
+      if (payload.resource_use_proxy && !/^https?:\/\//i.test(payload.resource_proxy)) {
+        throw new Error("资源代理地址必须以 http:// 或 https:// 开头");
+      }
       if (payload.imgbed_enabled) {
         if (!/^https?:\/\//i.test(payload.imgbed_api_url)) {
           throw new Error("图床 API 地址必须以 http:// 或 https:// 开头");
@@ -877,6 +902,88 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     saveConfigBtn.disabled = false;
   });
+
+  function formatProxyTestItem(title, item) {
+    const data = item && typeof item === "object" ? item : {};
+    const enabled = Boolean(data.enabled);
+    const ok = Boolean(data.ok);
+    const statusText = !enabled ? "未启用" : ok ? "连接成功" : "连接失败";
+    const elapsedText = Number.isFinite(Number(data.elapsed_ms))
+      ? `${Number(data.elapsed_ms)} ms`
+      : "-";
+    const statusCodeText = data.status_code == null ? "-" : String(data.status_code);
+    const proxyText = String(data.proxy || "").trim() || "未填写";
+    const targetText = String(data.target_url || "").trim() || "-";
+    const messageText = String(data.message || "").trim() || "-";
+    return [
+      `${title}`,
+      `状态：${statusText}`,
+      `代理地址：${proxyText}`,
+      `检测目标：${targetText}`,
+      `耗时：${elapsedText}`,
+      `HTTP 状态码：${statusCodeText}`,
+      `详细信息：${messageText}`,
+    ].join("\n");
+  }
+
+  function formatProxyTestResult(payload) {
+    const data = payload && typeof payload === "object" ? payload : {};
+    const sections = [
+      formatProxyTestItem("基础代理", data.basic),
+      formatProxyTestItem("资源代理", data.resource),
+    ];
+    return `代理检测结果\n\n${sections.join("\n\n")}`;
+  }
+
+  async function handleProxyTest() {
+    if (proxyTestResult) {
+      proxyTestResult.textContent = "正在检测代理连通性，请稍候...";
+    }
+    const payload = {
+      use_proxy: confUseProxy.checked,
+      proxy: confProxy.value.trim(),
+      resource_use_proxy: confResourceUseProxy.checked,
+      resource_proxy: confResourceProxy.value.trim(),
+    };
+    if (payload.use_proxy && !/^https?:\/\//i.test(payload.proxy)) {
+      throw new Error("基础代理地址必须以 http:// 或 https:// 开头");
+    }
+    if (payload.resource_use_proxy && !/^https?:\/\//i.test(payload.resource_proxy)) {
+      throw new Error("资源代理地址必须以 http:// 或 https:// 开头");
+    }
+    const res = await fetch("/api/v1/proxy/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "代理检测失败");
+    }
+    if (proxyTestResult) {
+      proxyTestResult.textContent = formatProxyTestResult(data);
+    }
+    showToast("代理检测已完成", false);
+  }
+
+  if (testProxyBtn) {
+    testProxyBtn.addEventListener("click", async () => {
+      testProxyBtn.disabled = true;
+      if (proxyTestResult) {
+        proxyTestResult.textContent = "正在检测代理，请稍候...";
+      }
+      try {
+        await handleProxyTest();
+      } catch (err) {
+        if (proxyTestResult) {
+          proxyTestResult.textContent = String(err?.message || err || "代理检测失败");
+        }
+        showToast(err.message || "代理检测失败", true);
+      } finally {
+        testProxyBtn.disabled = false;
+      }
+    });
+  }
 
   function formatTs(ts) {
     if (!ts) return "-";

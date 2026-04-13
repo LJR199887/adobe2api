@@ -243,6 +243,7 @@ def build_admin_router(
         page: int = 1,
         failed_only: bool = False,
         account: str = "",
+        media_kind: str = "",
     ):
         require_admin_auth(request)
         logs, total = log_store.list(
@@ -250,6 +251,7 @@ def build_admin_router(
             page=page,
             failed_only=bool(failed_only),
             account=str(account or "").strip(),
+            media_kind=str(media_kind or "").strip().lower(),
         )
         safe_limit = min(max(int(limit or 20), 1), 100)
         safe_page = max(int(page or 1), 1)
@@ -265,6 +267,7 @@ def build_admin_router(
             "filters": {
                 "failed_only": bool(failed_only),
                 "account": str(account or "").strip(),
+                "media_kind": str(media_kind or "").strip().lower(),
             },
         }
 

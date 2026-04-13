@@ -167,8 +167,10 @@ class RequestLogStore:
         end_ts: Optional[float] = None,
         failed_only: bool = False,
         account: str = "",
+        media_kind: str = "",
     ) -> list[dict]:
         filtered: list[dict] = []
+        normalized_media_kind = str(media_kind or "").strip().lower()
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -189,6 +191,10 @@ class RequestLogStore:
                 continue
             if account and not cls._match_account_filter(item, account):
                 continue
+            if normalized_media_kind:
+                preview_kind = str(item.get("preview_kind") or "").strip().lower()
+                if preview_kind != normalized_media_kind:
+                    continue
             filtered.append(item)
         return filtered
 
@@ -219,6 +225,7 @@ class RequestLogStore:
         *,
         failed_only: bool = False,
         account: str = "",
+        media_kind: str = "",
         start_ts: Optional[float] = None,
         end_ts: Optional[float] = None,
     ) -> tuple[list[dict], int]:
@@ -233,6 +240,7 @@ class RequestLogStore:
             end_ts=end_ts,
             failed_only=failed_only,
             account=account,
+            media_kind=media_kind,
         )
         total = len(filtered)
         if total <= 0:

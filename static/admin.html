@@ -285,9 +285,11 @@
             <input id="logsFailedOnly" type="checkbox" />
             <span>只看失败</span>
           </label>
-          <label for="logsFailedAccount" class="help">失败账号</label>
-          <select id="logsFailedAccount" class="input-select" aria-label="失败账号筛选">
-            <option value="">全部账号</option>
+          <label for="logsMediaKind" class="help">筛选类型</label>
+          <select id="logsMediaKind" class="input-select" aria-label="日志类型筛选">
+            <option value="">全部类型</option>
+            <option value="image">图片</option>
+            <option value="video">视频</option>
           </select>
           <button id="clearLogFiltersBtn" class="secondary small" type="button">清空筛选</button>
         </div>

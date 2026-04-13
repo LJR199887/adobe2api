@@ -1,4 +1,4 @@
-document.addEventListener("DOMContentLoaded", async () => {
+﻿document.addEventListener("DOMContentLoaded", async () => {
   const rawFetch = window.fetch.bind(window);
   window.fetch = async (...args) => {
     const res = await rawFetch(...args);
@@ -84,11 +84,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   let tokenTotalPages = 1;
 
   const STATUS_MAP = {
-    "active": "生效中",
-    "exhausted": "额度耗尽",
-    "invalid": "已失效",
-    "error": "请求异常",
-    "disabled": "已禁用"
+    "active": "鐢熸晥涓?,
+    "exhausted": "棰濆害鑰楀敖",
+    "invalid": "宸插け鏁?,
+    "error": "璇锋眰寮傚父",
+    "disabled": "宸茬鐢?
   };
 
   async function loadTokens() {
@@ -105,7 +105,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.error(err);
       renderTokenSummary([]);
       renderTokenPagination(0);
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-state" style="color: #ffb4bc;">加载失败</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state" style="color: #ffb4bc;">鍔犺浇澶辫触</td></tr>`;
     }
   }
 
@@ -131,7 +131,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     tokenCurrentPage = Math.min(Math.max(1, tokenCurrentPage), tokenTotalPages);
 
     if (tokenPageInfo) {
-      tokenPageInfo.textContent = `第 ${tokenCurrentPage} / ${tokenTotalPages} 页`;
+      tokenPageInfo.textContent = `绗?${tokenCurrentPage} / ${tokenTotalPages} 椤礰;
     }
     if (tokenPrevBtn) tokenPrevBtn.disabled = tokenCurrentPage <= 1;
     if (tokenNextBtn) tokenNextBtn.disabled = tokenCurrentPage >= tokenTotalPages;
@@ -166,21 +166,21 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function formatExpiry(token) {
     if (!token || token.expires_at == null) {
-      return '<span style="color:#7f96ad;">未知</span>';
+      return '<span style="color:#7f96ad;">鏈煡</span>';
     }
     const remain = Number(token.remaining_seconds || 0);
     const abs = Math.abs(remain);
     const days = Math.floor(abs / 86400);
     const hours = Math.floor((abs % 86400) / 3600);
     const mins = Math.floor((abs % 3600) / 60);
-    const rel = days > 0 ? `${days}天${hours}小时` : `${hours}小时${mins}分`;
+    const rel = days > 0 ? `${days}澶?{hours}灏忔椂` : `${hours}灏忔椂${mins}鍒哷;
     if (remain <= 0 || token.is_expired) {
-      return `<span style="color:#ffb4bc;">已过期 (${token.expires_at_text || '-'})</span>`;
+      return `<span style="color:#ffb4bc;">宸茶繃鏈?(${token.expires_at_text || '-'})</span>`;
     }
     if (remain < 3600 * 6) {
-      return `<span style="color:#ffca58;">剩余 ${rel}<br><span style="color:#7f96ad;">${token.expires_at_text || '-'}</span></span>`;
+      return `<span style="color:#ffca58;">鍓╀綑 ${rel}<br><span style="color:#7f96ad;">${token.expires_at_text || '-'}</span></span>`;
     }
-    return `<span style="color:#a8bfd8;">剩余 ${rel}<br><span style="color:#7f96ad;">${token.expires_at_text || '-'}</span></span>`;
+    return `<span style="color:#a8bfd8;">鍓╀綑 ${rel}<br><span style="color:#7f96ad;">${token.expires_at_text || '-'}</span></span>`;
   }
 
   function formatCredits(token) {
@@ -190,14 +190,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     const err = String(token?.credits_error || "").trim();
 
     if (err) {
-      return `<span style="color:#ffb4bc;">刷新失败</span><br><span style="color:#7f96ad;">${escapeHtml(err)}</span>`;
+      return `<span style="color:#ffb4bc;">鍒锋柊澶辫触</span><br><span style="color:#7f96ad;">${escapeHtml(err)}</span>`;
     }
     if (!Number.isFinite(available) || !Number.isFinite(total)) {
-      return `<span style="color:#7f96ad;">未获取</span>`;
+      return `<span style="color:#7f96ad;">鏈幏鍙?/span>`;
     }
 
     const resetText = availableUntil ? new Date(availableUntil).toLocaleString() : "-";
-    return `<span style="color:#a8bfd8;">${available} / ${total}</span><br><span style="color:#7f96ad;">重置 ${resetText}</span>`;
+    return `<span style="color:#a8bfd8;">${available} / ${total}</span><br><span style="color:#7f96ad;">閲嶇疆 ${resetText}</span>`;
   }
 
   function renderTable(tokens, summary = null) {
@@ -212,7 +212,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const pageTokens = getCurrentPageTokens();
 
     if (!latestTokens.length) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-state">当前没有可用的 Token，请在上方添加。</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state">褰撳墠娌℃湁鍙敤鐨?Token锛岃鍦ㄤ笂鏂规坊鍔犮€?/td></tr>`;
       syncTokenSelectAllState();
       return;
     }
@@ -231,34 +231,34 @@ document.addEventListener("DOMContentLoaded", async () => {
       const tokenProfileEmail = String(t.refresh_profile_email || "").trim();
       const refreshProfileNameSafe = escapeHtml(tokenProfileName);
       const refreshProfileEmailSafe = escapeHtml(tokenProfileEmail);
-      const accountName = refreshProfileNameSafe || '<span style="color:#7f96ad;">手动 Token</span>';
+      const accountName = refreshProfileNameSafe || '<span style="color:#7f96ad;">鎵嬪姩 Token</span>';
       const accountEmail = refreshProfileEmailSafe || '<span style="color:#7f96ad;">-</span>';
       const autoEnabled = t.auto_refresh && t.auto_refresh_enabled !== false;
       const autoRefreshCell = t.auto_refresh
-        ? `<div style="display: flex; align-items: center;"><button class="switch-btn ${autoEnabled ? "on" : "off"}" onclick="toggleAutoRefresh('${t.id}', ${autoEnabled ? "false" : "true"})" title="${autoEnabled ? "点击关闭自动刷新" : "点击开启自动刷新"}"><span class="switch-knob"></span></button><span class="switch-text">${autoEnabled ? "开启" : "关闭"}</span></div>`
-        : `<div style="display: flex; align-items: center;"><button class="switch-btn off" disabled title="手动 token 不支持自动刷新"><span class="switch-knob"></span></button><span class="switch-text" style="color:#7f96ad;">手动</span></div>`;
+        ? `<div style="display: flex; align-items: center;"><button class="switch-btn ${autoEnabled ? "on" : "off"}" onclick="toggleAutoRefresh('${t.id}', ${autoEnabled ? "false" : "true"})" title="${autoEnabled ? "鐐瑰嚮鍏抽棴鑷姩鍒锋柊" : "鐐瑰嚮寮€鍚嚜鍔ㄥ埛鏂?}"><span class="switch-knob"></span></button><span class="switch-text">${autoEnabled ? "寮€鍚? : "鍏抽棴"}</span></div>`
+        : `<div style="display: flex; align-items: center;"><button class="switch-btn off" disabled title="鎵嬪姩 token 涓嶆敮鎸佽嚜鍔ㄥ埛鏂?><span class="switch-knob"></span></button><span class="switch-text" style="color:#7f96ad;">鎵嬪姩</span></div>`;
       
       const d = new Date(t.added_at * 1000);
       const dateStr = d.toLocaleString();
 
       const refreshTokenBtn = t.auto_refresh
-        ? `<button class="action-mini" onclick="refreshToken('${t.id}')">刷新Token</button>`
-        : `<button class="action-mini" disabled title="仅自动刷新 token 支持刷新">刷新Token</button>`;
+        ? `<button class="action-mini" onclick="refreshToken('${t.id}')">鍒锋柊Token</button>`
+        : `<button class="action-mini" disabled title="浠呰嚜鍔ㄥ埛鏂?token 鏀寔鍒锋柊">鍒锋柊Token</button>`;
       const statusBtn = isFrozen
-        ? `<button class="action-mini" disabled title="额度耗尽或已失效 token 不可启用">不可启用</button>`
-        : `<button class="action-mini" onclick="toggleToken('${t.id}', '${isStatusActive ? 'disabled' : 'active'}')">${isStatusActive ? '禁用Token' : '启用Token'}</button>`;
+        ? `<button class="action-mini" disabled title="棰濆害鑰楀敖鎴栧凡澶辨晥 token 涓嶅彲鍚敤">涓嶅彲鍚敤</button>`
+        : `<button class="action-mini" onclick="toggleToken('${t.id}', '${isStatusActive ? 'disabled' : 'active'}')">${isStatusActive ? '绂佺敤Token' : '鍚敤Token'}</button>`;
       const actionsGrid = `
         <div class="action-btns">
-          <button class="action-mini" onclick="refreshTokenCredits('${t.id}')">刷新积分</button>
+          <button class="action-mini" onclick="refreshTokenCredits('${t.id}')">鍒锋柊绉垎</button>
           ${refreshTokenBtn}
           ${statusBtn}
-          <button class="action-mini danger" onclick="deleteToken('${t.id}')">删除Token</button>
+          <button class="action-mini danger" onclick="deleteToken('${t.id}')">鍒犻櫎Token</button>
         </div>
       `;
 
       tr.innerHTML = `
         <td><input type="checkbox" class="token-select" data-id="${tokenId}" ${selectedAttr} /></td>
-        <td style="color: #a8bfd8; font-size: 12px;" title="添加时间: ${dateStr}">${accountName}<br>${accountEmail}</td>
+        <td style="color: #a8bfd8; font-size: 12px;" title="娣诲姞鏃堕棿: ${dateStr}">${accountName}<br>${accountEmail}</td>
         <td class="token-val">${t.value}</td>
         <td><span class="status-badge ${statusClass}">${displayStatus}</span></td>
         <td>${autoRefreshCell}</td>
@@ -277,12 +277,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       tokens = await collectTokensFromInputs();
     } catch (err) {
-      showMsg(addMsg, err.message || "文件解析失败", true);
+      showMsg(addMsg, err.message || "鏂囦欢瑙ｆ瀽澶辫触", true);
       return;
     }
 
     if (!tokens.length) {
-      showMsg(addMsg, "请先输入 Token 内容或上传文件", true);
+      showMsg(addMsg, "璇峰厛杈撳叆 Token 鍐呭鎴栦笂浼犳枃浠?, true);
       return;
     }
 
@@ -301,14 +301,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (tokens.length > 1) {
           const data = await res.json();
           const addedCount = Number(data?.added_count || 0);
-          showMsg(addMsg, `批量添加成功（${addedCount} 个）`, false);
+          showMsg(addMsg, `鎵归噺娣诲姞鎴愬姛锛?{addedCount} 涓級`, false);
         } else {
-          showMsg(addMsg, "添加成功", false);
+          showMsg(addMsg, "娣诲姞鎴愬姛", false);
         }
         loadTokens();
         closeDialog(tokenModal);
       } else {
-        let detail = "添加失败，请重试";
+        let detail = "娣诲姞澶辫触锛岃閲嶈瘯";
         try {
           const body = await res.json();
           detail = body.detail || detail;
@@ -324,12 +324,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   refreshBtn.addEventListener("click", async () => {
-    showToast("Token 列表刷新中...", false, { duration: 0 });
+    showToast("Token 鍒楄〃鍒锋柊涓?..", false, { duration: 0 });
     try {
       await loadTokens();
-      showToast("Token 列表已刷新", false);
+      showToast("Token 鍒楄〃宸插埛鏂?, false);
     } catch (err) {
-      showToast("Token 列表刷新失败", true);
+      showToast("Token 鍒楄〃鍒锋柊澶辫触", true);
     }
   });
 
@@ -396,16 +396,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   window.deleteToken = async (id) => {
-    if (!confirm("确定要删除这个 Token 吗？")) return;
+    if (!confirm("纭畾瑕佸垹闄よ繖涓?Token 鍚楋紵")) return;
     try {
       const res = await fetch(`/api/v1/tokens/${id}`, { method: "DELETE" });
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(txt || "删除失败");
+        throw new Error(txt || "鍒犻櫎澶辫触");
       }
       await loadTokens();
     } catch (err) {
-      alert(err.message || "删除失败");
+      alert(err.message || "鍒犻櫎澶辫触");
     }
   };
 
@@ -414,61 +414,61 @@ document.addEventListener("DOMContentLoaded", async () => {
       const res = await fetch(`/api/v1/tokens/${id}/status?status=${newStatus}`, { method: "PUT" });
       if (!res.ok) {
         const text = await res.text();
-        alert(`状态更新失败: ${text}`);
+        alert(`鐘舵€佹洿鏂板け璐? ${text}`);
         return;
       }
       loadTokens();
     } catch (err) {
-      alert("状态更新失败");
+      alert("鐘舵€佹洿鏂板け璐?);
     }
   };
 
   window.refreshToken = async (id) => {
-    showToast("Token 刷新中...", false, { duration: 0 });
+    showToast("Token 鍒锋柊涓?..", false, { duration: 0 });
     try {
       const res = await fetch(`/api/v1/tokens/${id}/refresh`, { method: "POST" });
       if (!res.ok) {
-        let detail = "刷新失败";
+        let detail = "鍒锋柊澶辫触";
         try {
           const body = await res.json();
           detail = body.detail || JSON.stringify(body);
         } catch (_) {
           detail = await res.text();
         }
-        alert(`刷新失败: ${detail || "unknown error"}`);
-        showToast(`Token 刷新失败：${detail || "unknown error"}`, true);
+        alert(`鍒锋柊澶辫触: ${detail || "unknown error"}`);
+        showToast(`Token 鍒锋柊澶辫触锛?{detail || "unknown error"}`, true);
         return;
       }
-      showMsg(refreshMsg, "刷新成功", false);
-      showToast("Token 刷新成功", false);
+      showMsg(refreshMsg, "鍒锋柊鎴愬姛", false);
+      showToast("Token 鍒锋柊鎴愬姛", false);
       await loadTokens();
     } catch (err) {
-      alert("刷新失败");
-      showToast("Token 刷新失败", true);
+      alert("鍒锋柊澶辫触");
+      showToast("Token 鍒锋柊澶辫触", true);
     }
   };
 
   window.refreshTokenCredits = async (id) => {
-    showToast("Token 积分刷新中...", false, { duration: 0 });
+    showToast("Token 绉垎鍒锋柊涓?..", false, { duration: 0 });
     try {
       const res = await fetch(`/api/v1/tokens/${id}/credits/refresh`, { method: "POST" });
       if (!res.ok) {
-        let detail = "刷新积分失败";
+        let detail = "鍒锋柊绉垎澶辫触";
         try {
           const body = await res.json();
           detail = body.detail || JSON.stringify(body);
         } catch (_) {
           detail = await res.text();
         }
-        alert(detail || "刷新积分失败");
-        showToast(`刷新积分失败：${detail || "unknown error"}`, true);
+        alert(detail || "鍒锋柊绉垎澶辫触");
+        showToast(`鍒锋柊绉垎澶辫触锛?{detail || "unknown error"}`, true);
         return;
       }
       await loadTokens();
-      showToast("Token 积分刷新成功", false);
+      showToast("Token 绉垎鍒锋柊鎴愬姛", false);
     } catch (err) {
-      alert("刷新积分失败");
-      showToast("Token 积分刷新失败", true);
+      alert("鍒锋柊绉垎澶辫触");
+      showToast("Token 绉垎鍒锋柊澶辫触", true);
     }
   };
 
@@ -478,26 +478,26 @@ document.addEventListener("DOMContentLoaded", async () => {
         method: "PUT"
       });
       if (!res.ok) {
-        let detail = "自动刷新设置失败";
+        let detail = "鑷姩鍒锋柊璁剧疆澶辫触";
         try {
           const body = await res.json();
           detail = body.detail || JSON.stringify(body);
         } catch (_) {
           detail = await res.text();
         }
-        alert(detail || "自动刷新设置失败");
+        alert(detail || "鑷姩鍒锋柊璁剧疆澶辫触");
         return;
       }
       await loadTokens();
     } catch (err) {
-      alert("自动刷新设置失败");
+      alert("鑷姩鍒锋柊璁剧疆澶辫触");
     }
   };
 
   if (refreshCreditsBatchBtn) {
     refreshCreditsBatchBtn.addEventListener("click", async () => {
       refreshCreditsBatchBtn.disabled = true;
-      showToast("批量刷新积分中...", false, { duration: 0 });
+      showToast("鎵归噺鍒锋柊绉垎涓?..", false, { duration: 0 });
       try {
         const res = await fetch("/api/v1/tokens/credits/refresh-batch", {
           method: "POST",
@@ -505,23 +505,23 @@ document.addEventListener("DOMContentLoaded", async () => {
           body: JSON.stringify({}),
         });
         if (!res.ok) {
-          let detail = "批量刷新积分失败";
+          let detail = "鎵归噺鍒锋柊绉垎澶辫触";
           try {
             const body = await res.json();
             detail = body.detail || JSON.stringify(body);
           } catch (_) {
             detail = await res.text();
           }
-          showToast(`批量刷新积分失败：${detail || "unknown error"}`, true);
+          showToast(`鎵归噺鍒锋柊绉垎澶辫触锛?{detail || "unknown error"}`, true);
           return;
         }
         const data = await res.json();
         const ok = Number(data.refreshed_count || 0);
         const fail = Number(data.failed_count || 0);
-        showToast(`批量刷新完成：成功 ${ok}，失败 ${fail}`, false);
+        showToast(`鎵归噺鍒锋柊瀹屾垚锛氭垚鍔?${ok}锛屽け璐?${fail}`, false);
         await loadTokens();
       } catch (err) {
-        showToast("批量刷新积分失败", true);
+        showToast("鎵归噺鍒锋柊绉垎澶辫触", true);
       } finally {
         refreshCreditsBatchBtn.disabled = false;
       }
@@ -532,10 +532,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     deleteTokensBatchBtn.addEventListener("click", async () => {
       const selectedIds = Array.from(tokenSelectedIds);
       if (!selectedIds.length) {
-        alert("请先选择要删除的 Token");
+        alert("璇峰厛閫夋嫨瑕佸垹闄ょ殑 Token");
         return;
       }
-      if (!confirm(`确定批量删除选中的 ${selectedIds.length} 个 Token 吗？`)) return;
+      if (!confirm(`纭畾鎵归噺鍒犻櫎閫変腑鐨?${selectedIds.length} 涓?Token 鍚楋紵`)) return;
 
       deleteTokensBatchBtn.disabled = true;
       try {
@@ -545,14 +545,14 @@ document.addEventListener("DOMContentLoaded", async () => {
           body: JSON.stringify({ ids: selectedIds }),
         });
         if (!res.ok) {
-          let detail = "批量删除失败";
+          let detail = "鎵归噺鍒犻櫎澶辫触";
           try {
             const body = await res.json();
             detail = body.detail || JSON.stringify(body);
           } catch (_) {
             detail = await res.text();
           }
-          throw new Error(detail || "批量删除失败");
+          throw new Error(detail || "鎵归噺鍒犻櫎澶辫触");
         }
 
         const data = await res.json();
@@ -564,14 +564,14 @@ document.addEventListener("DOMContentLoaded", async () => {
         const missingCount = Number(data.missing_count || 0);
         showToast(
           missingCount > 0
-            ? `批量删除完成：成功 ${deletedCount}，未找到 ${missingCount}`
-            : `批量删除完成：成功删除 ${deletedCount} 个 Token`,
+            ? `鎵归噺鍒犻櫎瀹屾垚锛氭垚鍔?${deletedCount}锛屾湭鎵惧埌 ${missingCount}`
+            : `鎵归噺鍒犻櫎瀹屾垚锛氭垚鍔熷垹闄?${deletedCount} 涓?Token`,
           false,
           { duration: 5000 }
         );
       } catch (err) {
-        alert(err.message || "批量删除失败");
-        showToast(err.message || "批量删除失败", true);
+        alert(err.message || "鎵归噺鍒犻櫎澶辫触");
+        showToast(err.message || "鎵归噺鍒犻櫎澶辫触", true);
       } finally {
         deleteTokensBatchBtn.disabled = false;
       }
@@ -591,18 +591,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
         if (!res.ok) {
           const txt = await res.text();
-          throw new Error(txt || "导出 Token 失败");
+          throw new Error(txt || "瀵煎嚭 Token 澶辫触");
         }
         const data = await res.json();
         const total = Number(data.total || 0);
         if (total <= 0) {
-          alert("没有可导出的 Token");
+          alert("娌℃湁鍙鍑虹殑 Token");
           return;
         }
         downloadJsonFile(`tokens-export-${nowStamp()}.json`, data);
-        alert(`导出成功：${total} 个 Token`);
+        alert(`瀵煎嚭鎴愬姛锛?{total} 涓?Token`);
       } catch (err) {
-        alert(err.message || "导出 Token 失败");
+        alert(err.message || "瀵煎嚭 Token 澶辫触");
       } finally {
         exportTokensBtn.disabled = false;
       }
@@ -622,12 +622,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         });
         if (!res.ok) {
           const txt = await res.text();
-          throw new Error(txt || "导出 Cookie 失败");
+          throw new Error(txt || "瀵煎嚭 Cookie 澶辫触");
         }
         const data = await res.json();
         const total = Number(data.total || 0);
         if (total <= 0) {
-          alert("没有可导出的 Cookie");
+          alert("娌℃湁鍙鍑虹殑 Cookie");
           return;
         }
         const output = {
@@ -642,9 +642,9 @@ document.addEventListener("DOMContentLoaded", async () => {
             : [],
         };
         downloadJsonFile(`refresh-cookies-export-${nowStamp()}.json`, output);
-        alert(`导出成功：${total} 个 Cookie`);
+        alert(`瀵煎嚭鎴愬姛锛?{total} 涓?Cookie`);
       } catch (err) {
-        alert(err.message || "导出 Cookie 失败");
+        alert(err.message || "瀵煎嚭 Cookie 澶辫触");
       } finally {
         exportCookiesBtn.disabled = false;
       }
@@ -700,6 +700,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   const logsPrevBtn = document.getElementById("logsPrevBtn");
   const logsNextBtn = document.getElementById("logsNextBtn");
   const logsPageInfo = document.getElementById("logsPageInfo");
+  const logsFailedOnly = document.getElementById("logsFailedOnly");
+  const logsFailedAccount = document.getElementById("logsFailedAccount");
+  const clearLogFiltersBtn = document.getElementById("clearLogFiltersBtn");
   const previewModal = document.getElementById("previewModal");
   const previewContent = document.getElementById("previewContent");
   const previewCloseBtn = document.getElementById("previewCloseBtn");
@@ -717,15 +720,92 @@ document.addEventListener("DOMContentLoaded", async () => {
   let logsTotalPages = 1;
   let logsRunningTotal = 0;
 
+  function getSelectedLogAccount() {
+    return String(logsFailedAccount?.value || "").trim();
+  }
+
+  function isFailedOnlyFilterEnabled() {
+    return Boolean(logsFailedOnly?.checked);
+  }
+
+  function getLogsQueryParams() {
+    const params = new URLSearchParams();
+    params.set("limit", String(LOGS_PAGE_SIZE));
+    params.set("page", String(logsCurrentPage));
+    if (isFailedOnlyFilterEnabled()) {
+      params.set("failed_only", "true");
+    }
+    const account = getSelectedLogAccount();
+    if (account) {
+      params.set("account", account);
+    }
+    return params;
+  }
+
+  function matchesLogAccount(item, account) {
+    const target = String(account || "").trim().toLowerCase();
+    if (!target) return true;
+    const values = [
+      item?.token_account_email,
+      item?.token_account_name,
+      item?.token_id,
+    ];
+    return values.some((value) => String(value || "").trim().toLowerCase() === target);
+  }
+
+  function buildFailedAccountOptionLabel(item) {
+    const email = String(item?.token_account_email || "").trim();
+    const name = String(item?.token_account_name || "").trim();
+    const tokenId = String(item?.token_id || "").trim();
+    const failedCount = Number(item?.failed_count || 0);
+    const primary = email || name || tokenId || "Unknown account";
+    const extra = [];
+    if (name && name !== primary) extra.push(name);
+    if (email && email !== primary) extra.push(email);
+    if (tokenId && tokenId !== primary) extra.push(`ID ${tokenId}`);
+    const suffix = failedCount > 0 ? ` (${failedCount})` : "";
+    return `${primary}${extra.length ? ` - ${extra.join(" | ")}` : ""}${suffix}`;
+  }
+
+  async function loadFailedAccounts() {
+    if (!logsFailedAccount) return;
+    const previousValue = getSelectedLogAccount();
+    try {
+      const res = await fetch("/api/v1/logs/failed-accounts?limit=200");
+      if (!res.ok) {
+        throw new Error("failed to load failed accounts");
+      }
+      const data = await res.json();
+      const items = Array.isArray(data?.items) ? data.items : [];
+      logsFailedAccount.innerHTML = '<option value="">全部账号</option>';
+      items.forEach((item) => {
+        const accountKey = String(item?.account_key || "").trim();
+        if (!accountKey) return;
+        const option = document.createElement("option");
+        option.value = accountKey;
+        option.textContent = buildFailedAccountOptionLabel(item);
+        logsFailedAccount.appendChild(option);
+      });
+      if (previousValue) {
+        const hasOption = Array.from(logsFailedAccount.options).some(
+          (option) => String(option.value || "").trim() === previousValue
+        );
+        logsFailedAccount.value = hasOption ? previousValue : "";
+      }
+    } catch (_) {
+      logsFailedAccount.innerHTML = '<option value="">全部账号</option>';
+    }
+  }
+
   if (testProxyBtn) {
-    testProxyBtn.textContent = "检测代理与业务权限";
+    testProxyBtn.textContent = "妫€娴嬩唬鐞嗕笌涓氬姟鏉冮檺";
     const proxyHelp = testProxyBtn.nextElementSibling;
     if (proxyHelp && proxyHelp.classList.contains("help")) {
-      proxyHelp.textContent = "会先检测基础代理和资源代理的网络连通性，再用当前有效 token 检测基础代理是否真的能访问积分接口。检测时会直接使用你当前表单里的值，不需要先保存配置。";
+      proxyHelp.textContent = "浼氬厛妫€娴嬪熀纭€浠ｇ悊鍜岃祫婧愪唬鐞嗙殑缃戠粶杩為€氭€э紝鍐嶇敤褰撳墠鏈夋晥 token 妫€娴嬪熀纭€浠ｇ悊鏄惁鐪熺殑鑳借闂Н鍒嗘帴鍙ｃ€傛娴嬫椂浼氱洿鎺ヤ娇鐢ㄤ綘褰撳墠琛ㄥ崟閲岀殑鍊硷紝涓嶉渶瑕佸厛淇濆瓨閰嶇疆銆?;
     }
   }
   if (proxyTestResult && !String(proxyTestResult.textContent || "").trim()) {
-    proxyTestResult.textContent = "点击上方按钮后，会在这里显示连通性检测和业务权限检测结果。";
+    proxyTestResult.textContent = "鐐瑰嚮涓婃柟鎸夐挳鍚庯紝浼氬湪杩欓噷鏄剧ず杩為€氭€ф娴嬪拰涓氬姟鏉冮檺妫€娴嬬粨鏋溿€?;
   }
 
   function switchConfigPane(targetId) {
@@ -789,19 +869,18 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (generatedUsageInfo) {
           const usageMb = Number(data.generated_usage_mb || 0);
           const fileCount = Number(data.generated_file_count || 0);
-          generatedUsageInfo.textContent = `当前占用：${Number.isFinite(usageMb) ? usageMb : 0} MB（${Number.isFinite(fileCount) ? fileCount : 0} 个文件）`;
+          generatedUsageInfo.textContent = `褰撳墠鍗犵敤锛?{Number.isFinite(usageMb) ? usageMb : 0} MB锛?{Number.isFinite(fileCount) ? fileCount : 0} 涓枃浠讹級`;
         }
       }
     } catch (err) {
-      console.error("加载配置失败", err);
+      console.error("鍔犺浇閰嶇疆澶辫触", err);
     }
   }
 
   saveConfigBtn.addEventListener("click", async () => {
     saveConfigBtn.disabled = true;
     try {
-      // 保留未在此页面显示的配置项
-      const currentRes = await fetch("/api/v1/config");
+      // 淇濈暀鏈湪姝ら〉闈㈡樉绀虹殑閰嶇疆椤?      const currentRes = await fetch("/api/v1/config");
       const currentData = await currentRes.json();
       
       const payload = {
@@ -838,49 +917,49 @@ document.addEventListener("DOMContentLoaded", async () => {
       };
 
       if (!payload.admin_username) {
-        throw new Error("管理员账号不能为空");
+        throw new Error("绠＄悊鍛樿处鍙蜂笉鑳戒负绌?);
       }
       if (!payload.admin_password) {
-        throw new Error("管理员密码不能为空");
+        throw new Error("绠＄悊鍛樺瘑鐮佷笉鑳戒负绌?);
       }
 
       if (!Number.isInteger(payload.refresh_interval_hours) || payload.refresh_interval_hours < 1 || payload.refresh_interval_hours > 24) {
-        throw new Error("自动刷新间隔必须是 1-24 的整数小时");
+        throw new Error("鑷姩鍒锋柊闂撮殧蹇呴』鏄?1-24 鐨勬暣鏁板皬鏃?);
       }
       if (!Number.isInteger(payload.batch_concurrency) || payload.batch_concurrency < 1 || payload.batch_concurrency > 100) {
-        throw new Error("批量导入/积分并发数必须是 1-100 的整数");
+        throw new Error("鎵归噺瀵煎叆/绉垎骞跺彂鏁板繀椤绘槸 1-100 鐨勬暣鏁?);
       }
       if (!Number.isInteger(payload.generated_max_size_mb) || payload.generated_max_size_mb < 100 || payload.generated_max_size_mb > 102400) {
-        throw new Error("生成文件空间上限必须是 100-102400 的整数 MB");
+        throw new Error("鐢熸垚鏂囦欢绌洪棿涓婇檺蹇呴』鏄?100-102400 鐨勬暣鏁?MB");
       }
       if (!Number.isInteger(payload.generated_prune_size_mb) || payload.generated_prune_size_mb < 10 || payload.generated_prune_size_mb > 10240) {
-        throw new Error("触发后清理量必须是 10-10240 的整数 MB");
+        throw new Error("瑙﹀彂鍚庢竻鐞嗛噺蹇呴』鏄?10-10240 鐨勬暣鏁?MB");
       }
       if (payload.generated_prune_size_mb >= payload.generated_max_size_mb) {
-        throw new Error("触发后清理量必须小于生成文件空间上限");
+        throw new Error("瑙﹀彂鍚庢竻鐞嗛噺蹇呴』灏忎簬鐢熸垚鏂囦欢绌洪棿涓婇檺");
       }
       if (payload.use_proxy && !/^https?:\/\//i.test(payload.proxy)) {
-        throw new Error("基础代理地址必须以 http:// 或 https:// 开头");
+        throw new Error("鍩虹浠ｇ悊鍦板潃蹇呴』浠?http:// 鎴?https:// 寮€澶?);
       }
       if (payload.resource_use_proxy && !/^https?:\/\//i.test(payload.resource_proxy)) {
-        throw new Error("资源代理地址必须以 http:// 或 https:// 开头");
+        throw new Error("璧勬簮浠ｇ悊鍦板潃蹇呴』浠?http:// 鎴?https:// 寮€澶?);
       }
       if (payload.imgbed_enabled) {
         if (!/^https?:\/\//i.test(payload.imgbed_api_url)) {
-          throw new Error("图床 API 地址必须以 http:// 或 https:// 开头");
+          throw new Error("鍥惧簥 API 鍦板潃蹇呴』浠?http:// 鎴?https:// 寮€澶?);
         }
         if (!payload.imgbed_api_key) {
-          throw new Error("开启图传模式时，图床密钥不能为空");
+          throw new Error("寮€鍚浘浼犳ā寮忔椂锛屽浘搴婂瘑閽ヤ笉鑳戒负绌?);
         }
       }
       if (!Number.isInteger(payload.retry_max_attempts) || payload.retry_max_attempts < 1 || payload.retry_max_attempts > 10) {
-        throw new Error("最大尝试次数必须是 1-10 的整数");
+        throw new Error("鏈€澶у皾璇曟鏁板繀椤绘槸 1-10 鐨勬暣鏁?);
       }
       if (!Number.isFinite(payload.retry_backoff_seconds) || payload.retry_backoff_seconds < 0 || payload.retry_backoff_seconds > 30) {
-        throw new Error("重试退避基数必须是 0-30 的数字");
+        throw new Error("閲嶈瘯閫€閬垮熀鏁板繀椤绘槸 0-30 鐨勬暟瀛?);
       }
       if (!["round_robin", "random"].includes(payload.token_rotation_strategy)) {
-        throw new Error("Token 轮换策略无效");
+        throw new Error("Token 杞崲绛栫暐鏃犳晥");
       }
 
       const res = await fetch("/api/v1/config", {
@@ -889,16 +968,16 @@ document.addEventListener("DOMContentLoaded", async () => {
         body: JSON.stringify(payload)
       });
       if (res.ok) {
-        showMsg(configMsg, "配置已保存", false);
-        showToast("配置已保存", false);
+        showMsg(configMsg, "閰嶇疆宸蹭繚瀛?, false);
+        showToast("閰嶇疆宸蹭繚瀛?, false);
         await loadConfig();
       } else {
-        showMsg(configMsg, "保存失败，请检查服务状态", true);
-        showToast("保存失败，请检查服务状态", true);
+        showMsg(configMsg, "淇濆瓨澶辫触锛岃妫€鏌ユ湇鍔＄姸鎬?, true);
+        showToast("淇濆瓨澶辫触锛岃妫€鏌ユ湇鍔＄姸鎬?, true);
       }
     } catch (err) {
       showMsg(configMsg, err.message, true);
-      showToast(err.message || "保存失败", true);
+      showToast(err.message || "淇濆瓨澶辫触", true);
     }
     saveConfigBtn.disabled = false;
   });
@@ -907,32 +986,32 @@ document.addEventListener("DOMContentLoaded", async () => {
     const data = item && typeof item === "object" ? item : {};
     const enabled = Boolean(data.enabled);
     const statusCode = data.status_code == null ? null : Number(data.status_code);
-    let statusText = "连接失败";
+    let statusText = "杩炴帴澶辫触";
     if (!enabled) {
-      statusText = "未启用";
+      statusText = "鏈惎鐢?;
     } else if (Boolean(data.ok)) {
-      statusText = "连接成功";
+      statusText = "杩炴帴鎴愬姛";
     } else if (statusCode != null) {
-      statusText = "目标已响应";
+      statusText = "鐩爣宸插搷搴?;
     }
     const elapsedText = Number.isFinite(Number(data.elapsed_ms))
       ? `${Number(data.elapsed_ms)} ms`
       : "-";
     const statusCodeText = statusCode == null ? "-" : String(statusCode);
-    const proxyText = String(data.proxy || "").trim() || "未填写";
+    const proxyText = String(data.proxy || "").trim() || "鏈～鍐?;
     const targetText = String(data.target_url || "").trim() || "-";
     let messageText = String(data.message || "").trim() || "-";
     if (enabled && statusCode != null && [401, 403].includes(statusCode)) {
-      messageText = "已收到上游响应，说明代理链路是通的；当前检测请求本身没有业务权限。";
+      messageText = "宸叉敹鍒颁笂娓稿搷搴旓紝璇存槑浠ｇ悊閾捐矾鏄€氱殑锛涘綋鍓嶆娴嬭姹傛湰韬病鏈変笟鍔℃潈闄愩€?;
     }
     return [
       `${title}`,
-      `状态：${statusText}`,
-      `代理地址：${proxyText}`,
-      `检测目标：${targetText}`,
-      `耗时：${elapsedText}`,
-      `HTTP 状态码：${statusCodeText}`,
-      `详细信息：${messageText}`,
+      `鐘舵€侊細${statusText}`,
+      `浠ｇ悊鍦板潃锛?{proxyText}`,
+      `妫€娴嬬洰鏍囷細${targetText}`,
+      `鑰楁椂锛?{elapsedText}`,
+      `HTTP 鐘舵€佺爜锛?{statusCodeText}`,
+      `璇︾粏淇℃伅锛?{messageText}`,
     ].join("\n");
   }
 
@@ -941,15 +1020,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     const enabled = Boolean(data.enabled);
     const hasToken = Boolean(String(data.token_id || "").trim());
     const statusCode = data.status_code == null ? null : Number(data.status_code);
-    let statusText = "检测失败";
+    let statusText = "妫€娴嬪け璐?;
     if (!enabled) {
-      statusText = "未启用";
+      statusText = "鏈惎鐢?;
     } else if (!hasToken) {
-      statusText = "未执行";
+      statusText = "鏈墽琛?;
     } else if (Boolean(data.ok)) {
-      statusText = "权限检测成功";
+      statusText = "鏉冮檺妫€娴嬫垚鍔?;
     } else if (statusCode != null) {
-      statusText = "权限检测失败";
+      statusText = "鏉冮檺妫€娴嬪け璐?;
     }
     const elapsedText = Number.isFinite(Number(data.elapsed_ms))
       ? `${Number(data.elapsed_ms)} ms`
@@ -962,15 +1041,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     const messageText = String(data.message || "").trim() || "-";
     return [
       `${title}`,
-      `状态：${statusText}`,
-      `检测目标：${String(data.target_url || "").trim() || "-"}`,
-      `耗时：${elapsedText}`,
-      `HTTP 状态码：${statusCodeText}`,
-      `Token ID：${tokenIdText}`,
-      `Token 来源：${tokenSourceText}`,
-      `Token 预览：${tokenPreviewText}`,
-      `Account ID：${accountIdText}`,
-      `详细信息：${messageText}`,
+      `鐘舵€侊細${statusText}`,
+      `妫€娴嬬洰鏍囷細${String(data.target_url || "").trim() || "-"}`,
+      `鑰楁椂锛?{elapsedText}`,
+      `HTTP 鐘舵€佺爜锛?{statusCodeText}`,
+      `Token ID锛?{tokenIdText}`,
+      `Token 鏉ユ簮锛?{tokenSourceText}`,
+      `Token 棰勮锛?{tokenPreviewText}`,
+      `Account ID锛?{accountIdText}`,
+      `璇︾粏淇℃伅锛?{messageText}`,
     ].join("\n");
   }
 
@@ -983,26 +1062,26 @@ document.addEventListener("DOMContentLoaded", async () => {
       ? data.business
       : {};
     const connectivitySections = [
-      formatProxyConnectivityItem("基础代理", connectivity.basic),
-      formatProxyConnectivityItem("资源代理", connectivity.resource),
+      formatProxyConnectivityItem("鍩虹浠ｇ悊", connectivity.basic),
+      formatProxyConnectivityItem("璧勬簮浠ｇ悊", connectivity.resource),
     ];
     const businessSections = [
-      formatProxyBusinessItem("基础代理业务权限", business.basic),
+      formatProxyBusinessItem("鍩虹浠ｇ悊涓氬姟鏉冮檺", business.basic),
     ];
     return [
-      "代理检测结果",
+      "浠ｇ悊妫€娴嬬粨鏋?,
       "",
-      "一、连通性检测",
+      "涓€銆佽繛閫氭€ф娴?,
       connectivitySections.join("\n\n"),
       "",
-      "二、业务权限检测",
+      "浜屻€佷笟鍔℃潈闄愭娴?,
       businessSections.join("\n\n"),
     ].join("\n");
   }
 
   async function handleProxyTest() {
     if (proxyTestResult) {
-      proxyTestResult.textContent = "正在检测代理连通性和业务权限，请稍候...";
+      proxyTestResult.textContent = "姝ｅ湪妫€娴嬩唬鐞嗚繛閫氭€у拰涓氬姟鏉冮檺锛岃绋嶅€?..";
     }
     const payload = {
       use_proxy: confUseProxy.checked,
@@ -1011,10 +1090,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       resource_proxy: confResourceProxy.value.trim(),
     };
     if (payload.use_proxy && !/^https?:\/\//i.test(payload.proxy)) {
-      throw new Error("基础代理地址必须以 http:// 或 https:// 开头");
+      throw new Error("鍩虹浠ｇ悊鍦板潃蹇呴』浠?http:// 鎴?https:// 寮€澶?);
     }
     if (payload.resource_use_proxy && !/^https?:\/\//i.test(payload.resource_proxy)) {
-      throw new Error("资源代理地址必须以 http:// 或 https:// 开头");
+      throw new Error("璧勬簮浠ｇ悊鍦板潃蹇呴』浠?http:// 鎴?https:// 寮€澶?);
     }
     const res = await fetch("/api/v1/proxy/test", {
       method: "POST",
@@ -1023,29 +1102,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.detail || "代理与业务权限检测失败");
+      throw new Error(data.detail || "浠ｇ悊涓庝笟鍔℃潈闄愭娴嬪け璐?);
     }
     if (proxyTestResult) {
       proxyTestResult.textContent = formatProxyTestResult(data);
     }
-    showToast("代理与业务权限检测已完成", false);
+    showToast("浠ｇ悊涓庝笟鍔℃潈闄愭娴嬪凡瀹屾垚", false);
   }
 
   if (testProxyBtn) {
     testProxyBtn.addEventListener("click", async () => {
       testProxyBtn.disabled = true;
       if (proxyTestResult) {
-        proxyTestResult.textContent = "正在检测代理连通性和业务权限，请稍候...";
+        proxyTestResult.textContent = "姝ｅ湪妫€娴嬩唬鐞嗚繛閫氭€у拰涓氬姟鏉冮檺锛岃绋嶅€?..";
       }
       try {
         await handleProxyTest();
       } catch (err) {
         if (proxyTestResult) {
           proxyTestResult.textContent = String(
-            err?.message || err || "代理与业务权限检测失败"
+            err?.message || err || "浠ｇ悊涓庝笟鍔℃潈闄愭娴嬪け璐?
           );
         }
-        showToast(err.message || "代理与业务权限检测失败", true);
+        showToast(err.message || "浠ｇ悊涓庝笟鍔℃潈闄愭娴嬪け璐?, true);
       } finally {
         testProxyBtn.disabled = false;
       }
@@ -1117,11 +1196,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         try {
           parsed = JSON.parse(trimmed);
         } catch (_) {
-          throw new Error(`文件 ${file.name} 不是有效 JSON`);
+          throw new Error(`鏂囦欢 ${file.name} 涓嶆槸鏈夋晥 JSON`);
         }
         const parsedTokens = parseTokenJsonPayload(parsed);
         if (!parsedTokens.length) {
-          throw new Error(`文件 ${file.name} 未找到可用 token`);
+          throw new Error(`鏂囦欢 ${file.name} 鏈壘鍒板彲鐢?token`);
         }
         fileTokens.push(...parsedTokens);
         continue;
@@ -1205,11 +1284,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       return value.map((item, idx) => {
         if (!item || typeof item !== "object") {
-          throw new Error(`第 ${idx + 1} 项不是对象`);
+          throw new Error(`绗?${idx + 1} 椤逛笉鏄璞);
         }
         const cookie = cookieToHeaderString(item.cookie != null ? item.cookie : item.cookies != null ? item.cookies : item);
         if (!cookie) {
-          throw new Error(`第 ${idx + 1} 项缺少 cookie`);
+          throw new Error(`绗?${idx + 1} 椤圭己灏?cookie`);
         }
         return {
           name: String(item.name || "").trim() || null,
@@ -1220,18 +1299,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (value && typeof value === "object") {
       if (Array.isArray(value.items)) return toCookieBatchItems(value.items);
       const cookie = cookieToHeaderString(value.cookie != null ? value.cookie : value.cookies != null ? value.cookies : value);
-      if (!cookie) throw new Error("cookie 内容为空");
+      if (!cookie) throw new Error("cookie 鍐呭涓虹┖");
       return [{ name: String(value.name || "").trim() || null, cookie }];
     }
     const cookie = cookieToHeaderString(value);
-    if (!cookie) throw new Error("cookie 内容为空");
+    if (!cookie) throw new Error("cookie 鍐呭涓虹┖");
     return [{ name: null, cookie }];
   }
 
   async function importCookies() {
     const text = String(cookieInput?.value || "").trim();
     if (!text) {
-      showMsg(refreshMsg, "请先粘贴或上传 Cookie", true);
+      showMsg(refreshMsg, "璇峰厛绮樿创鎴栦笂浼?Cookie", true);
       return;
     }
 
@@ -1245,12 +1324,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       items = toCookieBatchItems(parsed);
     } catch (err) {
-      showMsg(refreshMsg, err.message || "Cookie 解析失败", true);
+      showMsg(refreshMsg, err.message || "Cookie 瑙ｆ瀽澶辫触", true);
       return;
     }
 
     if (!items.length) {
-      showMsg(refreshMsg, "未找到可导入的 Cookie", true);
+      showMsg(refreshMsg, "鏈壘鍒板彲瀵煎叆鐨?Cookie", true);
       return;
     }
 
@@ -1270,7 +1349,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const updateImportProgress = () => {
         showMsg(
           refreshMsg,
-          `已解析 ${progress.total} 个 Cookie，处理中 ${progress.completed}/${progress.total}，导入成功 ${progress.imported}，导入失败 ${progress.failed}，刷新失败 ${progress.refreshFailed}（并行 ${workerCount} 个）...`,
+          `宸茶В鏋?${progress.total} 涓?Cookie锛屽鐞嗕腑 ${progress.completed}/${progress.total}锛屽鍏ユ垚鍔?${progress.imported}锛屽鍏ュけ璐?${progress.failed}锛屽埛鏂板け璐?${progress.refreshFailed}锛堝苟琛?${workerCount} 涓級...`,
           progress.failed > 0 || progress.refreshFailed > 0,
           { duration: 0 }
         );
@@ -1283,7 +1362,7 @@ document.addEventListener("DOMContentLoaded", async () => {
           body: JSON.stringify({ cookie: item.cookie, name: item.name || null }),
         });
         if (!res.ok) {
-          let detailText = "Cookie 导入失败";
+          let detailText = "Cookie 瀵煎叆澶辫触";
           try {
             const body = await res.json();
             if (typeof body?.detail === "string") detailText = body.detail;
@@ -1326,7 +1405,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (items.length > 1) {
         showMsg(
           refreshMsg,
-          `批量 Cookie 导入完成：成功 ${progress.imported}，导入失败 ${progress.failed}，刷新失败 ${progress.refreshFailed}`,
+          `鎵归噺 Cookie 瀵煎叆瀹屾垚锛氭垚鍔?${progress.imported}锛屽鍏ュけ璐?${progress.failed}锛屽埛鏂板け璐?${progress.refreshFailed}`,
           progress.failed > 0 || progress.refreshFailed > 0,
           { duration: 8000 }
         );
@@ -1337,16 +1416,16 @@ document.addEventListener("DOMContentLoaded", async () => {
           throw singleResult.error;
         }
         if (refreshError) {
-          showMsg(refreshMsg, `Cookie 导入成功，但自动刷新失败：${refreshError}`, true, { duration: 8000 });
+          showMsg(refreshMsg, `Cookie 瀵煎叆鎴愬姛锛屼絾鑷姩鍒锋柊澶辫触锛?{refreshError}`, true, { duration: 8000 });
         } else {
-          showMsg(refreshMsg, "Cookie 导入成功，并已自动刷新", false, { duration: 8000 });
+          showMsg(refreshMsg, "Cookie 瀵煎叆鎴愬姛锛屽苟宸茶嚜鍔ㄥ埛鏂?, false, { duration: 8000 });
         }
       }
       if (cookieInput) cookieInput.value = "";
       if (cookieFile) cookieFile.value = "";
       await loadTokens();
     } catch (err) {
-      showMsg(refreshMsg, err.message || "Cookie 导入失败", true, { duration: 8000 });
+      showMsg(refreshMsg, err.message || "Cookie 瀵煎叆澶辫触", true, { duration: 8000 });
     } finally {
       if (importCookieBtn) importCookieBtn.disabled = false;
     }
@@ -1360,7 +1439,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (files.length === 1) {
           const text = await files[0].text();
           if (cookieInput) cookieInput.value = text;
-          showMsg(refreshMsg, `已读取 1 个文件：${files[0].name}`, false, { duration: 5000 });
+          showMsg(refreshMsg, `宸茶鍙?1 涓枃浠讹細${files[0].name}`, false, { duration: 5000 });
           return;
         }
 
@@ -1384,9 +1463,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (cookieInput) {
           cookieInput.value = JSON.stringify(items, null, 2);
         }
-        showMsg(refreshMsg, `已读取 ${files.length} 个文件，解析出 ${items.length} 个 Cookie`, false, { duration: 6000 });
+        showMsg(refreshMsg, `宸茶鍙?${files.length} 涓枃浠讹紝瑙ｆ瀽鍑?${items.length} 涓?Cookie`, false, { duration: 6000 });
       } catch (err) {
-        showMsg(refreshMsg, "读取 Cookie 文件失败", true);
+        showMsg(refreshMsg, "璇诲彇 Cookie 鏂囦欢澶辫触", true);
       }
     });
   }
@@ -1398,9 +1477,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!logsTbody) return;
     try {
       const rangeValue = logStatsRange ? String(logStatsRange.value || "today") : "today";
+      const logParams = getLogsQueryParams();
       const [runningResult, logsResult, statsResult] = await Promise.allSettled([
         fetch("/api/v1/logs/running?limit=200"),
-        fetch(`/api/v1/logs?limit=${LOGS_PAGE_SIZE}&page=${logsCurrentPage}`),
+        fetch(`/api/v1/logs?${logParams.toString()}`),
         fetch(`/api/v1/logs/stats?range=${encodeURIComponent(rangeValue)}`),
       ]);
 
@@ -1411,13 +1491,14 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       if (logsResult.status !== "fulfilled" || !logsResult.value.ok) {
-        throw new Error("加载日志失败");
+        throw new Error("鍔犺浇鏃ュ織澶辫触");
       }
 
       const logsData = await logsResult.value.json();
       logsCurrentPage = Math.max(1, Number(logsData.page || logsCurrentPage || 1));
       logsTotalPages = Math.max(1, Number(logsData.total_pages || 1));
       renderLogsPagination();
+      await loadFailedAccounts();
       renderLogs(logsData.logs || [], runningItems);
 
       if (statsResult.status === "fulfilled" && statsResult.value.ok) {
@@ -1427,7 +1508,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         renderLogStats(null);
       }
     } catch (err) {
-      logsTbody.innerHTML = `<tr><td colspan="8" class="empty-state" style="color: #ffb4bc;">${err.message || "日志加载失败"}</td></tr>`;
+      logsTbody.innerHTML = `<tr><td colspan="8" class="empty-state" style="color: #ffb4bc;">${err.message || "鏃ュ織鍔犺浇澶辫触"}</td></tr>`;
       logsRunningTotal = 0;
       logsTotalPages = Math.max(1, logsCurrentPage || 1);
       renderLogsPagination();
@@ -1448,14 +1529,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (!logStatsUpdatedAt) return;
     if (!stats) {
-      logStatsUpdatedAt.textContent = "统计信息暂不可用";
+      logStatsUpdatedAt.textContent = "缁熻淇℃伅鏆備笉鍙敤";
       return;
     }
 
-    const selectedLabel = logStatsRange?.selectedOptions?.[0]?.textContent || "当前范围";
+    const selectedLabel = logStatsRange?.selectedOptions?.[0]?.textContent || "褰撳墠鑼冨洿";
     const endTs = Number(stats.end_ts || 0);
     const updatedText = endTs > 0 ? new Date(endTs * 1000).toLocaleString() : "-";
-    logStatsUpdatedAt.textContent = `${selectedLabel}统计，更新于 ${updatedText}`;
+    logStatsUpdatedAt.textContent = `${selectedLabel}缁熻锛屾洿鏂颁簬 ${updatedText}`;
   }
 
   function renderLogsPagination() {
@@ -1465,7 +1546,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     logsTotalPages = safeTotalPages;
 
     if (logsPageInfo) {
-      logsPageInfo.textContent = `第 ${safeCurrent} / ${safeTotalPages} 页`;
+      logsPageInfo.textContent = `绗?${safeCurrent} / ${safeTotalPages} 椤礰;
     }
     if (logsPrevBtn) {
       logsPrevBtn.disabled = safeCurrent <= 1;
@@ -1488,13 +1569,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     const isSuccess = !isRunning && !isFailed;
     const stateClass = isRunning ? "running" : (isFailed ? "failed" : "success");
     const stateLabel = isRunning
-      ? "进行中"
-      : (isFailed ? `错误 ${status || "-"}` : "已完成");
+      ? "杩涜涓?
+      : (isFailed ? `閿欒 ${status || "-"}` : "宸插畬鎴?);
     const stateIcon = isRunning
       ? `<span class="icon-spinner" aria-hidden="true"></span>`
       : (isFailed
         ? `<span class="icon-error" aria-hidden="true">!</span>`
-        : `<span class="icon-check" aria-hidden="true">✓</span>`);
+        : `<span class="icon-check" aria-hidden="true">鉁?/span>`);
     const errCode = String(item.error_code || "").trim();
     const failedStatusText = status > 0 ? String(status) : "-";
     const failedStateContent = errCode
@@ -1514,10 +1595,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     const tokenSource = String(item.token_source || "").trim();
     const tokenAttempt = Number(item.token_attempt || 0);
     const tokenTitleParts = [];
-    if (tokenName) tokenTitleParts.push(`账号: ${tokenName}`);
+    if (tokenName) tokenTitleParts.push(`璐﹀彿: ${tokenName}`);
     if (tokenId) tokenTitleParts.push(`ID: ${tokenId}`);
-    if (tokenSource) tokenTitleParts.push(`来源: ${tokenSource}`);
-    if (tokenAttempt > 0) tokenTitleParts.push(`尝试: 第${tokenAttempt}次`);
+    if (tokenSource) tokenTitleParts.push(`鏉ユ簮: ${tokenSource}`);
+    if (tokenAttempt > 0) tokenTitleParts.push(`灏濊瘯: 绗?{tokenAttempt}娆);
     const tokenTitle = escapeHtml(tokenTitleParts.join(" | "));
     const accountParts = [];
     accountParts.push(
@@ -1531,7 +1612,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const promptSummary = buildPromptSummary(promptText);
     const tokenCell = `<div class="log-account-cell">${accountParts.join("<br>")}</div>`;
     const previewCell = previewUrl
-      ? `<button class="small preview-btn" data-url="${encodeURIComponent(previewUrl)}" data-kind="${previewKind || ""}">查看</button>`
+      ? `<button class="small preview-btn" data-url="${encodeURIComponent(previewUrl)}" data-kind="${previewKind || ""}">鏌ョ湅</button>`
       : `<span style="color:#7f96ad;">-</span>`;
     const modelTitle = escapeHtml([modelText, modelParamsText].filter(Boolean).join(" | "));
     const modelCell = `
@@ -1559,7 +1640,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearTimeout(logsAutoTimer);
       logsAutoTimer = null;
     }
-    const runningRows = Array.isArray(runningItems) ? runningItems : [];
+    const selectedAccount = getSelectedLogAccount();
+    const runningRows = isFailedOnlyFilterEnabled()
+      ? []
+      : (Array.isArray(runningItems) ? runningItems : []).filter((item) =>
+          matchesLogAccount(item, selectedAccount)
+        );
     logsRunningTotal = runningRows.length;
     const allRows = [
       ...runningRows,
@@ -1567,7 +1653,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     ];
 
     if (!allRows.length) {
-      logsTbody.innerHTML = `<tr><td colspan="8" class="empty-state">暂无请求日志</td></tr>`;
+      logsTbody.innerHTML = `<tr><td colspan="8" class="empty-state">鏆傛棤璇锋眰鏃ュ織</td></tr>`;
       return;
     }
 
@@ -1629,7 +1715,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!errorDetailModal || !errorDetailContent || !errorDetailCode) return;
     errorDetailModal.classList.remove("open");
     errorDetailModal.setAttribute("aria-hidden", "true");
-    errorDetailCode.textContent = "错误信息";
+    errorDetailCode.textContent = "閿欒淇℃伅";
     errorDetailContent.innerHTML = "";
   }
 
@@ -1643,21 +1729,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function openErrorDetailByCode(code) {
     const errCode = String(code || "").trim();
     if (!errCode || !errorDetailModal || !errorDetailCode || !errorDetailContent) return;
-    errorDetailCode.textContent = "错误信息";
-    errorDetailContent.innerHTML = `<pre>加载中...</pre>`;
+    errorDetailCode.textContent = "閿欒淇℃伅";
+    errorDetailContent.innerHTML = `<pre>鍔犺浇涓?..</pre>`;
     errorDetailModal.classList.add("open");
     errorDetailModal.setAttribute("aria-hidden", "false");
     try {
       const res = await fetch(`/api/v1/logs/errors/${encodeURIComponent(errCode)}`);
       if (!res.ok) {
         const txt = await res.text();
-        throw new Error(txt || `获取错误详情失败 (${res.status})`);
+        throw new Error(txt || `鑾峰彇閿欒璇︽儏澶辫触 (${res.status})`);
       }
       const data = await res.json();
-      const message = String(data?.message || "").trim() || "暂无错误信息";
+      const message = String(data?.message || "").trim() || "鏆傛棤閿欒淇℃伅";
       errorDetailContent.innerHTML = `<pre>${escapeHtml(message)}</pre>`;
     } catch (err) {
-      errorDetailContent.innerHTML = `<pre>${escapeHtml(err.message || "获取错误详情失败")}</pre>`;
+      errorDetailContent.innerHTML = `<pre>${escapeHtml(err.message || "鑾峰彇閿欒璇︽儏澶辫触")}</pre>`;
     }
   }
 
@@ -1679,7 +1765,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (mediaKind === "video") {
       previewContent.innerHTML = `<video controls autoplay playsinline src="${url}"></video>`;
     } else {
-      previewContent.innerHTML = `<img src="${url}" alt="预览图" />`;
+      previewContent.innerHTML = `<img src="${url}" alt="棰勮鍥? />`;
     }
     if (previewDownloadBtn) {
       previewDownloadBtn.setAttribute("href", url);
@@ -1691,7 +1777,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function openPromptDetail(text) {
     if (!promptDetailModal || !promptDetailContent) return;
-    promptDetailContent.textContent = String(text || "").trim() || "暂无提示词";
+    promptDetailContent.textContent = String(text || "").trim() || "鏆傛棤鎻愮ず璇?;
     promptDetailModal.classList.add("open");
     promptDetailModal.setAttribute("aria-hidden", "false");
   }
@@ -1769,6 +1855,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  if (logsFailedOnly) {
+    logsFailedOnly.addEventListener("change", () => {
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
+  if (logsFailedAccount) {
+    logsFailedAccount.addEventListener("change", () => {
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
+  if (clearLogFiltersBtn) {
+    clearLogFiltersBtn.addEventListener("click", () => {
+      if (logsFailedOnly) logsFailedOnly.checked = false;
+      if (logsFailedAccount) logsFailedAccount.value = "";
+      logsCurrentPage = 1;
+      loadLogs();
+    });
+  }
+
   if (logStatsRange) {
     logStatsRange.addEventListener("change", () => {
       logsCurrentPage = 1;
@@ -1810,14 +1919,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (clearLogsBtn) {
     clearLogsBtn.addEventListener("click", async () => {
-      if (!confirm("确定清空请求日志吗？")) return;
+      if (!confirm("纭畾娓呯┖璇锋眰鏃ュ織鍚楋紵")) return;
       try {
         const res = await fetch("/api/v1/logs", { method: "DELETE" });
-        if (!res.ok) throw new Error("清空失败");
+        if (!res.ok) throw new Error("娓呯┖澶辫触");
         logsCurrentPage = 1;
         loadLogs();
       } catch (err) {
-        alert(err.message || "清空失败");
+        alert(err.message || "娓呯┖澶辫触");
       }
     });
   }
@@ -1864,3 +1973,4 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadConfig();
   renderLogsPagination();
 });
+

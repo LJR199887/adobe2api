@@ -237,9 +237,20 @@ def build_admin_router(
         return FileResponse(static_dir / "admin.html")
 
     @router.get("/api/v1/logs")
-    def list_logs(request: Request, limit: int = 20, page: int = 1):
+    def list_logs(
+        request: Request,
+        limit: int = 20,
+        page: int = 1,
+        failed_only: bool = False,
+        account: str = "",
+    ):
         require_admin_auth(request)
-        logs, total = log_store.list(limit=limit, page=page)
+        logs, total = log_store.list(
+            limit=limit,
+            page=page,
+            failed_only=bool(failed_only),
+            account=str(account or "").strip(),
+        )
         safe_limit = min(max(int(limit or 20), 1), 100)
         safe_page = max(int(page or 1), 1)
         total_pages = (total + safe_limit - 1) // safe_limit if total > 0 else 1
@@ -251,7 +262,17 @@ def build_admin_router(
             "limit": safe_limit,
             "total": total,
             "total_pages": total_pages,
+            "filters": {
+                "failed_only": bool(failed_only),
+                "account": str(account or "").strip(),
+            },
         }
+
+    @router.get("/api/v1/logs/failed-accounts")
+    def list_failed_accounts(request: Request, limit: int = 200):
+        require_admin_auth(request)
+        items = log_store.list_failed_accounts(limit=limit)
+        return {"items": items, "total": len(items)}
 
     @router.get("/api/v1/logs/errors/{code}")
     def get_error_detail(code: str, request: Request):

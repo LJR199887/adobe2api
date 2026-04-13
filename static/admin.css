@@ -404,25 +404,6 @@ button.small:hover {
   margin-bottom: 10px;
 }
 
-.logs-filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 0 0 14px;
-}
-
-.logs-filter-checkbox {
-  min-height: 36px;
-  padding-right: 4px;
-  color: #cce0f5;
-}
-
-.logs-filter-bar .input-select {
-  min-width: 260px;
-  max-width: 100%;
-}
-
 .stat-card {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1003,15 +984,6 @@ td input[type="checkbox"] {
     width: 100%;
     flex-wrap: wrap;
     gap: 10px;
-  }
-
-  .logs-filter-bar {
-    align-items: stretch;
-  }
-
-  .logs-filter-bar .input-select,
-  .logs-filter-bar button {
-    width: 100%;
   }
 }
 

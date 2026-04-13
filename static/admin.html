@@ -1,13 +1,13 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Adobe2API 鎺у埗鍙?/title>
+  <title>Adobe2API 控制台</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/admin.css?v=20260413-1" />
+  <link rel="stylesheet" href="/static/admin.css?v=20260302-4" />
 </head>
 <body>
   <div class="bg-orb bg-orb-a"></div>
@@ -16,66 +16,66 @@
   <main class="shell">
     <header class="header card" style="text-align: center; padding-bottom: 16px;">
       <h1 style="font-size: 24px; font-weight: 800; letter-spacing: 0.05em;">Adobe2API</h1>
-      <p class="muted" style="margin-top: 4px;">Firefly 鍥惧儚鐢熸垚 API 涓浆鏈嶅姟</p>
+      <p class="muted" style="margin-top: 4px;">Firefly 图像生成 API 中转服务</p>
     </header>
 
     <div class="tabs">
-      <button class="tab-btn active" data-target="tokens">Token 绠＄悊</button>
-      <button class="tab-btn" data-target="config">绯荤粺閰嶇疆</button>
-      <button class="tab-btn" data-target="logs">璇锋眰鏃ュ織</button>
+      <button class="tab-btn active" data-target="tokens">Token 管理</button>
+      <button class="tab-btn" data-target="config">系统配置</button>
+      <button class="tab-btn" data-target="logs">请求日志</button>
     </div>
 
     <!-- Tokens Tab -->
     <div id="tokens" class="tab-pane active">
       <section class="card quick-actions-card">
-        <h2>蹇嵎鎿嶄綔</h2>
+        <h2>快捷操作</h2>
         <div class="actions">
-          <button id="openAddTokenModalBtn">娣诲姞 Token</button>
-          <button id="openCookieImportBtn" class="secondary">瀵煎叆 Cookie</button>
+          <button id="openAddTokenModalBtn">添加 Token</button>
+          <button id="openCookieImportBtn" class="secondary">导入 Cookie</button>
         </div>
       </section>
 
       <section class="token-list-card card">
         <div class="list-head">
-          <h2>Token 璐﹀彿姹?/h2>
+          <h2>Token 账号池</h2>
           <div class="actions">
-            <button id="exportTokensBtn" class="secondary">瀵煎嚭 Token</button>
-            <button id="exportCookiesBtn" class="secondary">瀵煎嚭 Cookie</button>
-            <button id="deleteTokensBatchBtn" class="danger">鎵归噺鍒犻櫎</button>
-            <button id="refreshCreditsBatchBtn" class="secondary">鎵归噺鍒锋柊绉垎</button>
-            <button id="refreshBtn" class="secondary">鍒锋柊鍒楄〃</button>
+            <button id="exportTokensBtn" class="secondary">导出 Token</button>
+            <button id="exportCookiesBtn" class="secondary">导出 Cookie</button>
+            <button id="deleteTokensBatchBtn" class="danger">批量删除</button>
+            <button id="refreshCreditsBatchBtn" class="secondary">批量刷新积分</button>
+            <button id="refreshBtn" class="secondary">刷新列表</button>
           </div>
         </div>
         <div id="tokenSummary" class="token-summary">
-          <span>Token 鎬绘暟锛?strong id="tokenTotalCount">0</strong></span>
-          <span>褰撳墠鐢熸晥锛?strong id="tokenActiveCount">0</strong></span>
+          <span>Token 总数：<strong id="tokenTotalCount">0</strong></span>
+          <span>当前生效：<strong id="tokenActiveCount">0</strong></span>
         </div>
         <div class="table-wrapper">
           <table id="tokenTable">
             <thead>
               <tr>
-                <th><input id="tokenSelectAll" type="checkbox" title="鍏ㄩ€?鍙栨秷鍏ㄩ€? /></th>
-                <th>璐﹀彿</th>
-                <th>Token (鑴辨晱灞曠ず)</th>
-                <th>鐘舵€?/th>
-                <th>鑷姩鍒锋柊</th>
-                <th>绉垎</th>
-                <th>澶辫触娆℃暟</th>
-                <th>鏈夋晥鏈?/th>
-                <th>鎿嶄綔</th>
+                <th><input id="tokenSelectAll" type="checkbox" title="全选/取消全选" /></th>
+                <th>账号</th>
+                <th>Token (脱敏展示)</th>
+                <th>状态</th>
+                <th>自动刷新</th>
+                <th>积分</th>
+                <th>失败次数</th>
+                <th>有效期</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td colspan="9" class="empty-state">鍔犺浇涓?..</td>
+                <td colspan="9" class="empty-state">加载中...</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div id="tokenPagination" class="logs-pagination" style="display:none;">
-          <button id="tokenPrevBtn" class="secondary small" type="button">涓婁竴椤?/button>
-          <span id="tokenPageInfo" class="help">绗?1 / 1 椤?/span>
-          <button id="tokenNextBtn" class="secondary small" type="button">涓嬩竴椤?/button>
+          <button id="tokenPrevBtn" class="secondary small" type="button">上一页</button>
+          <span id="tokenPageInfo" class="help">第 1 / 1 页</span>
+          <button id="tokenNextBtn" class="secondary small" type="button">下一页</button>
         </div>
       </section>
     </div>
@@ -83,38 +83,38 @@
     <!-- Config Tab -->
     <div id="config" class="tab-pane">
       <section class="config-card card">
-        <h2>缃戠粶涓庝唬鐞嗚缃?/h2>
+        <h2>网络与代理设置</h2>
         <div class="config-form">
-          <div class="config-category-tabs" role="tablist" aria-label="閰嶇疆鍒嗙被">
-            <button class="config-cat-btn active" type="button" data-target="cfg-account">璐︽埛涓庡畨鍏?/button>
-            <button class="config-cat-btn" type="button" data-target="cfg-network">浠ｇ悊涓庣綉缁?/button>
-            <button class="config-cat-btn" type="button" data-target="cfg-retry">閲嶈瘯涓庡閿?/button>
-            <button class="config-cat-btn" type="button" data-target="cfg-storage">鍒锋柊涓庡瓨鍌?/button>
+          <div class="config-category-tabs" role="tablist" aria-label="配置分类">
+            <button class="config-cat-btn active" type="button" data-target="cfg-account">账户与安全</button>
+            <button class="config-cat-btn" type="button" data-target="cfg-network">代理与网络</button>
+            <button class="config-cat-btn" type="button" data-target="cfg-retry">重试与容错</button>
+            <button class="config-cat-btn" type="button" data-target="cfg-storage">刷新与存储</button>
           </div>
 
           <section id="cfg-account" class="config-cat-pane active">
             <div class="form-group">
-              <label for="confApiKey">鏈嶅姟 API Key</label>
-              <input type="text" id="confApiKey" class="input-text" placeholder="鐣欑┖琛ㄧず涓嶉壌鏉冿紝渚嬪锛歮y-secret-key" />
-              <p class="help">鐢ㄤ簬璁块棶鏈湇鍔℃帴鍙ｏ紙濡?/v1/images/generations锛夈€傛敮鎸?Bearer 鎴?X-API-Key銆?/p>
+              <label for="confApiKey">服务 API Key</label>
+              <input type="text" id="confApiKey" class="input-text" placeholder="留空表示不鉴权，例如：my-secret-key" />
+              <p class="help">用于访问本服务接口（如 /v1/images/generations）。支持 Bearer 或 X-API-Key。</p>
             </div>
 
             <div class="form-group">
-              <label for="confAdminUsername">绠＄悊鍛樿处鍙?/label>
-              <input type="text" id="confAdminUsername" class="input-text" placeholder="榛樿 admin" />
-              <p class="help">绠＄悊鍚庡彴鐧诲綍璐﹀彿銆?/p>
+              <label for="confAdminUsername">管理员账号</label>
+              <input type="text" id="confAdminUsername" class="input-text" placeholder="默认 admin" />
+              <p class="help">管理后台登录账号。</p>
             </div>
 
             <div class="form-group">
-              <label for="confAdminPassword">绠＄悊鍛樺瘑鐮?/label>
-              <input type="password" id="confAdminPassword" class="input-text" placeholder="榛樿 admin" />
-              <p class="help">绠＄悊鍚庡彴鐧诲綍瀵嗙爜銆?/p>
+              <label for="confAdminPassword">管理员密码</label>
+              <input type="password" id="confAdminPassword" class="input-text" placeholder="默认 admin" />
+              <p class="help">管理后台登录密码。</p>
             </div>
 
             <div class="form-group">
-              <label for="confPublicBaseUrl">鍏叡 URL (Public Base URL)</label>
-              <input type="text" id="confPublicBaseUrl" class="input-text" placeholder="渚嬪锛歨ttp://127.0.0.1:6001/ 鎴?https://your-domain/antigravity" />
-              <p class="help">鐢ㄤ簬鐢熸垚鍥剧墖/瑙嗛棰勮鐨勭粷瀵归摼鎺ャ€傚缓璁～鍐欏閮ㄥ彲璁块棶鍦板潃銆?/p>
+              <label for="confPublicBaseUrl">公共 URL (Public Base URL)</label>
+              <input type="text" id="confPublicBaseUrl" class="input-text" placeholder="例如：http://127.0.0.1:6001/ 或 https://your-domain/antigravity" />
+              <p class="help">用于生成图片/视频预览的绝对链接。建议填写外部可访问地址。</p>
             </div>
           </section>
 
@@ -122,39 +122,39 @@
             <div class="form-group">
               <label class="checkbox-label" style="user-select: none;">
                 <input type="checkbox" id="confUseProxy" />
-                鍚敤鍩虹浠ｇ悊
+                启用基础代理
               </label>
-              <p class="help">鍩虹浠ｇ悊鐢ㄤ簬鍙戦€佺敓鎴愩€佽疆璇€佸埛鏂扮Н鍒嗚繖绫烩€滃姙鐞嗕笟鍔♀€濈殑璇锋眰銆?/p>
+              <p class="help">基础代理用于发送生成、轮询、刷新积分这类“办理业务”的请求。</p>
             </div>
 
             <div class="form-group">
-              <label for="confProxy">鍩虹浠ｇ悊鍦板潃 (Proxy URL)</label>
-              <input type="text" id="confProxy" class="input-text" placeholder="渚嬪锛歨ttp://127.0.0.1:7890" />
+              <label for="confProxy">基础代理地址 (Proxy URL)</label>
+              <input type="text" id="confProxy" class="input-text" placeholder="例如：http://127.0.0.1:7890" />
             </div>
 
             <div class="form-group">
               <label class="checkbox-label" style="user-select: none;">
                 <input type="checkbox" id="confResourceUseProxy" />
-                鍚敤璧勬簮浠ｇ悊
+                启用资源代理
               </label>
-              <p class="help">璧勬簮浠ｇ悊鐢ㄤ簬涓嬭浇銆佷笂浼犲浘鐗囪棰戣繖绫烩€滄惉杩愪笟鍔♀€濈殑璇锋眰銆?/p>
+              <p class="help">资源代理用于下载、上传图片视频这类“搬运业务”的请求。</p>
             </div>
 
             <div class="form-group">
-              <label for="confResourceProxy">璧勬簮浠ｇ悊鍦板潃 (Proxy URL)</label>
-              <input type="text" id="confResourceProxy" class="input-text" placeholder="渚嬪锛歨ttp://127.0.0.1:7890" />
+              <label for="confResourceProxy">资源代理地址 (Proxy URL)</label>
+              <input type="text" id="confResourceProxy" class="input-text" placeholder="例如：http://127.0.0.1:7890" />
             </div>
 
             <div class="form-group">
-              <label for="confGenerateTimeout">鐢熸垚瓒呮椂 (绉?</label>
-              <input type="number" id="confGenerateTimeout" class="input-text" step="1" placeholder="榛樿 300" />
-              <p class="help">榛樿 300 绉掋€傛敮鎸佷换鎰忔鏁存暟锛屾寜浣犵殑涓氬姟鍦烘櫙璁剧疆銆?/p>
+              <label for="confGenerateTimeout">生成超时 (秒)</label>
+              <input type="number" id="confGenerateTimeout" class="input-text" step="1" placeholder="默认 300" />
+              <p class="help">默认 300 秒。支持任意正整数，按你的业务场景设置。</p>
             </div>
 
             <div class="form-group">
-              <button id="testProxyBtn" type="button" class="secondary">妫€娴嬩唬鐞嗕笌涓氬姟鏉冮檺</button>
-              <p class="help">浼氬厛妫€娴嬪熀纭€浠ｇ悊鍜岃祫婧愪唬鐞嗙殑缃戠粶杩為€氭€э紝鍐嶇敤褰撳墠鏈夋晥 token 妫€娴嬪熀纭€浠ｇ悊鏄惁鐪熺殑鑳借闂Н鍒嗘帴鍙ｃ€?/p>
-              <pre id="proxyTestResult" class="help" style="white-space: pre-wrap; margin: 10px 0 0 0;">鐐瑰嚮涓婃柟鎸夐挳鍚庯紝浼氬湪杩欓噷鏄剧ず杩為€氭€ф娴嬪拰涓氬姟鏉冮檺妫€娴嬬粨鏋溿€?/pre>
+              <button id="testProxyBtn" type="button" class="secondary">检测代理与业务权限</button>
+              <p class="help">会先检测基础代理和资源代理的网络连通性，再用当前有效 token 检测基础代理是否真的能访问积分接口。</p>
+              <pre id="proxyTestResult" class="help" style="white-space: pre-wrap; margin: 10px 0 0 0;">点击上方按钮后，会在这里显示连通性检测和业务权限检测结果。</pre>
             </div>
           </section>
 
@@ -162,75 +162,75 @@
             <div class="form-group">
               <label class="checkbox-label" style="user-select: none;">
                 <input type="checkbox" id="confRetryEnabled" />
-                鍚敤鑷姩閲嶈瘯
+                启用自动重试
               </label>
-              <p class="help">褰撳懡涓彲閲嶈瘯閿欒鏃讹紝鑷姩鍒囨崲鍒颁笅涓€涓?token 閲嶈瘯銆?/p>
+              <p class="help">当命中可重试错误时，自动切换到下一个 token 重试。</p>
             </div>
 
             <div class="form-group">
-              <label for="confRetryMaxAttempts">鏈€澶у皾璇曟鏁?(鍚娆?</label>
-              <input type="number" id="confRetryMaxAttempts" class="input-text" min="1" max="10" step="1" placeholder="榛樿 3" />
+              <label for="confRetryMaxAttempts">最大尝试次数 (含首次)</label>
+              <input type="number" id="confRetryMaxAttempts" class="input-text" min="1" max="10" step="1" placeholder="默认 3" />
             </div>
 
             <div class="form-group">
-              <label for="confRetryBackoffSeconds">閲嶈瘯閫€閬垮熀鏁?(绉?</label>
-              <input type="number" id="confRetryBackoffSeconds" class="input-text" min="0" max="30" step="0.1" placeholder="榛樿 1.0" />
-              <p class="help">绗?n 娆￠噸璇曠瓑寰呮椂闂?= 鍩烘暟 * 2^(n-1)銆?/p>
+              <label for="confRetryBackoffSeconds">重试退避基数 (秒)</label>
+              <input type="number" id="confRetryBackoffSeconds" class="input-text" min="0" max="30" step="0.1" placeholder="默认 1.0" />
+              <p class="help">第 n 次重试等待时间 = 基数 * 2^(n-1)。</p>
             </div>
 
             <div class="form-group">
-              <label for="confRetryOnStatusCodes">鍙噸璇曠姸鎬佺爜</label>
-              <input type="text" id="confRetryOnStatusCodes" class="input-text" placeholder="渚嬪锛?29,451,500,502,503,504" />
+              <label for="confRetryOnStatusCodes">可重试状态码</label>
+              <input type="text" id="confRetryOnStatusCodes" class="input-text" placeholder="例如：429,451,500,502,503,504" />
             </div>
 
             <div class="form-group">
-              <label for="confRetryOnErrorTypes">鍙噸璇曢敊璇被鍨?/label>
-              <input type="text" id="confRetryOnErrorTypes" class="input-text" placeholder="渚嬪锛歵imeout,connection,proxy" />
+              <label for="confRetryOnErrorTypes">可重试错误类型</label>
+              <input type="text" id="confRetryOnErrorTypes" class="input-text" placeholder="例如：timeout,connection,proxy" />
             </div>
 
             <div class="form-group">
-              <label for="confTokenRotationStrategy">Token 杞崲绛栫暐</label>
+              <label for="confTokenRotationStrategy">Token 轮换策略</label>
               <select id="confTokenRotationStrategy" class="input-select">
-                <option value="round_robin">round_robin锛堝缁堣疆鎹級</option>
-                <option value="random">random锛堥殢鏈鸿疆鎹級</option>
+                <option value="round_robin">round_robin（始终轮换）</option>
+                <option value="random">random（随机轮换）</option>
               </select>
             </div>
           </section>
 
           <section id="cfg-storage" class="config-cat-pane">
             <div class="form-group">
-              <label for="confRefreshIntervalHours">鑷姩鍒锋柊闂撮殧 (灏忔椂)</label>
-              <input type="number" id="confRefreshIntervalHours" class="input-text" min="1" max="24" step="1" placeholder="榛樿 15" />
-              <p class="help">鑼冨洿 1-24 灏忔椂銆傚悗鍙板皢涓ユ牸鎸夎闂撮殧鍒锋柊銆?/p>
+              <label for="confRefreshIntervalHours">自动刷新间隔 (小时)</label>
+              <input type="number" id="confRefreshIntervalHours" class="input-text" min="1" max="24" step="1" placeholder="默认 15" />
+              <p class="help">范围 1-24 小时。后台将严格按该间隔刷新。</p>
             </div>
 
             <div class="form-group">
-              <label for="confBatchConcurrency">鎵归噺瀵煎叆/绉垎骞跺彂鏁?/label>
-              <input type="number" id="confBatchConcurrency" class="input-text" min="1" max="100" step="1" placeholder="榛樿 5" />
-              <p class="help">鐢ㄤ簬鎵归噺瀵煎叆 Cookie 鏃剁殑鑷姩鍒锋柊涓庣Н鍒嗘煡璇紝浠ュ強鎵归噺鍒锋柊绉垎銆傞粯璁ゅ苟琛?5 涓€?/p>
+              <label for="confBatchConcurrency">批量导入/积分并发数</label>
+              <input type="number" id="confBatchConcurrency" class="input-text" min="1" max="100" step="1" placeholder="默认 5" />
+              <p class="help">用于批量导入 Cookie 时的自动刷新与积分查询，以及批量刷新积分。默认并行 5 个。</p>
             </div>
 
             <div class="config-inline-row">
               <div class="form-group inline-item">
-                <label for="confGeneratedMaxSizeMb">鐢熸垚鏂囦欢绌洪棿涓婇檺 (MB)</label>
-                <input type="number" id="confGeneratedMaxSizeMb" class="input-text" min="100" max="102400" step="1" placeholder="榛樿 1024" />
+                <label for="confGeneratedMaxSizeMb">生成文件空间上限 (MB)</label>
+                <input type="number" id="confGeneratedMaxSizeMb" class="input-text" min="100" max="102400" step="1" placeholder="默认 1024" />
               </div>
               <div class="form-group inline-item">
-                <label for="confGeneratedPruneSizeMb">瑙﹀彂鍚庢竻鐞嗛噺 (MB)</label>
-                <input type="number" id="confGeneratedPruneSizeMb" class="input-text" min="10" max="10240" step="1" placeholder="榛樿 200" />
+                <label for="confGeneratedPruneSizeMb">触发后清理量 (MB)</label>
+                <input type="number" id="confGeneratedPruneSizeMb" class="input-text" min="10" max="10240" step="1" placeholder="默认 200" />
               </div>
             </div>
-            <p id="generatedUsageInfo" class="help">褰撳墠鍗犵敤锛? MB锛? 涓枃浠讹級</p>
-            <p class="help">瓒呰繃涓婇檺鍚庢寜鏈€鏃ф枃浠朵紭鍏堟竻鐞嗭紱鏈€鏂扮敓鎴愭枃浠朵細琚繚鎶わ紝涓嶄細琚珛鍗冲垹鎺夈€?/p>
+            <p id="generatedUsageInfo" class="help">当前占用：- MB（- 个文件）</p>
+            <p class="help">超过上限后按最旧文件优先清理；最新生成文件会被保护，不会被立即删掉。</p>
           </section>
 
           <section style="padding-top:0;">
             <div class="form-group" style="margin-top: 12px;">
               <label class="checkbox-label" style="user-select: none;">
                 <input type="checkbox" id="confUseUpstreamResultUrl" />
-                鐩存帴浣跨敤涓婃父缁撴灉閾炬帴锛堜笉涓嬭浇鍒版湰鍦帮級
+                直接使用上游结果链接（不下载到本地）
               </label>
-              <p class="help">寮€鍚悗灏嗙洿鎺ヨ繑鍥炰笂娓哥殑 presignedUrl锛屽彲鍑忓皯鏈嶅姟鍣ㄧ鐩樺崰鐢ㄥ拰鏈湴缂撳瓨鍘嬪姏锛涗絾璇ラ摼鎺ラ€氬父浼氳繃鏈燂紝鍘嗗彶棰勮鎴栨棫缁撴灉鍙兘澶辨晥銆?/p>
+              <p class="help">开启后将直接返回上游的 presignedUrl，可减少服务器磁盘占用和本地缓存压力；但该链接通常会过期，历史预览或旧结果可能失效。</p>
             </div>
           </section>
 
@@ -238,23 +238,23 @@
             <div class="form-group" style="margin-top: 12px;">
               <label class="checkbox-label" style="user-select: none;">
                 <input type="checkbox" id="confImgBedEnabled" />
-                寮€鍚浘浼犳ā寮忥紙鐢熸垚鍚庤嚜鍔ㄤ笂浼犲浘搴婏級
+                开启图传模式（生成后自动上传图床）
               </label>
-              <p class="help">寮€鍚悗鍥剧墖鍜岃棰戜細鍏堜笂浼犲埌鍥惧簥锛屽啀杩斿洖鍥惧簥閾炬帴锛涙妯″紡浼樺厛浜庝笂娓哥洿閾惧拰鏈湴鏂囦欢鍥為摼銆?/p>
+              <p class="help">开启后图片和视频会先上传到图床，再返回图床链接；此模式优先于上游直链和本地文件回链。</p>
             </div>
             <div class="form-group">
-              <label for="confImgBedApiUrl">鍥惧簥涓婁紶 API 鍦板潃</label>
-              <input type="text" id="confImgBedApiUrl" class="input-text" placeholder="渚嬪锛歨ttps://your-domain/upload 鎴?https://your-domain/api/upload" />
-              <p class="help">鍙傝€?CloudFlare ImgBed 涓婁紶鎺ュ彛锛屽缓璁～鍐欏畬鏁翠笂浼犲湴鍧€銆傜▼搴忎細鑷姩杩藉姞 authCode 鍜?returnFormat=full銆?/p>
+              <label for="confImgBedApiUrl">图床上传 API 地址</label>
+              <input type="text" id="confImgBedApiUrl" class="input-text" placeholder="例如：https://your-domain/upload 或 https://your-domain/api/upload" />
+              <p class="help">参考 CloudFlare ImgBed 上传接口，建议填写完整上传地址。程序会自动追加 authCode 和 returnFormat=full。</p>
             </div>
             <div class="form-group">
-              <label for="confImgBedApiKey">鍥惧簥瀵嗛挜 / 璁よ瘉鐮?/label>
-              <input type="password" id="confImgBedApiKey" class="input-text" placeholder="濉啓涓婁紶 authCode 鎴栧搴斿瘑閽? />
+              <label for="confImgBedApiKey">图床密钥 / 认证码</label>
+              <input type="password" id="confImgBedApiKey" class="input-text" placeholder="填写上传 authCode 或对应密钥" />
             </div>
           </section>
 
           <div class="actions" style="margin-top: 24px;">
-            <button id="saveConfigBtn">淇濆瓨閰嶇疆</button>
+            <button id="saveConfigBtn">保存配置</button>
             <span id="configMsg" class="msg"></span>
           </div>
         </div>
@@ -265,47 +265,36 @@
     <div id="logs" class="tab-pane">
       <section class="card">
         <div class="list-head">
-          <h2>璇锋眰鏃ュ織</h2>
+          <h2>请求日志</h2>
           <div class="actions">
-            <label for="logStatsRange" class="help">缁熻鑼冨洿</label>
-            <select id="logStatsRange" class="input-select" aria-label="鏃ュ織缁熻鑼冨洿">
-              <option value="today">浠婃棩</option>
-              <option value="yesterday">鏄ㄥぉ</option>
-              <option value="3d">杩?3 澶?/option>
-              <option value="7d">杩?7 澶?/option>
-              <option value="30d">杩?30 澶?/option>
+            <label for="logStatsRange" class="help">统计范围</label>
+            <select id="logStatsRange" class="input-select" aria-label="日志统计范围">
+              <option value="today">今日</option>
+              <option value="yesterday">昨天</option>
+              <option value="3d">近 3 天</option>
+              <option value="7d">近 7 天</option>
+              <option value="30d">近 30 天</option>
             </select>
-            <button id="refreshLogsBtn" class="secondary">鍒锋柊</button>
-            <button id="clearLogsBtn" class="danger">娓呯┖鏃ュ織</button>
+            <button id="refreshLogsBtn" class="secondary">刷新</button>
+            <button id="clearLogsBtn" class="danger">清空日志</button>
           </div>
         </div>
-        <p class="help" style="margin-bottom: 16px;">浠呭睍绀哄閮?OpenAI 椋庢牸璇锋眰鏃ュ織銆傚け璐ョ姸鎬佷腑鐨勭姸鎬佺爜鍙偣鍑绘煡鐪嬮敊璇俊鎭€?/p>
-        <div class="logs-filter-bar">
-          <label class="checkbox-label logs-filter-checkbox">
-            <input id="logsFailedOnly" type="checkbox" />
-            <span>只看失败</span>
-          </label>
-          <label for="logsFailedAccount" class="help">失败账号</label>
-          <select id="logsFailedAccount" class="input-select" aria-label="失败账号筛选">
-            <option value="">全部账号</option>
-          </select>
-          <button id="clearLogFiltersBtn" class="secondary small" type="button">清空筛选</button>
-        </div>
+        <p class="help" style="margin-bottom: 16px;">仅展示外部 OpenAI 风格请求日志。失败状态中的状态码可点击查看错误信息。</p>
         <div class="stats-grid" id="logsStatsGrid">
           <div class="stat-card">
-            <div class="stat-label">鍥剧墖鐢熸垚鏁?/div>
+            <div class="stat-label">图片生成数</div>
             <div id="logsStatsImageCount" class="stat-value">-</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">瑙嗛鐢熸垚鏁?/div>
+            <div class="stat-label">视频生成数</div>
             <div id="logsStatsVideoCount" class="stat-value">-</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">璇锋眰鎬绘暟</div>
+            <div class="stat-label">请求总数</div>
             <div id="logsStatsTotalCount" class="stat-value">-</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">澶辫触璇锋眰鏁?/div>
+            <div class="stat-label">失败请求数</div>
             <div id="logsStatsFailCount" class="stat-value">-</div>
           </div>
         </div>
@@ -315,27 +304,27 @@
           <table id="logsTable">
             <thead>
               <tr>
-                <th>鏃堕棿</th>
-                <th>鐘舵€?/th>
-                <th>鑰楁椂/绉?/th>
-                <th>杩涘害</th>
-                <th>璐﹀彿</th>
-                <th>妯″瀷/鍙傛暟</th>
-                <th>鎻愮ず璇嶆憳瑕?/th>
-                <th>棰勮</th>
+                <th>时间</th>
+                <th>状态</th>
+                <th>耗时/秒</th>
+                <th>进度</th>
+                <th>账号</th>
+                <th>模型/参数</th>
+                <th>提示词摘要</th>
+                <th>预览</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td colspan="8" class="empty-state">鏆傛棤鏃ュ織</td>
+                <td colspan="8" class="empty-state">暂无日志</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div id="logsPagination" class="logs-pagination">
-          <button id="logsPrevBtn" class="secondary small" type="button">涓婁竴椤?/button>
-          <span id="logsPageInfo" class="help">绗?1 / 1 椤?/span>
-          <button id="logsNextBtn" class="secondary small" type="button">涓嬩竴椤?/button>
+          <button id="logsPrevBtn" class="secondary small" type="button">上一页</button>
+          <span id="logsPageInfo" class="help">第 1 / 1 页</span>
+          <button id="logsNextBtn" class="secondary small" type="button">下一页</button>
         </div>
       </section>
     </div>
@@ -343,20 +332,20 @@
   </main>
 
   <div id="tokenModal" class="dialog-modal" aria-hidden="true">
-    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="娣诲姞 Token">
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="添加 Token">
       <div class="list-head" style="margin-bottom: 10px;">
-        <h2>娣诲姞 Token</h2>
-        <button id="tokenModalCloseBtn" class="secondary small" type="button">鍏抽棴</button>
+        <h2>添加 Token</h2>
+        <button id="tokenModalCloseBtn" class="secondary small" type="button">关闭</button>
       </div>
       <div class="add-form">
-        <textarea id="tokenInput" placeholder="鏀寔鎵归噺娣诲姞锛氫竴琛屼竴涓?Token锛堜緥濡俓neyJhbGciOiJSUz...\neyJhbGciOiJSUz...锛?></textarea>
+        <textarea id="tokenInput" placeholder="支持批量添加：一行一个 Token（例如\neyJhbGciOiJSUz...\neyJhbGciOiJSUz...）"></textarea>
         <div class="form-group" style="margin-top: 10px;">
-          <label for="tokenFile">鎴栦笂浼?Token 鏂囦欢锛堟敮鎸佸閫夛級</label>
+          <label for="tokenFile">或上传 Token 文件（支持多选）</label>
           <input type="file" id="tokenFile" accept="text/plain,.txt,application/json,.json" multiple />
-          <p class="help">鏀寔 .txt锛堟瘡琛屼竴涓?token锛夋垨 .json锛堟暟缁?瀵硅薄锛夈€?/p>
+          <p class="help">支持 .txt（每行一个 token）或 .json（数组/对象）。</p>
         </div>
         <div class="actions">
-          <button id="addBtn">纭娣诲姞</button>
+          <button id="addBtn">确认添加</button>
           <span id="addMsg" class="msg"></span>
         </div>
       </div>
@@ -364,25 +353,25 @@
   </div>
 
   <div id="refreshModal" class="dialog-modal" aria-hidden="true">
-    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="瀵煎叆 Cookie">
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="导入 Cookie">
       <div class="list-head" style="margin-bottom: 10px;">
-        <h2>AT 鑷姩鍒锋柊</h2>
-        <button id="refreshModalCloseBtn" class="secondary small" type="button">鍏抽棴</button>
+        <h2>AT 自动刷新</h2>
+        <button id="refreshModalCloseBtn" class="secondary small" type="button">关闭</button>
       </div>
       <div class="config-form">
         <div class="form-group">
-          <label for="cookieInput">瀵煎叆 Cookie锛堟敮鎸佸崟涓垨鎵归噺锛?/label>
-          <textarea id="cookieInput" rows="7" placeholder="鏀寔锛歕n1) Cookie 瀛楃涓诧細k1=v1; k2=v2\n2) 娴忚鍣ㄥ鍑虹殑 cookie 鏁扮粍 JSON\n3) 鎵归噺锛歔{\"name\":\"璐﹀彿A\",\"cookie\":\"k=v;...\"},{\"name\":\"璐﹀彿B\",\"cookie\":[...]}]"></textarea>
-          <p class="help">瀵煎叆鍚庝細鑷姩绔嬪嵆鍒锋柊涓€娆°€傛壒閲忓鍏ュ缓璁娇鐢ㄦ暟缁勬牸寮忋€?/p>
+          <label for="cookieInput">导入 Cookie（支持单个或批量）</label>
+          <textarea id="cookieInput" rows="7" placeholder="支持：\n1) Cookie 字符串：k1=v1; k2=v2\n2) 浏览器导出的 cookie 数组 JSON\n3) 批量：[{\"name\":\"账号A\",\"cookie\":\"k=v;...\"},{\"name\":\"账号B\",\"cookie\":[...]}]"></textarea>
+          <p class="help">导入后会自动立即刷新一次。批量导入建议使用数组格式。</p>
         </div>
 
         <div class="form-group">
-          <label for="cookieFile">鎴栦笂浼?Cookie 鏂囦欢锛堟敮鎸佸閫夛級</label>
+          <label for="cookieFile">或上传 Cookie 文件（支持多选）</label>
           <input type="file" id="cookieFile" accept="text/plain,.txt,application/json,.json" multiple />
         </div>
 
         <div class="actions">
-          <button id="importCookieBtn" class="secondary">瀵煎叆 Cookie</button>
+          <button id="importCookieBtn" class="secondary">导入 Cookie</button>
         </div>
         <span id="refreshMsg" class="msg"></span>
       </div>
@@ -390,30 +379,30 @@
   </div>
 
   <div id="previewModal" class="preview-modal" aria-hidden="true">
-    <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="濯掍綋棰勮">
-      <button id="previewCloseBtn" class="preview-close" type="button">鍏抽棴</button>
+    <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="媒体预览">
+      <button id="previewCloseBtn" class="preview-close" type="button">关闭</button>
       <div id="previewContent" class="preview-content"></div>
       <div class="preview-actions">
-        <a id="previewDownloadBtn" class="preview-download" href="#" download>涓嬭浇</a>
+        <a id="previewDownloadBtn" class="preview-download" href="#" download>下载</a>
       </div>
     </div>
   </div>
 
   <div id="errorDetailModal" class="preview-modal" aria-hidden="true">
-    <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="閿欒璇︽儏">
-      <button id="errorDetailCloseBtn" class="preview-close" type="button">鍏抽棴</button>
+    <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="错误详情">
+      <button id="errorDetailCloseBtn" class="preview-close" type="button">关闭</button>
       <div class="error-detail-head">
-        <h3 id="errorDetailCode">閿欒淇℃伅</h3>
+        <h3 id="errorDetailCode">错误信息</h3>
       </div>
       <div id="errorDetailContent" class="error-detail-content"></div>
     </div>
   </div>
 
   <div id="promptDetailModal" class="preview-modal" aria-hidden="true">
-    <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="鎻愮ず璇嶈鎯?>
-      <button id="promptDetailCloseBtn" class="preview-close" type="button">鍏抽棴</button>
+    <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="提示词详情">
+      <button id="promptDetailCloseBtn" class="preview-close" type="button">关闭</button>
       <div class="error-detail-head">
-        <h3>鎻愮ず璇嶈鎯?/h3>
+        <h3>提示词详情</h3>
       </div>
       <div id="promptDetailContent" class="prompt-detail-content"></div>
     </div>
@@ -421,7 +410,6 @@
 
   <div id="appToast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="/static/admin.js?v=20260413-1"></script>
+  <script src="/static/admin.js?v=20260302-7"></script>
 </body>
 </html>
-

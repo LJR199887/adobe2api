@@ -73,3 +73,61 @@ def test_proxy_endpoint(
             "status_code": None,
             "message": str(exc),
         }
+
+
+def test_authorized_endpoint(
+    *,
+    check_name: str,
+    proxy: str,
+    target_url: str,
+    headers: dict[str, str],
+    timeout: float = 15.0,
+) -> dict[str, Any]:
+    started = time.time()
+    if not proxy:
+        return {
+            "name": check_name,
+            "enabled": False,
+            "ok": False,
+            "target_url": target_url,
+            "proxy": "",
+            "elapsed_ms": 0,
+            "status_code": None,
+            "message": "proxy disabled",
+        }
+
+    try:
+        resp = requests.get(
+            target_url,
+            headers=headers,
+            timeout=max(1.0, float(timeout)),
+            proxies=build_requests_proxies(proxy),
+        )
+        elapsed_ms = round((time.time() - started) * 1000, 2)
+        status_code = int(resp.status_code)
+        return {
+            "name": check_name,
+            "enabled": True,
+            "ok": status_code == 200,
+            "target_url": target_url,
+            "proxy": proxy,
+            "elapsed_ms": elapsed_ms,
+            "status_code": status_code,
+            "message": (
+                "authorized request succeeded"
+                if status_code == 200
+                else f"authorized request failed ({status_code})"
+            ),
+        }
+    except Exception as exc:
+        elapsed_ms = round((time.time() - started) * 1000, 2)
+        return {
+            "name": check_name,
+            "enabled": True,
+            "ok": False,
+            "target_url": target_url,
+            "proxy": proxy,
+            "elapsed_ms": elapsed_ms,
+            "status_code": None,
+            "message": str(exc),
+        }

@@ -718,14 +718,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   let logsRunningTotal = 0;
 
   if (testProxyBtn) {
-    testProxyBtn.textContent = "检测代理连通性";
+    testProxyBtn.textContent = "检测代理与业务权限";
     const proxyHelp = testProxyBtn.nextElementSibling;
     if (proxyHelp && proxyHelp.classList.contains("help")) {
-      proxyHelp.textContent = "会分别检测基础代理和资源代理，并显示是否成功、耗时、HTTP 状态码和详细错误信息。检测时会直接使用你当前表单里的值，不需要先保存配置。";
+      proxyHelp.textContent = "会先检测基础代理和资源代理的网络连通性，再用当前有效 token 检测基础代理是否真的能访问积分接口。检测时会直接使用你当前表单里的值，不需要先保存配置。";
     }
   }
   if (proxyTestResult && !String(proxyTestResult.textContent || "").trim()) {
-    proxyTestResult.textContent = "点击上方按钮后，会在这里显示检测结果。";
+    proxyTestResult.textContent = "点击上方按钮后，会在这里显示连通性检测和业务权限检测结果。";
   }
 
   function switchConfigPane(targetId) {
@@ -903,18 +903,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveConfigBtn.disabled = false;
   });
 
-  function formatProxyTestItem(title, item) {
+  function formatProxyConnectivityItem(title, item) {
     const data = item && typeof item === "object" ? item : {};
     const enabled = Boolean(data.enabled);
-    const ok = Boolean(data.ok);
-    const statusText = !enabled ? "未启用" : ok ? "连接成功" : "连接失败";
+    const statusCode = data.status_code == null ? null : Number(data.status_code);
+    let statusText = "连接失败";
+    if (!enabled) {
+      statusText = "未启用";
+    } else if (Boolean(data.ok)) {
+      statusText = "连接成功";
+    } else if (statusCode != null) {
+      statusText = "目标已响应";
+    }
     const elapsedText = Number.isFinite(Number(data.elapsed_ms))
       ? `${Number(data.elapsed_ms)} ms`
       : "-";
-    const statusCodeText = data.status_code == null ? "-" : String(data.status_code);
+    const statusCodeText = statusCode == null ? "-" : String(statusCode);
     const proxyText = String(data.proxy || "").trim() || "未填写";
     const targetText = String(data.target_url || "").trim() || "-";
-    const messageText = String(data.message || "").trim() || "-";
+    let messageText = String(data.message || "").trim() || "-";
+    if (enabled && statusCode != null && [401, 403].includes(statusCode)) {
+      messageText = "已收到上游响应，说明代理链路是通的；当前检测请求本身没有业务权限。";
+    }
     return [
       `${title}`,
       `状态：${statusText}`,
@@ -926,18 +936,73 @@ document.addEventListener("DOMContentLoaded", async () => {
     ].join("\n");
   }
 
+  function formatProxyBusinessItem(title, item) {
+    const data = item && typeof item === "object" ? item : {};
+    const enabled = Boolean(data.enabled);
+    const hasToken = Boolean(String(data.token_id || "").trim());
+    const statusCode = data.status_code == null ? null : Number(data.status_code);
+    let statusText = "检测失败";
+    if (!enabled) {
+      statusText = "未启用";
+    } else if (!hasToken) {
+      statusText = "未执行";
+    } else if (Boolean(data.ok)) {
+      statusText = "权限检测成功";
+    } else if (statusCode != null) {
+      statusText = "权限检测失败";
+    }
+    const elapsedText = Number.isFinite(Number(data.elapsed_ms))
+      ? `${Number(data.elapsed_ms)} ms`
+      : "-";
+    const statusCodeText = statusCode == null ? "-" : String(statusCode);
+    const tokenIdText = String(data.token_id || "").trim() || "-";
+    const tokenSourceText = String(data.token_source || "").trim() || "-";
+    const tokenPreviewText = String(data.token_preview || "").trim() || "-";
+    const accountIdText = String(data.account_id || "").trim() || "-";
+    const messageText = String(data.message || "").trim() || "-";
+    return [
+      `${title}`,
+      `状态：${statusText}`,
+      `检测目标：${String(data.target_url || "").trim() || "-"}`,
+      `耗时：${elapsedText}`,
+      `HTTP 状态码：${statusCodeText}`,
+      `Token ID：${tokenIdText}`,
+      `Token 来源：${tokenSourceText}`,
+      `Token 预览：${tokenPreviewText}`,
+      `Account ID：${accountIdText}`,
+      `详细信息：${messageText}`,
+    ].join("\n");
+  }
+
   function formatProxyTestResult(payload) {
     const data = payload && typeof payload === "object" ? payload : {};
-    const sections = [
-      formatProxyTestItem("基础代理", data.basic),
-      formatProxyTestItem("资源代理", data.resource),
+    const connectivity = data.connectivity && typeof data.connectivity === "object"
+      ? data.connectivity
+      : data;
+    const business = data.business && typeof data.business === "object"
+      ? data.business
+      : {};
+    const connectivitySections = [
+      formatProxyConnectivityItem("基础代理", connectivity.basic),
+      formatProxyConnectivityItem("资源代理", connectivity.resource),
     ];
-    return `代理检测结果\n\n${sections.join("\n\n")}`;
+    const businessSections = [
+      formatProxyBusinessItem("基础代理业务权限", business.basic),
+    ];
+    return [
+      "代理检测结果",
+      "",
+      "一、连通性检测",
+      connectivitySections.join("\n\n"),
+      "",
+      "二、业务权限检测",
+      businessSections.join("\n\n"),
+    ].join("\n");
   }
 
   async function handleProxyTest() {
     if (proxyTestResult) {
-      proxyTestResult.textContent = "正在检测代理连通性，请稍候...";
+      proxyTestResult.textContent = "正在检测代理连通性和业务权限，请稍候...";
     }
     const payload = {
       use_proxy: confUseProxy.checked,
@@ -958,27 +1023,29 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.detail || "代理检测失败");
+      throw new Error(data.detail || "代理与业务权限检测失败");
     }
     if (proxyTestResult) {
       proxyTestResult.textContent = formatProxyTestResult(data);
     }
-    showToast("代理检测已完成", false);
+    showToast("代理与业务权限检测已完成", false);
   }
 
   if (testProxyBtn) {
     testProxyBtn.addEventListener("click", async () => {
       testProxyBtn.disabled = true;
       if (proxyTestResult) {
-        proxyTestResult.textContent = "正在检测代理，请稍候...";
+        proxyTestResult.textContent = "正在检测代理连通性和业务权限，请稍候...";
       }
       try {
         await handleProxyTest();
       } catch (err) {
         if (proxyTestResult) {
-          proxyTestResult.textContent = String(err?.message || err || "代理检测失败");
+          proxyTestResult.textContent = String(
+            err?.message || err || "代理与业务权限检测失败"
+          );
         }
-        showToast(err.message || "代理检测失败", true);
+        showToast(err.message || "代理与业务权限检测失败", true);
       } finally {
         testProxyBtn.disabled = false;
       }

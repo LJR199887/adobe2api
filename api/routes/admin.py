@@ -20,7 +20,12 @@ from api.schemas import (
     TokenBatchAddRequest,
     TokenCreditsBatchRefreshRequest,
 )
-from core.proxy_utils import resolve_basic_proxy, resolve_resource_proxy, test_proxy_endpoint
+from core.proxy_utils import (
+    resolve_basic_proxy,
+    resolve_resource_proxy,
+    test_authorized_endpoint,
+    test_proxy_endpoint,
+)
 
 
 def build_admin_router(
@@ -62,6 +67,87 @@ def build_admin_router(
             token_manager.remove(token_id)
         return True
 
+    def build_basic_business_proxy_result(proxy: str) -> dict[str, Any]:
+        result = {
+            "name": "basic_business",
+            "enabled": bool(proxy),
+            "ok": False,
+            "target_url": "https://firefly.adobe.io/v1/credits/balance",
+            "proxy": proxy,
+            "elapsed_ms": 0,
+            "status_code": None,
+            "message": "",
+            "token_id": "",
+            "token_source": "",
+            "token_preview": "",
+            "account_id": "",
+        }
+        if not proxy:
+            result["message"] = "basic proxy disabled"
+            return result
+
+        active_ids = []
+        try:
+            active_ids = token_manager.list_active_ids()
+        except Exception:
+            active_ids = []
+        token_info = None
+        for token_id in active_ids:
+            token_info = token_manager.get_by_id(token_id)
+            if token_info and str(token_info.get("value") or "").strip():
+                break
+        if not token_info:
+            result["message"] = "no active token available for business auth test"
+            return result
+
+        token_value = str(token_info.get("value") or "").strip()
+        token_id = str(token_info.get("id") or "").strip()
+        token_source = str(token_info.get("source") or "manual").strip()
+        token_preview = (
+            token_value[:10] + "..." + token_value[-6:]
+            if len(token_value) > 20
+            else "***"
+        )
+        account_id = ""
+        try:
+            account_id = str(refresh_manager._extract_account_id(token_value) or "").strip()
+        except Exception:
+            account_id = ""
+
+        result.update(
+            {
+                "token_id": token_id,
+                "token_source": token_source,
+                "token_preview": token_preview,
+                "account_id": account_id,
+            }
+        )
+        if not account_id:
+            result["message"] = "active token found, but account_id could not be extracted"
+            return result
+
+        auth_result = test_authorized_endpoint(
+            check_name="basic_business",
+            proxy=proxy,
+            target_url="https://firefly.adobe.io/v1/credits/balance",
+            headers={
+                "Authorization": f"Bearer {token_value}",
+                "x-api-key": "SunbreakWebUI1",
+                "x-account-id": account_id,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+        )
+        auth_result.update(
+            {
+                "token_id": token_id,
+                "token_source": token_source,
+                "token_preview": token_preview,
+                "account_id": account_id,
+            }
+        )
+        return auth_result
+
     @router.get("/api/v1/health")
     def health():
         return {
@@ -92,10 +178,16 @@ def build_admin_router(
             proxy=resource_proxy,
             target_url="https://firefly-3p.ff.adobe.io/v2/storage/image",
         )
+        basic_business_result = build_basic_business_proxy_result(basic_proxy)
         return {
             "status": "ok",
-            "basic": basic_result,
-            "resource": resource_result,
+            "connectivity": {
+                "basic": basic_result,
+                "resource": resource_result,
+            },
+            "business": {
+                "basic": basic_business_result,
+            },
         }
 
     @router.get("/login", include_in_schema=False)

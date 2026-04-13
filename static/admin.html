@@ -152,9 +152,9 @@
             </div>
 
             <div class="form-group">
-              <button id="testProxyBtn" type="button" class="secondary">检测代理</button>
-              <p class="help">会分别检测基础代理和资源代理是否能连通目标服务，并返回详细结果。</p>
-              <pre id="proxyTestResult" class="help" style="white-space: pre-wrap; margin: 10px 0 0 0;"></pre>
+              <button id="testProxyBtn" type="button" class="secondary">检测代理与业务权限</button>
+              <p class="help">会先检测基础代理和资源代理的网络连通性，再用当前有效 token 检测基础代理是否真的能访问积分接口。</p>
+              <pre id="proxyTestResult" class="help" style="white-space: pre-wrap; margin: 10px 0 0 0;">点击上方按钮后，会在这里显示连通性检测和业务权限检测结果。</pre>
             </div>
           </section>
 

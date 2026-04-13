@@ -658,6 +658,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confPublicBaseUrl = document.getElementById("confPublicBaseUrl");
   const confUseProxy = document.getElementById("confUseProxy");
   const confProxy = document.getElementById("confProxy");
+  const confResourceUseProxy = document.getElementById("confResourceUseProxy");
+  const confResourceProxy = document.getElementById("confResourceProxy");
+  const testProxyBtn = document.getElementById("testProxyBtn");
+  const proxyTestResult = document.getElementById("proxyTestResult");
   const confGenerateTimeout = document.getElementById("confGenerateTimeout");
   const confRetryEnabled = document.getElementById("confRetryEnabled");
   const confRetryMaxAttempts = document.getElementById("confRetryMaxAttempts");
@@ -713,6 +717,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   let logsTotalPages = 1;
   let logsRunningTotal = 0;
 
+  if (testProxyBtn) {
+    testProxyBtn.textContent = "检测代理与业务权限";
+    const proxyHelp = testProxyBtn.nextElementSibling;
+    if (proxyHelp && proxyHelp.classList.contains("help")) {
+      proxyHelp.textContent = "会先检测基础代理和资源代理的网络连通性，再用当前有效 token 检测基础代理是否真的能访问积分接口。检测时会直接使用你当前表单里的值，不需要先保存配置。";
+    }
+  }
+  if (proxyTestResult && !String(proxyTestResult.textContent || "").trim()) {
+    proxyTestResult.textContent = "点击上方按钮后，会在这里显示连通性检测和业务权限检测结果。";
+  }
+
   function switchConfigPane(targetId) {
     if (!targetId) return;
     configCatBtns.forEach((btn) => {
@@ -749,6 +764,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         confPublicBaseUrl.value = data.public_base_url || "";
         confUseProxy.checked = data.use_proxy || false;
         confProxy.value = data.proxy || "";
+        confResourceUseProxy.checked = data.resource_use_proxy || false;
+        confResourceProxy.value = data.resource_proxy || "";
         confGenerateTimeout.value = Number(data.generate_timeout || 300);
         confRetryEnabled.checked = Boolean(data.retry_enabled ?? true);
         confRetryMaxAttempts.value = Number(data.retry_max_attempts || 3);
@@ -795,6 +812,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         public_base_url: confPublicBaseUrl.value.trim(),
         use_proxy: confUseProxy.checked,
         proxy: confProxy.value.trim(),
+        resource_use_proxy: confResourceUseProxy.checked,
+        resource_proxy: confResourceProxy.value.trim(),
         generate_timeout: Math.max(1, Number(confGenerateTimeout.value || 300)),
         retry_enabled: confRetryEnabled.checked,
         retry_max_attempts: Math.max(1, Math.min(10, Number(confRetryMaxAttempts.value || 3))),
@@ -840,6 +859,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (payload.generated_prune_size_mb >= payload.generated_max_size_mb) {
         throw new Error("触发后清理量必须小于生成文件空间上限");
       }
+      if (payload.use_proxy && !/^https?:\/\//i.test(payload.proxy)) {
+        throw new Error("基础代理地址必须以 http:// 或 https:// 开头");
+      }
+      if (payload.resource_use_proxy && !/^https?:\/\//i.test(payload.resource_proxy)) {
+        throw new Error("资源代理地址必须以 http:// 或 https:// 开头");
+      }
       if (payload.imgbed_enabled) {
         if (!/^https?:\/\//i.test(payload.imgbed_api_url)) {
           throw new Error("图床 API 地址必须以 http:// 或 https:// 开头");
@@ -877,6 +902,155 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     saveConfigBtn.disabled = false;
   });
+
+  function formatProxyConnectivityItem(title, item) {
+    const data = item && typeof item === "object" ? item : {};
+    const enabled = Boolean(data.enabled);
+    const statusCode = data.status_code == null ? null : Number(data.status_code);
+    let statusText = "连接失败";
+    if (!enabled) {
+      statusText = "未启用";
+    } else if (Boolean(data.ok)) {
+      statusText = "连接成功";
+    } else if (statusCode != null) {
+      statusText = "目标已响应";
+    }
+    const elapsedText = Number.isFinite(Number(data.elapsed_ms))
+      ? `${Number(data.elapsed_ms)} ms`
+      : "-";
+    const statusCodeText = statusCode == null ? "-" : String(statusCode);
+    const proxyText = String(data.proxy || "").trim() || "未填写";
+    const targetText = String(data.target_url || "").trim() || "-";
+    let messageText = String(data.message || "").trim() || "-";
+    if (enabled && statusCode != null && [401, 403].includes(statusCode)) {
+      messageText = "已收到上游响应，说明代理链路是通的；当前检测请求本身没有业务权限。";
+    }
+    return [
+      `${title}`,
+      `状态：${statusText}`,
+      `代理地址：${proxyText}`,
+      `检测目标：${targetText}`,
+      `耗时：${elapsedText}`,
+      `HTTP 状态码：${statusCodeText}`,
+      `详细信息：${messageText}`,
+    ].join("\n");
+  }
+
+  function formatProxyBusinessItem(title, item) {
+    const data = item && typeof item === "object" ? item : {};
+    const enabled = Boolean(data.enabled);
+    const hasToken = Boolean(String(data.token_id || "").trim());
+    const statusCode = data.status_code == null ? null : Number(data.status_code);
+    let statusText = "检测失败";
+    if (!enabled) {
+      statusText = "未启用";
+    } else if (!hasToken) {
+      statusText = "未执行";
+    } else if (Boolean(data.ok)) {
+      statusText = "权限检测成功";
+    } else if (statusCode != null) {
+      statusText = "权限检测失败";
+    }
+    const elapsedText = Number.isFinite(Number(data.elapsed_ms))
+      ? `${Number(data.elapsed_ms)} ms`
+      : "-";
+    const statusCodeText = statusCode == null ? "-" : String(statusCode);
+    const tokenIdText = String(data.token_id || "").trim() || "-";
+    const tokenSourceText = String(data.token_source || "").trim() || "-";
+    const tokenPreviewText = String(data.token_preview || "").trim() || "-";
+    const accountIdText = String(data.account_id || "").trim() || "-";
+    const messageText = String(data.message || "").trim() || "-";
+    return [
+      `${title}`,
+      `状态：${statusText}`,
+      `检测目标：${String(data.target_url || "").trim() || "-"}`,
+      `耗时：${elapsedText}`,
+      `HTTP 状态码：${statusCodeText}`,
+      `Token ID：${tokenIdText}`,
+      `Token 来源：${tokenSourceText}`,
+      `Token 预览：${tokenPreviewText}`,
+      `Account ID：${accountIdText}`,
+      `详细信息：${messageText}`,
+    ].join("\n");
+  }
+
+  function formatProxyTestResult(payload) {
+    const data = payload && typeof payload === "object" ? payload : {};
+    const connectivity = data.connectivity && typeof data.connectivity === "object"
+      ? data.connectivity
+      : data;
+    const business = data.business && typeof data.business === "object"
+      ? data.business
+      : {};
+    const connectivitySections = [
+      formatProxyConnectivityItem("基础代理", connectivity.basic),
+      formatProxyConnectivityItem("资源代理", connectivity.resource),
+    ];
+    const businessSections = [
+      formatProxyBusinessItem("基础代理业务权限", business.basic),
+    ];
+    return [
+      "代理检测结果",
+      "",
+      "一、连通性检测",
+      connectivitySections.join("\n\n"),
+      "",
+      "二、业务权限检测",
+      businessSections.join("\n\n"),
+    ].join("\n");
+  }
+
+  async function handleProxyTest() {
+    if (proxyTestResult) {
+      proxyTestResult.textContent = "正在检测代理连通性和业务权限，请稍候...";
+    }
+    const payload = {
+      use_proxy: confUseProxy.checked,
+      proxy: confProxy.value.trim(),
+      resource_use_proxy: confResourceUseProxy.checked,
+      resource_proxy: confResourceProxy.value.trim(),
+    };
+    if (payload.use_proxy && !/^https?:\/\//i.test(payload.proxy)) {
+      throw new Error("基础代理地址必须以 http:// 或 https:// 开头");
+    }
+    if (payload.resource_use_proxy && !/^https?:\/\//i.test(payload.resource_proxy)) {
+      throw new Error("资源代理地址必须以 http:// 或 https:// 开头");
+    }
+    const res = await fetch("/api/v1/proxy/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "代理与业务权限检测失败");
+    }
+    if (proxyTestResult) {
+      proxyTestResult.textContent = formatProxyTestResult(data);
+    }
+    showToast("代理与业务权限检测已完成", false);
+  }
+
+  if (testProxyBtn) {
+    testProxyBtn.addEventListener("click", async () => {
+      testProxyBtn.disabled = true;
+      if (proxyTestResult) {
+        proxyTestResult.textContent = "正在检测代理连通性和业务权限，请稍候...";
+      }
+      try {
+        await handleProxyTest();
+      } catch (err) {
+        if (proxyTestResult) {
+          proxyTestResult.textContent = String(
+            err?.message || err || "代理与业务权限检测失败"
+          );
+        }
+        showToast(err.message || "代理与业务权限检测失败", true);
+      } finally {
+        testProxyBtn.disabled = false;
+      }
+    });
+  }
 
   function formatTs(ts) {
     if (!ts) return "-";

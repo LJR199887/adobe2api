@@ -7,6 +7,8 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import requests
 
+from core.proxy_utils import build_requests_proxies, resolve_resource_proxy
+
 
 class ImgBedUploadError(Exception):
     pass
@@ -17,16 +19,14 @@ class ImgBedClient:
         self.enabled = False
         self.api_url = ""
         self.api_key = ""
-        self.proxy = ""
+        self.resource_proxy = ""
         self.timeout = 300
 
     def apply_config(self, cfg: dict) -> None:
         self.enabled = bool(cfg.get("imgbed_enabled", False))
         self.api_url = str(cfg.get("imgbed_api_url", "") or "").strip()
         self.api_key = str(cfg.get("imgbed_api_key", "") or "").strip()
-        proxy = str(cfg.get("proxy", "") or "").strip()
-        use_proxy = bool(cfg.get("use_proxy", False))
-        self.proxy = proxy if use_proxy and proxy else ""
+        self.resource_proxy = resolve_resource_proxy(cfg)
         timeout_val = cfg.get("generate_timeout", 300)
         try:
             timeout_val = int(timeout_val)
@@ -41,9 +41,7 @@ class ImgBedClient:
         return self.enabled and bool(self.api_url) and bool(self.api_key)
 
     def _requests_proxies(self) -> dict | None:
-        if not self.proxy:
-            return None
-        return {"http": self.proxy, "https": self.proxy}
+        return build_requests_proxies(self.resource_proxy)
 
     def _build_upload_url(self) -> str:
         raw = str(self.api_url or "").strip()

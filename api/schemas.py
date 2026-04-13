@@ -33,6 +33,8 @@ class ConfigUpdateRequest(BaseModel):
     public_base_url: Optional[str] = None
     proxy: Optional[str] = None
     use_proxy: Optional[bool] = None
+    resource_proxy: Optional[str] = None
+    resource_use_proxy: Optional[bool] = None
     generate_timeout: Optional[int] = None
     refresh_interval_hours: Optional[int] = None
     retry_enabled: Optional[bool] = None
@@ -71,3 +73,10 @@ class RefreshProfileEnabledRequest(BaseModel):
 class AdminLoginRequest(BaseModel):
     username: str
     password: str
+
+
+class ProxyTestRequest(BaseModel):
+    proxy: Optional[str] = None
+    use_proxy: Optional[bool] = None
+    resource_proxy: Optional[str] = None
+    resource_use_proxy: Optional[bool] = None

@@ -10,6 +10,7 @@ import requests
 
 from core.config_mgr import config_manager
 from core.models import build_image_payload_candidates
+from core.proxy_utils import build_requests_proxies, resolve_basic_proxy, resolve_resource_proxy
 
 try:
     from curl_cffi.requests import Session as CurlSession
@@ -52,7 +53,8 @@ class AdobeClient:
     def __init__(self) -> None:
         self.api_key = "clio-playground-web"
         self.impersonate = "chrome124"
-        self.proxy = ""
+        self.basic_proxy = ""
+        self.resource_proxy = ""
         self.generate_timeout = 300
         self.retry_enabled = True
         self.retry_max_attempts = 3
@@ -70,6 +72,7 @@ class AdobeClient:
         env_api_key = os.getenv("ADOBE_API_KEY")
         env_impersonate = os.getenv("ADOBE_IMPERSONATE")
         env_proxy = os.getenv("ADOBE_PROXY")
+        env_resource_proxy = os.getenv("ADOBE_RESOURCE_PROXY")
         env_user_agent = os.getenv("ADOBE_USER_AGENT")
         env_sec_ch_ua = os.getenv("ADOBE_SEC_CH_UA")
         env_generate_timeout = os.getenv("ADOBE_GENERATE_TIMEOUT")
@@ -79,7 +82,11 @@ class AdobeClient:
         if env_impersonate:
             self.impersonate = env_impersonate.strip() or self.impersonate
         if env_proxy is not None:
-            self.proxy = env_proxy.strip()
+            self.basic_proxy = env_proxy.strip()
+        if env_resource_proxy is not None:
+            self.resource_proxy = env_resource_proxy.strip()
+        elif env_proxy is not None:
+            self.resource_proxy = env_proxy.strip()
         if env_user_agent:
             self.user_agent = env_user_agent.strip() or self.user_agent
         if env_sec_ch_ua:
@@ -93,15 +100,14 @@ class AdobeClient:
                 pass
 
     def apply_config(self, cfg: dict) -> None:
-        proxy = str(cfg.get("proxy", "")).strip()
-        use_proxy = bool(cfg.get("use_proxy", False))
+        self.basic_proxy = resolve_basic_proxy(cfg)
+        self.resource_proxy = resolve_resource_proxy(cfg)
         timeout_val = cfg.get("generate_timeout", 300)
         try:
             timeout_val = int(timeout_val)
         except Exception:
             timeout_val = 300
         self.generate_timeout = timeout_val if timeout_val > 0 else 300
-        self.proxy = proxy if use_proxy and proxy else ""
         self.retry_enabled = bool(cfg.get("retry_enabled", True))
         try:
             attempts = int(cfg.get("retry_max_attempts", 3))
@@ -159,10 +165,19 @@ class AdobeClient:
         if strategy not in {"round_robin", "random"}:
             strategy = "round_robin"
         self.token_rotation_strategy = strategy
-        if self.proxy:
-            logger.warning("proxy enabled for upstream requests: %s", self.proxy)
+        if self.basic_proxy:
+            logger.warning(
+                "basic proxy enabled for upstream requests: %s", self.basic_proxy
+            )
         else:
-            logger.warning("proxy disabled for upstream requests")
+            logger.warning("basic proxy disabled for upstream requests")
+        if self.resource_proxy:
+            logger.warning(
+                "resource proxy enabled for media transfer requests: %s",
+                self.resource_proxy,
+            )
+        else:
+            logger.warning("resource proxy disabled for media transfer requests")
 
     def _retry_delay_for_attempt(self, attempt: int) -> float:
         base = float(self.retry_backoff_seconds or 0.0)
@@ -202,17 +217,19 @@ class AdobeClient:
             return "connection"
         return "network"
 
-    def _requests_proxies(self) -> Optional[dict]:
-        if not self.proxy:
-            return None
-        return {"http": self.proxy, "https": self.proxy}
+    def _requests_proxies(self, proxy_kind: str = "basic") -> Optional[dict]:
+        proxy = (
+            self.resource_proxy if str(proxy_kind).strip().lower() == "resource" else self.basic_proxy
+        )
+        return build_requests_proxies(proxy)
 
-    def _session(self):
+    def _session(self, proxy_kind: str = "basic"):
         if CurlSession is None:
             return None
         kwargs = {"impersonate": self.impersonate, "timeout": 60}
-        if self.proxy:
-            kwargs["proxies"] = {"http": self.proxy, "https": self.proxy}
+        proxies = self._requests_proxies(proxy_kind=proxy_kind)
+        if proxies:
+            kwargs["proxies"] = proxies
         return CurlSession(**kwargs)
 
     def _browser_headers(self) -> dict:
@@ -259,7 +276,7 @@ class AdobeClient:
         }
 
     def _post_json(self, url: str, headers: dict, payload: dict):
-        session = self._session()
+        session = self._session(proxy_kind="basic")
         if session is None:
             try:
                 return requests.post(
@@ -267,7 +284,7 @@ class AdobeClient:
                     headers=headers,
                     json=payload,
                     timeout=60,
-                    proxies=self._requests_proxies(),
+                    proxies=self._requests_proxies(proxy_kind="basic"),
                 )
             except requests.Timeout as exc:
                 raise UpstreamTemporaryError(
@@ -300,7 +317,7 @@ class AdobeClient:
                     headers=headers,
                     json=payload,
                     timeout=60,
-                    proxies=self._requests_proxies(),
+                    proxies=self._requests_proxies(proxy_kind="basic"),
                 )
             except requests.Timeout as exc:
                 raise UpstreamTemporaryError(
@@ -324,8 +341,8 @@ class AdobeClient:
                 )
         return resp
 
-    def _post_bytes(self, url: str, headers: dict, payload: bytes):
-        session = self._session()
+    def _post_bytes(self, url: str, headers: dict, payload: bytes, proxy_kind: str = "basic"):
+        session = self._session(proxy_kind=proxy_kind)
         if session is None:
             try:
                 return requests.post(
@@ -333,7 +350,7 @@ class AdobeClient:
                     headers=headers,
                     data=payload,
                     timeout=60,
-                    proxies=self._requests_proxies(),
+                    proxies=self._requests_proxies(proxy_kind=proxy_kind),
                 )
             except requests.Timeout as exc:
                 raise UpstreamTemporaryError(
@@ -361,15 +378,15 @@ class AdobeClient:
             )
         return resp
 
-    def _get(self, url: str, headers: dict, timeout: int = 60):
-        session = self._session()
+    def _get(self, url: str, headers: dict, timeout: int = 60, proxy_kind: str = "basic"):
+        session = self._session(proxy_kind=proxy_kind)
         if session is None:
             try:
                 return requests.get(
                     url,
                     headers=headers,
                     timeout=timeout,
-                    proxies=self._requests_proxies(),
+                    proxies=self._requests_proxies(proxy_kind=proxy_kind),
                 )
             except requests.Timeout as exc:
                 raise UpstreamTemporaryError(
@@ -412,7 +429,7 @@ class AdobeClient:
                 url,
                 headers=headers or {},
                 timeout=timeout,
-                proxies=self._requests_proxies(),
+                proxies=self._requests_proxies(proxy_kind="resource"),
                 stream=True,
             ) as resp:
                 resp.raise_for_status()
@@ -448,7 +465,12 @@ class AdobeClient:
             "content-type": mime_type,
             "accept": "application/json",
         }
-        resp = self._post_bytes(self.upload_url, headers=headers, payload=image_bytes)
+        resp = self._post_bytes(
+            self.upload_url,
+            headers=headers,
+            payload=image_bytes,
+            proxy_kind="resource",
+        )
 
         if resp.status_code in (401, 403):
             raise AuthError("Token invalid or expired")
@@ -899,7 +921,10 @@ class AdobeClient:
                         video_bytes = None
                     else:
                         video_resp = self._get(
-                            video_url, headers={"accept": "*/*"}, timeout=60
+                            video_url,
+                            headers={"accept": "*/*"},
+                            timeout=60,
+                            proxy_kind="resource",
                         )
                         video_resp.raise_for_status()
                         video_bytes = video_resp.content
@@ -1143,7 +1168,10 @@ class AdobeClient:
                         image_bytes = None
                     else:
                         img_resp = self._get(
-                            image_url, headers={"accept": "*/*"}, timeout=30
+                            image_url,
+                            headers={"accept": "*/*"},
+                            timeout=30,
+                            proxy_kind="resource",
                         )
                         img_resp.raise_for_status()
                         image_bytes = img_resp.content

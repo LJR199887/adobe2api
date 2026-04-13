@@ -38,6 +38,7 @@ from core.token_mgr import token_manager
 from core.config_mgr import config_manager
 from core.refresh_mgr import refresh_manager
 from core.imgbed_client import ImgBedClient
+from core.proxy_utils import build_requests_proxies, resolve_resource_proxy
 from core.redis_health import check_redis_connection
 from core.stores import (
     ErrorDetailRecord,
@@ -963,7 +964,11 @@ def _load_input_images(messages) -> list[tuple[bytes, str]]:
                     status_code=400,
                     detail="Only http/https or data URL images are supported",
                 )
-            resp = requests.get(image_url, timeout=30)
+            resp = requests.get(
+                image_url,
+                timeout=30,
+                proxies=build_requests_proxies(resolve_resource_proxy(config_manager.get_all())),
+            )
             if resp.status_code != 200:
                 raise HTTPException(
                     status_code=400,

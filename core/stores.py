@@ -180,6 +180,8 @@ class RequestLogStore:
 
         path = str(item.get("path") or "").strip().lower()
         operation = str(item.get("operation") or "").strip().lower()
+        if path.endswith("/v1/video/generations") or operation == "video.generations":
+            return "video"
         if path.endswith("/v1/images/generations") or operation == "images.generations":
             return "image"
         if path.endswith("/v1/chat/completions") or operation == "chat.completions":

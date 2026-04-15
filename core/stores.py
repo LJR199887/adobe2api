@@ -15,6 +15,8 @@ class JobRecord:
     id: str
     prompt: str
     aspect_ratio: str
+    model: Optional[str] = None
+    kind: Optional[str] = None
     status: str = "queued"
     progress: float = 0.0
     image_url: Optional[str] = None
@@ -35,12 +37,20 @@ class JobStore:
             for item in sorted_items[:50]:
                 self._items.pop(item.id, None)
 
-    def create(self, prompt: str, aspect_ratio: str) -> JobRecord:
+    def create(
+        self,
+        prompt: str,
+        aspect_ratio: str,
+        model: Optional[str] = None,
+        kind: Optional[str] = None,
+    ) -> JobRecord:
         now = time.time()
         item = JobRecord(
             id=uuid.uuid4().hex,
             prompt=prompt,
             aspect_ratio=aspect_ratio,
+            model=model,
+            kind=kind,
             created_at=now,
             updated_at=now,
         )

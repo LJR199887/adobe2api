@@ -748,6 +748,277 @@ def build_generation_router(
         normalized["messages"] = [{"role": "user", "content": content}]
         return normalized
 
+    def _wants_async_video_generation(data: dict) -> bool:
+        for key in ("async", "async_mode", "background"):
+            value = (data or {}).get(key)
+            if isinstance(value, bool):
+                if value:
+                    return True
+                continue
+            if isinstance(value, (int, float)):
+                if value != 0:
+                    return True
+                continue
+            if isinstance(value, str):
+                if value.strip().lower() in {"1", "true", "yes", "y", "on"}:
+                    return True
+        return False
+
+    def _format_video_generation_job(job) -> dict:
+        status = str(getattr(job, "status", "") or "queued").strip().lower()
+        public_status = "completed" if status == "succeeded" else status
+        video_url = str(getattr(job, "image_url", "") or "").strip()
+        payload = {
+            "id": f"vidgen-{str(job.id)[:24]}",
+            "object": "video.generation",
+            "created": int(float(getattr(job, "created_at", 0) or time.time())),
+            "model": getattr(job, "model", None),
+            "status": public_status,
+            "task_id": job.id,
+            "progress": float(getattr(job, "progress", 0.0) or 0.0),
+        }
+        if video_url:
+            payload["url"] = video_url
+            payload["video_url"] = video_url
+            payload["data"] = [{"url": video_url}]
+        error = str(getattr(job, "error", "") or "").strip()
+        if error:
+            payload["error"] = error
+        return payload
+
+    def _create_async_video_generation(data: dict, request: Request, prompt: str):
+        normalized_data = _normalize_video_request_data(data, prompt)
+        model_id = str(normalized_data.get("model") or "").strip()
+        if not model_id:
+            return _json_response(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "model is required",
+                        "type": "invalid_request_error",
+                    }
+                },
+                request=request,
+            )
+        if _looks_like_video_model_id(model_id) and model_id not in video_model_catalog:
+            return _json_response(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "Invalid video model. Use /v1/models to get supported sora2, sora2-pro, veo31, veo31-ref or veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
+                        "type": "invalid_request_error",
+                    }
+                },
+                request=request,
+            )
+        video_conf = video_model_catalog.get(model_id)
+        if video_conf is None:
+            return _json_response(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "Only video models are supported on /v1/video/generations",
+                        "type": "invalid_request_error",
+                    }
+                },
+                request=request,
+            )
+
+        resolved_video_conf = _resolve_video_request_config(
+            model_id, normalized_data, video_conf or {}
+        )
+        resolved_model_id = str(
+            resolved_video_conf.get("resolved_model_id") or model_id
+        )
+        ratio = str(resolved_video_conf.get("aspect_ratio") or "9:16")
+        duration = int(resolved_video_conf["duration"])
+        video_resolution = str(resolved_video_conf.get("resolution") or "720p")
+        video_engine = str(resolved_video_conf.get("engine") or "sora2")
+        generate_audio = True
+        negative_prompt = ""
+        video_reference_mode = str(
+            resolved_video_conf.get("reference_mode") or "frame"
+        )
+        resolved_video_options = resolve_video_options(normalized_data)
+        if (
+            isinstance(resolved_video_options, tuple)
+            and len(resolved_video_options) == 3
+        ):
+            generate_audio, negative_prompt, requested_reference_mode = (
+                resolved_video_options
+            )
+            if "reference_mode" not in (video_conf or {}):
+                video_reference_mode = requested_reference_mode
+        else:
+            generate_audio, negative_prompt = resolved_video_options
+        video_locale, timeline_events, video_audio = _resolve_sora_video_extras(
+            normalized_data
+        )
+
+        job = store.create(
+            prompt=prompt,
+            aspect_ratio=ratio,
+            model=resolved_model_id,
+            kind="video",
+        )
+
+        def runner(job_id: str) -> None:
+            store.update(job_id, status="running", progress=1.0)
+            max_attempts = client.retry_max_attempts if client.retry_enabled else 1
+            max_attempts = max(1, int(max_attempts))
+            last_error = "No active tokens available in the pool"
+            try:
+                input_images = load_input_images(normalized_data.get("messages") or [])
+                if (
+                    video_engine == "veo31-standard"
+                    and video_reference_mode == "image"
+                ):
+                    max_video_inputs = 3
+                else:
+                    max_video_inputs = (
+                        2 if video_engine in {"veo31-fast", "veo31-standard"} else 1
+                    )
+                if len(input_images) > max_video_inputs:
+                    raise RuntimeError(
+                        f"video model supports at most {max_video_inputs} input image(s)"
+                    )
+            except Exception as exc:
+                store.update(job_id, status="failed", progress=0.0, error=str(exc))
+                return
+
+            for attempt in range(1, max_attempts + 1):
+                token = token_manager.get_available(
+                    strategy=client.token_rotation_strategy
+                )
+                if not token:
+                    break
+
+                try:
+                    source_image_ids: list[str] = []
+                    for image_bytes, _image_mime in input_images[:max_video_inputs]:
+                        prepared_bytes, prepared_mime = prepare_video_source_image(
+                            image_bytes,
+                            ratio,
+                            video_resolution,
+                        )
+                        source_image_ids.append(
+                            client.upload_image(token, prepared_bytes, prepared_mime)
+                        )
+
+                    def _video_progress_cb(update: dict):
+                        progress = update.get("task_progress")
+                        try:
+                            progress_value = float(progress)
+                        except Exception:
+                            progress_value = None
+                        patch = {"status": "running"}
+                        if progress_value is not None:
+                            patch["progress"] = max(1.0, min(progress_value, 99.0))
+                        error_text = str(update.get("error") or "").strip()
+                        if error_text:
+                            patch["error"] = error_text
+                        store.update(job_id, **patch)
+
+                    imgbed_upload_enabled = bool(use_imgbed_upload())
+                    direct_result_url = (
+                        bool(use_upstream_result_url()) or imgbed_upload_enabled
+                    )
+                    tmp_path = generated_dir / f"{job_id}.video.tmp"
+                    old_size = 0
+                    if not direct_result_url:
+                        try:
+                            if tmp_path.exists():
+                                old_size = int(tmp_path.stat().st_size)
+                        except Exception:
+                            old_size = 0
+
+                    video_bytes, video_meta = client.generate_video(
+                        token=token,
+                        video_conf=resolved_video_conf or {},
+                        prompt=prompt,
+                        aspect_ratio=ratio,
+                        duration=duration,
+                        source_image_ids=source_image_ids,
+                        timeout=max(int(client.generate_timeout), 600),
+                        negative_prompt=negative_prompt,
+                        generate_audio=generate_audio,
+                        locale=video_locale,
+                        timeline_events=timeline_events,
+                        audio=video_audio,
+                        reference_mode=video_reference_mode,
+                        out_path=None if direct_result_url else tmp_path,
+                        progress_cb=_video_progress_cb,
+                        return_upstream_url=direct_result_url,
+                    )
+                    upstream_video_url = _extract_upstream_asset_url(
+                        video_meta, "video"
+                    )
+                    video_ext = video_ext_from_meta(video_meta)
+                    if imgbed_upload_enabled:
+                        if not upstream_video_url:
+                            raise RuntimeError("upstream result url missing")
+                        video_url = upload_generated_asset_to_imgbed(
+                            upstream_video_url,
+                            filename=f"{job_id}.{video_ext}",
+                            mime_type=_video_mime_type(video_ext),
+                        )
+                    elif direct_result_url:
+                        video_url = upstream_video_url
+                        if not video_url:
+                            raise RuntimeError("upstream result url missing")
+                    else:
+                        filename = f"{job_id}.{video_ext}"
+                        out_path = generated_dir / filename
+                        if video_bytes is not None:
+                            out_path.write_bytes(video_bytes)
+                        elif tmp_path.exists():
+                            tmp_path.replace(out_path)
+                        new_size = int(out_path.stat().st_size) if out_path.exists() else 0
+                        on_generated_file_written(out_path, old_size, new_size)
+                        video_url = public_generated_url(request, filename)
+
+                    store.update(
+                        job_id,
+                        status="succeeded",
+                        progress=100.0,
+                        image_url=video_url,
+                        error=None,
+                    )
+                    return
+                except quota_error_cls:
+                    token_manager.report_exhausted(token)
+                    last_error = "Token quota exhausted."
+                    retryable = attempt < max_attempts
+                except auth_error_cls:
+                    token_manager.report_invalid(token)
+                    last_error = "Token invalid or expired."
+                    retryable = attempt < max_attempts
+                except upstream_temp_error_cls as exc:
+                    last_error = str(exc)
+                    retryable = (
+                        attempt < max_attempts
+                        and client.should_retry_temporary_error(exc)
+                    )
+                except Exception as exc:
+                    store.update(job_id, status="failed", error=str(exc))
+                    return
+
+                if retryable:
+                    delay = client._retry_delay_for_attempt(attempt)
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                break
+
+            store.update(job_id, status="failed", error=last_error)
+
+        threading.Thread(target=runner, args=(job.id,), daemon=True).start()
+        return _json_response(
+            status_code=202,
+            content=_format_video_generation_job(job),
+            request=request,
+        )
+
     def _handle_video_generation_request(
         data: dict,
         request: Request,
@@ -1179,12 +1450,23 @@ def build_generation_router(
                 request=request,
             )
         _validate_prompt_length(prompt)
+        if _wants_async_video_generation(data):
+            return _create_async_video_generation(data, request, prompt)
         return _handle_video_generation_request(
             data,
             request,
             prompt=prompt,
             response_mode="video",
         )
+
+    @router.get("/v1/video/generations/{task_id}")
+    def get_video_generation(task_id: str, request: Request):
+        require_service_api_key(request)
+
+        job = store.get(task_id)
+        if not job or str(getattr(job, "kind", "") or "") != "video":
+            raise HTTPException(status_code=404, detail="video generation not found")
+        return _format_video_generation_job(job)
 
     @router.post("/v1/chat/completions")
     def chat_completions(data: dict, request: Request):

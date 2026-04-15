@@ -282,6 +282,7 @@ def _set_request_error_detail(
     op_map = {
         "/v1/chat/completions": "chat.completions",
         "/v1/images/generations": "images.generations",
+        "/v1/video/generations": "video.generations",
         "/api/v1/generate": "api.generate",
     }
     path = str(getattr(getattr(request, "url", None), "path", "") or "")
@@ -505,6 +506,7 @@ async def request_logger(request: Request, call_next):
     op_map = {
         "/v1/chat/completions": "chat.completions",
         "/v1/images/generations": "images.generations",
+        "/v1/video/generations": "video.generations",
     }
     operation = op_map.get(path, "")
     should_log = bool(operation)
@@ -516,6 +518,7 @@ async def request_logger(request: Request, call_next):
             if path in {
                 "/v1/images/generations",
                 "/v1/chat/completions",
+                "/v1/video/generations",
                 "/api/v1/generate",
             }:
                 body_meta = _extract_logging_fields(raw_body)

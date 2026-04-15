@@ -52,6 +52,20 @@ def _video_mime_type(video_ext: str) -> str:
     return "video/mp4"
 
 
+def _looks_like_video_model_id(model_id: str) -> bool:
+    normalized = str(model_id or "").strip().lower()
+    return normalized.startswith(
+        (
+            "sora2",
+            "veo31-fast",
+            "veo31-",
+            "firefly-sora2",
+            "firefly-veo31-fast",
+            "firefly-veo31-",
+        )
+    )
+
+
 def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | None]:
     locale = str(
         data.get("locale")
@@ -302,7 +316,7 @@ def build_generation_router(
                 status_code=400,
                 content={
                     "error": {
-                        "message": "Use /v1/chat/completions for video generation",
+                        "message": "Use /v1/video/generations or /v1/chat/completions for video generation",
                         "type": "invalid_request_error",
                     }
                 },
@@ -683,6 +697,495 @@ def build_generation_router(
             raise HTTPException(status_code=404, detail="task not found")
         return asdict(job)
 
+    def _normalize_video_request_data(data: dict, prompt: str) -> dict:
+        normalized = dict(data or {})
+        messages = normalized.get("messages")
+        if isinstance(messages, list) and messages:
+            return normalized
+
+        image_urls: list[str] = []
+        seen_urls: set[str] = set()
+
+        def _append_image_url(value: Any) -> None:
+            raw_value = value
+            if isinstance(raw_value, dict):
+                raw_value = (
+                    raw_value.get("url")
+                    or raw_value.get("image_url")
+                    or raw_value.get("src")
+                )
+            text = str(raw_value or "").strip()
+            if not text or text in seen_urls:
+                return
+            seen_urls.add(text)
+            image_urls.append(text)
+
+        for key in (
+            "image_url",
+            "image_urls",
+            "input_image",
+            "input_images",
+            "reference_image",
+            "reference_images",
+        ):
+            value = normalized.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    _append_image_url(item)
+            else:
+                _append_image_url(value)
+
+        if not image_urls:
+            return normalized
+
+        content: list[dict[str, Any]] = []
+        if prompt:
+            content.append({"type": "text", "text": prompt})
+        for image_url in image_urls[:6]:
+            content.append(
+                {"type": "image_url", "image_url": {"url": image_url}}
+            )
+        normalized["messages"] = [{"role": "user", "content": content}]
+        return normalized
+
+    def _handle_video_generation_request(
+        data: dict,
+        request: Request,
+        *,
+        prompt: str,
+        response_mode: str,
+    ):
+        route_path = (
+            "/v1/video/generations"
+            if response_mode == "video"
+            else "/v1/chat/completions"
+        )
+        operation_name = (
+            "video.generations" if response_mode == "video" else "chat.completions"
+        )
+        normalized_data = _normalize_video_request_data(data, prompt)
+        model_id = str(normalized_data.get("model") or "").strip()
+        if not model_id:
+            return _json_response(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "model is required",
+                        "type": "invalid_request_error",
+                    }
+                },
+                request=request,
+            )
+        if _looks_like_video_model_id(model_id) and model_id not in video_model_catalog:
+            return _json_response(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "Invalid video model. Use /v1/models to get supported sora2, sora2-pro, veo31, veo31-ref or veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
+                        "type": "invalid_request_error",
+                    }
+                },
+                request=request,
+            )
+        video_conf = video_model_catalog.get(model_id)
+        if video_conf is None:
+            return _json_response(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": f"Only video models are supported on {route_path}",
+                        "type": "invalid_request_error",
+                    }
+                },
+                request=request,
+            )
+        if response_mode == "video" and bool(normalized_data.get("stream", False)):
+            return _json_response(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "stream is not supported on /v1/video/generations",
+                        "type": "invalid_request_error",
+                    }
+                },
+                request=request,
+            )
+
+        resolved_video_conf = _resolve_video_request_config(
+            model_id, normalized_data, video_conf or {}
+        )
+        resolved_model_id = str(
+            resolved_video_conf.get("resolved_model_id") or model_id
+        )
+        ratio = str(resolved_video_conf.get("aspect_ratio") or "9:16")
+        duration = int(resolved_video_conf["duration"])
+        video_resolution = str(resolved_video_conf.get("resolution") or "720p")
+        video_engine = str(resolved_video_conf.get("engine") or "sora2")
+        generate_audio = True
+        negative_prompt = ""
+        video_locale = "en-US"
+        timeline_events = None
+        video_audio = None
+        video_reference_mode = str(
+            resolved_video_conf.get("reference_mode") or "frame"
+        )
+        resolved_video_options = resolve_video_options(normalized_data)
+        if (
+            isinstance(resolved_video_options, tuple)
+            and len(resolved_video_options) == 3
+        ):
+            generate_audio, negative_prompt, requested_reference_mode = (
+                resolved_video_options
+            )
+            if "reference_mode" not in (video_conf or {}):
+                video_reference_mode = requested_reference_mode
+        else:
+            generate_audio, negative_prompt = resolved_video_options
+        video_locale, timeline_events, video_audio = _resolve_sora_video_extras(
+            normalized_data
+        )
+
+        try:
+            input_images = load_input_images(normalized_data.get("messages") or [])
+            set_request_task_progress(
+                request, task_status="IN_PROGRESS", task_progress=0.0
+            )
+
+            def _run_once(token: str):
+                source_image_ids: list[str] = []
+                if (
+                    video_engine == "veo31-standard"
+                    and video_reference_mode == "image"
+                ):
+                    max_video_inputs = 3
+                else:
+                    max_video_inputs = (
+                        2 if video_engine in {"veo31-fast", "veo31-standard"} else 1
+                    )
+                if len(input_images) > max_video_inputs:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"video model supports at most {max_video_inputs} input image(s)",
+                    )
+                for image_bytes, _image_mime in input_images[:max_video_inputs]:
+                    prepared_bytes, prepared_mime = prepare_video_source_image(
+                        image_bytes,
+                        ratio,
+                        video_resolution,
+                    )
+                    source_image_ids.append(
+                        client.upload_image(token, prepared_bytes, prepared_mime)
+                    )
+
+                def _video_progress_cb(update: dict):
+                    set_request_task_progress(
+                        request,
+                        task_status=str(update.get("task_status") or "IN_PROGRESS"),
+                        task_progress=update.get("task_progress"),
+                        upstream_job_id=update.get("upstream_job_id"),
+                        retry_after=update.get("retry_after"),
+                        error=update.get("error"),
+                    )
+
+                imgbed_upload_enabled = bool(use_imgbed_upload())
+                direct_result_url = (
+                    bool(use_upstream_result_url()) or imgbed_upload_enabled
+                )
+                task_id = uuid.uuid4().hex
+                tmp_path = generated_dir / f"{task_id}.video.tmp"
+                old_size = 0
+                if not direct_result_url:
+                    try:
+                        if tmp_path.exists():
+                            old_size = int(tmp_path.stat().st_size)
+                    except Exception:
+                        old_size = 0
+
+                video_bytes, video_meta = client.generate_video(
+                    token=token,
+                    video_conf=resolved_video_conf or {},
+                    prompt=prompt,
+                    aspect_ratio=ratio,
+                    duration=duration,
+                    source_image_ids=source_image_ids,
+                    timeout=max(int(client.generate_timeout), 600),
+                    negative_prompt=negative_prompt,
+                    generate_audio=generate_audio,
+                    locale=video_locale,
+                    timeline_events=timeline_events,
+                    audio=video_audio,
+                    reference_mode=video_reference_mode,
+                    out_path=None if direct_result_url else tmp_path,
+                    progress_cb=_video_progress_cb,
+                    return_upstream_url=direct_result_url,
+                )
+                upstream_video_url = _extract_upstream_asset_url(video_meta, "video")
+                video_ext = video_ext_from_meta(video_meta)
+                if imgbed_upload_enabled:
+                    if not upstream_video_url:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="upstream result url missing",
+                        )
+                    video_url = upload_generated_asset_to_imgbed(
+                        upstream_video_url,
+                        filename=f"{task_id}.{video_ext}",
+                        mime_type=_video_mime_type(video_ext),
+                    )
+                elif direct_result_url:
+                    video_url = upstream_video_url
+                    if not video_url:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="upstream result url missing",
+                        )
+                else:
+                    filename = f"{task_id}.{video_ext}"
+                    out_path = generated_dir / filename
+                    if video_bytes is not None:
+                        out_path.write_bytes(video_bytes)
+                    elif tmp_path.exists():
+                        tmp_path.replace(out_path)
+                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
+                    on_generated_file_written(out_path, old_size, new_size)
+                    video_url = public_generated_url(request, filename)
+
+                set_request_preview(request, video_url, kind="video")
+                created_ts = int(time.time())
+                return {
+                    "id": f"vidgen-{task_id[:24]}",
+                    "object": "video.generation",
+                    "created": created_ts,
+                    "model": resolved_model_id,
+                    "status": "completed",
+                    "task_id": task_id,
+                    "url": video_url,
+                    "video_url": video_url,
+                    "data": [{"url": video_url}],
+                }
+
+            result = run_with_token_retries(
+                request=request,
+                operation_name=operation_name,
+                run_once=_run_once,
+            )
+            if response_mode == "video":
+                return result
+
+            video_url = str(result.get("url") or "").strip()
+            response_payload = {
+                "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
+                "object": "chat.completion",
+                "created": int(result.get("created") or time.time()),
+                "model": str(result.get("model") or resolved_model_id),
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": f"```html\n<video src='{video_url}' controls></video>\n```",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": 0,
+                },
+            }
+            if bool(normalized_data.get("stream", False)):
+                return StreamingResponse(
+                    sse_chat_stream(response_payload),
+                    media_type="text/event-stream",
+                )
+            return response_payload
+        except quota_error_cls:
+            error_code = str(
+                getattr(request.state, "log_error_code", "") or ""
+            ) or set_request_error_detail(
+                request,
+                error="Token quota exhausted",
+                status_code=429,
+                error_type="rate_limit_error",
+                include_traceback=False,
+            )
+            set_request_task_progress(
+                request,
+                task_status="FAILED",
+                task_progress=0.0,
+                error="Token quota exhausted",
+            )
+            return _json_response(
+                status_code=429,
+                content={
+                    "error": {
+                        "message": "Token quota exhausted",
+                        "type": "rate_limit_error",
+                        "code": error_code,
+                    }
+                },
+                request=request,
+            )
+        except auth_error_cls:
+            error_code = str(
+                getattr(request.state, "log_error_code", "") or ""
+            ) or set_request_error_detail(
+                request,
+                error="Token invalid or expired",
+                status_code=401,
+                error_type="authentication_error",
+                include_traceback=False,
+            )
+            set_request_task_progress(
+                request,
+                task_status="FAILED",
+                task_progress=0.0,
+                error="Token invalid or expired",
+            )
+            return _json_response(
+                status_code=401,
+                content={
+                    "error": {
+                        "message": "Token invalid or expired",
+                        "type": "authentication_error",
+                        "code": error_code,
+                    }
+                },
+                request=request,
+            )
+        except upstream_temp_error_cls as exc:
+            error_code = str(
+                getattr(request.state, "log_error_code", "") or ""
+            ) or set_request_error_detail(
+                request,
+                error=exc,
+                status_code=503,
+                error_type="server_error",
+                include_traceback=False,
+            )
+            set_request_task_progress(
+                request, task_status="FAILED", task_progress=0.0, error=str(exc)
+            )
+            return _json_response(
+                status_code=503,
+                content={
+                    "error": {
+                        "message": str(exc),
+                        "type": "server_error",
+                        "code": error_code,
+                    }
+                },
+                request=request,
+            )
+        except HTTPException as exc:
+            err_type = (
+                "invalid_request_error"
+                if 400 <= int(exc.status_code) < 500
+                else "server_error"
+            )
+            error_code = set_request_error_detail(
+                request,
+                error=str(exc.detail),
+                status_code=exc.status_code,
+                error_type=err_type,
+                include_traceback=False,
+            )
+            set_request_task_progress(
+                request, task_status="FAILED", task_progress=0.0, error=str(exc.detail)
+            )
+            return _json_response(
+                status_code=exc.status_code,
+                content={
+                    "error": {
+                        "message": str(exc.detail),
+                        "type": err_type,
+                        "code": error_code,
+                    }
+                },
+                request=request,
+            )
+        except Exception as exc:
+            normalized = _normalize_upstream_request_error(exc)
+            if normalized is not None:
+                status_code, err_type, message = normalized
+                error_code = set_request_error_detail(
+                    request,
+                    error=message,
+                    status_code=status_code,
+                    error_type=err_type,
+                    include_traceback=False,
+                )
+                set_request_task_progress(
+                    request, task_status="FAILED", task_progress=0.0, error=message
+                )
+                return _json_response(
+                    status_code=status_code,
+                    content={
+                        "error": {
+                            "message": message,
+                            "type": err_type,
+                            "code": error_code,
+                        }
+                    },
+                    request=request,
+                )
+            error_code = set_request_error_detail(
+                request,
+                error=exc,
+                status_code=500,
+                error_type="server_error",
+                include_traceback=True,
+            )
+            logger.exception(
+                "Unhandled error in %s log_id=%s model=%s resolved_model=%s is_video_model=%s",
+                route_path,
+                getattr(request.state, "log_id", ""),
+                model_id,
+                resolved_model_id,
+                True,
+            )
+            set_request_task_progress(
+                request, task_status="FAILED", task_progress=0.0, error=str(exc)
+            )
+            return _json_response(
+                status_code=500,
+                content={
+                    "error": {
+                        "message": str(exc),
+                        "type": "server_error",
+                        "code": error_code,
+                    }
+                },
+                request=request,
+            )
+
+    @router.post("/v1/video/generations")
+    def video_generations(data: dict, request: Request):
+        require_service_api_key(request)
+
+        prompt = extract_prompt_from_messages(data.get("messages") or [])
+        if not prompt:
+            prompt = str(data.get("prompt") or "").strip()
+        if not prompt:
+            return _json_response(
+                status_code=400,
+                content={
+                    "error": {
+                        "message": "messages or prompt is required",
+                        "type": "invalid_request_error",
+                    }
+                },
+                request=request,
+            )
+        _validate_prompt_length(prompt)
+        return _handle_video_generation_request(
+            data,
+            request,
+            prompt=prompt,
+            response_mode="video",
+        )
+
     @router.post("/v1/chat/completions")
     def chat_completions(data: dict, request: Request):
         require_service_api_key(request)
@@ -703,14 +1206,7 @@ def build_generation_router(
             )
 
         model_id = str(data.get("model") or "").strip()
-        if (
-            model_id.startswith("sora2")
-            or model_id.startswith("veo31-fast")
-            or model_id.startswith("veo31-")
-            or model_id.startswith("firefly-sora2")
-            or model_id.startswith("firefly-veo31-fast")
-            or model_id.startswith("firefly-veo31-")
-        ) and model_id not in video_model_catalog:
+        if _looks_like_video_model_id(model_id) and model_id not in video_model_catalog:
             return _json_response(
                 status_code=400,
                 content={
@@ -721,64 +1217,19 @@ def build_generation_router(
                 },
                 request=request,
             )
-        video_conf = video_model_catalog.get(model_id)
-        is_video_model = video_conf is not None
-        if not is_video_model:
-            _validate_prompt_length(prompt)
-        resolved_video_conf = (
-            _resolve_video_request_config(model_id, data, video_conf or {})
-            if is_video_model
-            else {}
-        )
-        resolved_model_id = (
-            str(resolved_video_conf.get("resolved_model_id") or model_id)
-            if is_video_model
-            else None
-        )
-        ratio = "9:16"
-        output_resolution = "2K"
-        duration = int(resolved_video_conf["duration"]) if is_video_model else 12
-        video_resolution = (
-            str(resolved_video_conf.get("resolution") or "720p")
-            if is_video_model
-            else "720p"
-        )
-        if is_video_model:
-            ratio = str(resolved_video_conf.get("aspect_ratio") or ratio)
-        video_engine = (
-            str(resolved_video_conf.get("engine") or "sora2") if is_video_model else ""
-        )
-        generate_audio = True
-        negative_prompt = ""
-        video_locale = "en-US"
-        timeline_events = None
-        video_audio = None
-        video_reference_mode = (
-            str(resolved_video_conf.get("reference_mode") or "frame")
-            if is_video_model
-            else "frame"
-        )
-        if is_video_model:
-            resolved_video_options = resolve_video_options(data)
-            if (
-                isinstance(resolved_video_options, tuple)
-                and len(resolved_video_options) == 3
-            ):
-                generate_audio, negative_prompt, requested_reference_mode = (
-                    resolved_video_options
-                )
-                if "reference_mode" not in (video_conf or {}):
-                    video_reference_mode = requested_reference_mode
-            else:
-                generate_audio, negative_prompt = resolved_video_options
-            video_locale, timeline_events, video_audio = _resolve_sora_video_extras(data)
-        else:
-            ratio, output_resolution, resolved_model_id = resolve_ratio_and_resolution(
-                data, model_id or None
+        if model_id in video_model_catalog:
+            return _handle_video_generation_request(
+                data,
+                request,
+                prompt=prompt,
+                response_mode="chat",
             )
-        image_model_conf = (
-            resolve_model(resolved_model_id) if not is_video_model else {}
+
+        _validate_prompt_length(prompt)
+        ratio, output_resolution, resolved_model_id = resolve_ratio_and_resolution(
+            data, model_id or None
         )
+        image_model_conf = resolve_model(resolved_model_id)
 
         try:
             input_images = load_input_images(data.get("messages") or [])
@@ -789,184 +1240,80 @@ def build_generation_router(
             def _run_once(token: str):
                 source_image_ids: list[str] = []
                 image_url = ""
-                response_content = ""
-
-                if is_video_model:
-                    if (
-                        video_engine == "veo31-standard"
-                        and video_reference_mode == "image"
-                    ):
-                        max_video_inputs = 3
-                    else:
-                        max_video_inputs = (
-                            2 if video_engine in {"veo31-fast", "veo31-standard"} else 1
+                for image_bytes, image_mime in input_images:
+                    source_image_ids.append(
+                        client.upload_image(
+                            token, image_bytes, image_mime or "image/jpeg"
                         )
-                    if len(input_images) > max_video_inputs:
+                    )
+
+                def _image_progress_cb(update: dict):
+                    set_request_task_progress(
+                        request,
+                        task_status=str(update.get("task_status") or "IN_PROGRESS"),
+                        task_progress=update.get("task_progress"),
+                        upstream_job_id=update.get("upstream_job_id"),
+                        retry_after=update.get("retry_after"),
+                        error=update.get("error"),
+                    )
+
+                imgbed_upload_enabled = bool(use_imgbed_upload())
+                direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
+                job_id = uuid.uuid4().hex
+                out_path = generated_dir / f"{job_id}.png"
+                old_size = 0
+                if not direct_result_url:
+                    try:
+                        if out_path.exists():
+                            old_size = int(out_path.stat().st_size)
+                    except Exception:
+                        old_size = 0
+
+                image_bytes, meta = client.generate(
+                    token=token,
+                    prompt=prompt,
+                    aspect_ratio=ratio,
+                    output_resolution=output_resolution,
+                    upstream_model_id=str(
+                        image_model_conf.get("upstream_model_id") or "gemini-flash"
+                    ),
+                    upstream_model_version=str(
+                        image_model_conf.get("upstream_model_version")
+                        or "nano-banana-2"
+                    ),
+                    source_image_ids=source_image_ids,
+                    timeout=client.generate_timeout,
+                    out_path=None if direct_result_url else out_path,
+                    progress_cb=_image_progress_cb,
+                    return_upstream_url=direct_result_url,
+                )
+                upstream_image_url = _extract_upstream_asset_url(meta, "image")
+                if imgbed_upload_enabled:
+                    if not upstream_image_url:
                         raise HTTPException(
-                            status_code=400,
-                            detail=f"video model supports at most {max_video_inputs} input image(s)",
+                            status_code=502,
+                            detail="upstream result url missing",
                         )
-                    for image_bytes, _image_mime in input_images[:max_video_inputs]:
-                        prepared_bytes, prepared_mime = prepare_video_source_image(
-                            image_bytes,
-                            ratio,
-                            video_resolution,
-                        )
-                        source_image_ids.append(
-                            client.upload_image(token, prepared_bytes, prepared_mime)
-                        )
-
-                    def _video_progress_cb(update: dict):
-                        set_request_task_progress(
-                            request,
-                            task_status=str(update.get("task_status") or "IN_PROGRESS"),
-                            task_progress=update.get("task_progress"),
-                            upstream_job_id=update.get("upstream_job_id"),
-                            retry_after=update.get("retry_after"),
-                            error=update.get("error"),
-                        )
-
-                    imgbed_upload_enabled = bool(use_imgbed_upload())
-                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
-                    job_id = uuid.uuid4().hex
-                    tmp_path = generated_dir / f"{job_id}.video.tmp"
-                    old_size = 0
-                    if not direct_result_url:
-                        try:
-                            if tmp_path.exists():
-                                old_size = int(tmp_path.stat().st_size)
-                        except Exception:
-                            old_size = 0
-
-                    video_bytes, video_meta = client.generate_video(
-                        token=token,
-                        video_conf=resolved_video_conf or {},
-                        prompt=prompt,
-                        aspect_ratio=ratio,
-                        duration=duration,
-                        source_image_ids=source_image_ids,
-                        timeout=max(int(client.generate_timeout), 600),
-                        negative_prompt=negative_prompt,
-                        generate_audio=generate_audio,
-                        locale=video_locale,
-                        timeline_events=timeline_events,
-                        audio=video_audio,
-                        reference_mode=video_reference_mode,
-                        out_path=None if direct_result_url else tmp_path,
-                        progress_cb=_video_progress_cb,
-                        return_upstream_url=direct_result_url,
+                    image_url = upload_generated_asset_to_imgbed(
+                        upstream_image_url,
+                        filename=f"{job_id}.png",
+                        mime_type="image/png",
                     )
-                    upstream_video_url = _extract_upstream_asset_url(video_meta, "video")
-                    video_ext = video_ext_from_meta(video_meta)
-                    if imgbed_upload_enabled:
-                        if not upstream_video_url:
-                            raise HTTPException(
-                                status_code=502,
-                                detail="upstream result url missing",
-                            )
-                        image_url = upload_generated_asset_to_imgbed(
-                            upstream_video_url,
-                            filename=f"{job_id}.{video_ext}",
-                            mime_type=_video_mime_type(video_ext),
+                elif direct_result_url:
+                    image_url = upstream_image_url
+                    if not image_url:
+                        raise HTTPException(
+                            status_code=502,
+                            detail="upstream result url missing",
                         )
-                    elif direct_result_url:
-                        image_url = upstream_video_url
-                        if not image_url:
-                            raise HTTPException(
-                                status_code=502,
-                                detail="upstream result url missing",
-                            )
-                    else:
-                        filename = f"{job_id}.{video_ext}"
-                        out_path = generated_dir / filename
-                        if video_bytes is not None:
-                            out_path.write_bytes(video_bytes)
-                        elif tmp_path.exists():
-                            tmp_path.replace(out_path)
-                        new_size = (
-                            int(out_path.stat().st_size) if out_path.exists() else 0
-                        )
-                        on_generated_file_written(out_path, old_size, new_size)
-                        image_url = public_generated_url(request, filename)
-                    set_request_preview(request, image_url, kind="video")
-                    response_content = (
-                        f"```html\n<video src='{image_url}' controls></video>\n```"
-                    )
                 else:
-                    for image_bytes, image_mime in input_images:
-                        source_image_ids.append(
-                            client.upload_image(
-                                token, image_bytes, image_mime or "image/jpeg"
-                            )
-                        )
-
-                    def _image_progress_cb(update: dict):
-                        set_request_task_progress(
-                            request,
-                            task_status=str(update.get("task_status") or "IN_PROGRESS"),
-                            task_progress=update.get("task_progress"),
-                            upstream_job_id=update.get("upstream_job_id"),
-                            retry_after=update.get("retry_after"),
-                            error=update.get("error"),
-                        )
-
-                    imgbed_upload_enabled = bool(use_imgbed_upload())
-                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
-                    job_id = uuid.uuid4().hex
-                    out_path = generated_dir / f"{job_id}.png"
-                    old_size = 0
-                    if not direct_result_url:
-                        try:
-                            if out_path.exists():
-                                old_size = int(out_path.stat().st_size)
-                        except Exception:
-                            old_size = 0
-
-                    image_bytes, meta = client.generate(
-                        token=token,
-                        prompt=prompt,
-                        aspect_ratio=ratio,
-                        output_resolution=output_resolution,
-                        upstream_model_id=str(
-                            image_model_conf.get("upstream_model_id") or "gemini-flash"
-                        ),
-                        upstream_model_version=str(
-                            image_model_conf.get("upstream_model_version")
-                            or "nano-banana-2"
-                        ),
-                        source_image_ids=source_image_ids,
-                        timeout=client.generate_timeout,
-                        out_path=None if direct_result_url else out_path,
-                        progress_cb=_image_progress_cb,
-                        return_upstream_url=direct_result_url,
-                    )
-                    upstream_image_url = _extract_upstream_asset_url(meta, "image")
-                    if imgbed_upload_enabled:
-                        if not upstream_image_url:
-                            raise HTTPException(
-                                status_code=502,
-                                detail="upstream result url missing",
-                            )
-                        image_url = upload_generated_asset_to_imgbed(
-                            upstream_image_url,
-                            filename=f"{job_id}.png",
-                            mime_type="image/png",
-                        )
-                    elif direct_result_url:
-                        image_url = upstream_image_url
-                        if not image_url:
-                            raise HTTPException(
-                                status_code=502,
-                                detail="upstream result url missing",
-                            )
-                    else:
-                        if image_bytes is not None:
-                            out_path.write_bytes(image_bytes)
-                        new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                        on_generated_file_written(out_path, old_size, new_size)
-                        image_url = public_image_url(request, job_id)
-                    set_request_preview(request, image_url, kind="image")
-                    response_content = f"![Generated Image]({image_url})"
+                    if image_bytes is not None:
+                        out_path.write_bytes(image_bytes)
+                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
+                    on_generated_file_written(out_path, old_size, new_size)
+                    image_url = public_image_url(request, job_id)
+                set_request_preview(request, image_url, kind="image")
+                response_content = f"![Generated Image]({image_url})"
 
                 response_payload = {
                     "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
@@ -1139,11 +1486,10 @@ def build_generation_router(
                 include_traceback=True,
             )
             logger.exception(
-                "Unhandled error in /v1/chat/completions log_id=%s model=%s resolved_model=%s is_video_model=%s",
+                "Unhandled error in /v1/chat/completions log_id=%s model=%s resolved_model=%s",
                 getattr(request.state, "log_id", ""),
                 model_id,
                 resolved_model_id,
-                is_video_model,
             )
             set_request_task_progress(
                 request, task_status="FAILED", task_progress=0.0, error=str(exc)

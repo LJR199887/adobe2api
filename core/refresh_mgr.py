@@ -261,6 +261,32 @@ class RefreshManager:
             return "; ".join(pairs)
         return ""
 
+    @classmethod
+    def cookie_fingerprint(cls, cookie_input) -> str:
+        cookie = cls._cookie_string_from_input(cookie_input)
+        if not cookie:
+            return ""
+
+        pairs: List[List[str]] = []
+        for part in cookie.split(";"):
+            text = part.strip()
+            if not text:
+                continue
+            if "=" in text:
+                key, val = text.split("=", 1)
+                key = key.strip()
+                val = val.strip()
+            else:
+                key = text.strip()
+                val = ""
+            if key:
+                pairs.append([key, val])
+
+        if not pairs:
+            return ""
+        pairs.sort(key=lambda item: (item[0].casefold(), item[0], item[1]))
+        return json.dumps(pairs, ensure_ascii=False, separators=(",", ":"))
+
     def import_cookie(self, cookie_input, name: Optional[str] = None) -> Dict:
         cookie = self._cookie_string_from_input(cookie_input)
         if not cookie:
@@ -377,6 +403,20 @@ class RefreshManager:
             self._profiles = [p for p in self._profiles if p.get("id") != profile_id]
             self._save_profiles()
         token_manager.remove_auto_refresh_by_profile(profile_id)
+
+    def _remove_profiles_only(self, profile_ids: List[str]):
+        remove_ids = {str(x or "").strip() for x in profile_ids if str(x or "").strip()}
+        if not remove_ids:
+            return
+        with self._lock:
+            before_count = len(self._profiles)
+            self._profiles = [
+                p
+                for p in self._profiles
+                if str(p.get("id") or "").strip() not in remove_ids
+            ]
+            if len(self._profiles) != before_count:
+                self._save_profiles()
 
     def set_enabled(self, profile_id: str, enabled: bool) -> Dict:
         with self._lock:
@@ -643,6 +683,12 @@ class RefreshManager:
             profile_name=profile_name,
             profile_email=profile_email,
         )
+        merged_profile_ids = [
+            str(x or "").strip()
+            for x in token_record.get("_merged_refresh_profile_ids", [])
+            if str(x or "").strip() and str(x or "").strip() != str(snapshot["id"])
+        ]
+        self._remove_profiles_only(merged_profile_ids)
 
         credits_error = ""
         token_id = str(token_record.get("id") or "").strip()

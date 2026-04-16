@@ -888,6 +888,21 @@ def build_admin_router(
         failed = []
         refreshed = []
         refresh_failed = []
+        retained_by_cookie = {}
+        invalid_entries = []
+
+        for idx, item in enumerate(req.items):
+            fingerprint = refresh_manager.cookie_fingerprint(item.cookie)
+            if not fingerprint:
+                invalid_entries.append((idx, item))
+                continue
+            retained_by_cookie[fingerprint] = (idx, item)
+
+        import_entries = sorted(
+            [*retained_by_cookie.values(), *invalid_entries],
+            key=lambda pair: pair[0],
+        )
+        deduplicated_count = len(req.items) - len(import_entries)
 
         def import_one(idx: int, item):
             try:
@@ -933,11 +948,11 @@ def build_admin_router(
                 "refresh_failed": refresh_failed_item,
             }
 
-        max_workers = min(get_batch_concurrency(), len(req.items))
+        max_workers = min(get_batch_concurrency(), len(import_entries))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(import_one, idx, item)
-                for idx, item in enumerate(req.items)
+                for idx, item in import_entries
             ]
             done_items = [future.result() for future in as_completed(futures)]
 
@@ -959,6 +974,8 @@ def build_admin_router(
                 else ("partial" if imported else "failed")
             ),
             "total": len(req.items),
+            "processed_count": len(import_entries),
+            "deduplicated_count": deduplicated_count,
             "imported_count": len(imported),
             "failed_count": len(failed),
             "refreshed_count": len(refreshed),

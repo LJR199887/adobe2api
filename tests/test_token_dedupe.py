@@ -29,6 +29,19 @@ def test_cookie_import_token_overwrites_existing_token(tmp_path, monkeypatch):
     assert manager.tokens[0]["refresh_profile_email"] == "imported@example.com"
 
 
+def test_add_marks_duplicate_token(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+
+    first = manager.add("token-A")
+    second = manager.add("Bearer token-A")
+
+    assert first["_created"] is True
+    assert first["_duplicate"] is False
+    assert second["_created"] is False
+    assert second["_duplicate"] is True
+    assert len(manager.tokens) == 1
+
+
 def test_auto_refresh_upsert_merges_duplicate_value_and_profile(tmp_path, monkeypatch):
     manager = make_token_manager(tmp_path, monkeypatch)
     existing = manager.add(
@@ -57,6 +70,7 @@ def test_auto_refresh_upsert_merges_duplicate_value_and_profile(tmp_path, monkey
 
     assert result["id"] == existing["id"]
     assert result["_merged_refresh_profile_ids"] == ["profile-old"]
+    assert result["_duplicate_token"] is True
     assert len(manager.tokens) == 1
     assert manager.tokens[0]["id"] == existing["id"]
     assert manager.tokens[0]["value"] == "token-A"

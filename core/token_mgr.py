@@ -68,7 +68,10 @@ class TokenManager:
                     if meta:
                         t.update(meta)
                         self.save()
-                    return t
+                    result = dict(t)
+                    result["_created"] = False
+                    result["_duplicate"] = True
+                    return result
 
             new_token = {
                 "id": uuid.uuid4().hex[:8],
@@ -82,7 +85,10 @@ class TokenManager:
                 new_token.update(meta)
             self.tokens.append(new_token)
             self.save()
-            return new_token
+            result = dict(new_token)
+            result["_created"] = True
+            result["_duplicate"] = False
+            return result
 
     def upsert_auto_refresh_token(
         self,
@@ -119,6 +125,7 @@ class TokenManager:
             # refresh profile own it.
             target = value_target or profile_target
             if target is not None:
+                duplicate_token = value_target is not None
                 removed_profile_ids = set()
                 previous_profile_id = str(target.get("refresh_profile_id") or "").strip()
                 if previous_profile_id and previous_profile_id != pid:
@@ -153,6 +160,8 @@ class TokenManager:
 
                 self.save()
                 result = dict(target)
+                result["_created"] = False
+                result["_duplicate_token"] = duplicate_token
                 if removed_profile_ids:
                     result["_merged_refresh_profile_ids"] = sorted(removed_profile_ids)
                 return result
@@ -173,7 +182,10 @@ class TokenManager:
             }
             self.tokens.append(new_token)
             self.save()
-            return dict(new_token)
+            result = dict(new_token)
+            result["_created"] = True
+            result["_duplicate_token"] = False
+            return result
 
     def remove(self, tid: str):
         with self._lock:

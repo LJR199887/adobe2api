@@ -708,6 +708,8 @@ class RefreshManager:
             "profile_email": profile_email,
             "expires_in": data.get("expires_in"),
             "credits_error": credits_error,
+            "token_duplicate": bool(token_record.get("_duplicate_token")),
+            "token_created": bool(token_record.get("_created")),
         }
 
     def start(self):

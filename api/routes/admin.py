@@ -369,8 +369,15 @@ def build_admin_router(
         require_admin_auth(request)
         if not req.token.strip():
             raise HTTPException(status_code=400, detail="Empty token")
-        token_manager.add(req.token)
-        return {"status": "ok"}
+        result = token_manager.add(req.token)
+        duplicate_count = 1 if bool(result.get("_duplicate")) else 0
+        success_count = 0 if duplicate_count else 1
+        return {
+            "status": "ok",
+            "success_count": success_count,
+            "failed_count": 0,
+            "duplicate_count": duplicate_count,
+        }
 
     @router.post("/api/v1/tokens/batch")
     def add_tokens_batch(req: TokenBatchAddRequest, request: Request):
@@ -378,18 +385,31 @@ def build_admin_router(
         if not req.tokens:
             raise HTTPException(status_code=400, detail="tokens is required")
 
-        added_count = 0
+        success_count = 0
+        failed_count = 0
+        duplicate_count = 0
         for raw in req.tokens:
             token = str(raw or "").strip()
             if not token:
+                failed_count += 1
                 continue
-            token_manager.add(token)
-            added_count += 1
+            result = token_manager.add(token)
+            if bool(result.get("_duplicate")):
+                duplicate_count += 1
+            else:
+                success_count += 1
 
-        if added_count == 0:
+        if success_count == 0 and duplicate_count == 0:
             raise HTTPException(status_code=400, detail="no valid token provided")
 
-        return {"status": "ok", "added_count": added_count}
+        return {
+            "status": "ok" if failed_count == 0 else "partial",
+            "total": len(req.tokens),
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "duplicate_count": duplicate_count,
+            "added_count": success_count,
+        }
 
     @router.post("/api/v1/tokens/export")
     def export_tokens(req: ExportSelectionRequest, request: Request):
@@ -867,11 +887,22 @@ def build_admin_router(
                 )
             except Exception as exc:
                 refresh_error = str(exc)
+            duplicate_count = (
+                1
+                if isinstance(refresh_result, dict)
+                and bool(refresh_result.get("token_duplicate"))
+                else 0
+            )
+            failed_count = 1 if refresh_error else 0
+            success_count = 0 if (failed_count or duplicate_count) else 1
             return {
                 "status": "ok" if not refresh_error else "partial",
                 "profile": profile,
                 "refresh_result": refresh_result,
                 "refresh_error": refresh_error,
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "duplicate_count": duplicate_count,
             }
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -902,7 +933,8 @@ def build_admin_router(
             [*retained_by_cookie.values(), *invalid_entries],
             key=lambda pair: pair[0],
         )
-        deduplicated_count = len(req.items) - len(import_entries)
+        request_duplicate_count = len(req.items) - len(import_entries)
+        token_duplicate_count = 0
 
         def import_one(idx: int, item):
             try:
@@ -964,8 +996,14 @@ def build_admin_router(
                 failed.append(item["failed"])
             if item["refreshed"] is not None:
                 refreshed.append(item["refreshed"])
+                if bool((item["refreshed"].get("result") or {}).get("token_duplicate")):
+                    token_duplicate_count += 1
             if item["refresh_failed"] is not None:
                 refresh_failed.append(item["refresh_failed"])
+
+        success_count = max(0, len(refreshed) - token_duplicate_count)
+        duplicate_count = request_duplicate_count + token_duplicate_count
+        error_count = len(failed) + len(refresh_failed)
 
         result = {
             "status": (
@@ -975,7 +1013,10 @@ def build_admin_router(
             ),
             "total": len(req.items),
             "processed_count": len(import_entries),
-            "deduplicated_count": deduplicated_count,
+            "deduplicated_count": request_duplicate_count,
+            "success_count": success_count,
+            "duplicate_count": duplicate_count,
+            "error_count": error_count,
             "imported_count": len(imported),
             "failed_count": len(failed),
             "refreshed_count": len(refreshed),

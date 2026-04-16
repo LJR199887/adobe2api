@@ -403,6 +403,7 @@ class RefreshManager:
                 self._profiles.append(target)
             self._save_profiles()
 
+        reused_existing_profile = str(target.get("id") or "").strip() != profile_id
         for profile_id in removed_profile_ids:
             if profile_id:
                 token_manager.remove_auto_refresh_by_profile(profile_id)
@@ -411,7 +412,9 @@ class RefreshManager:
             current = self._find_profile_locked(str(target.get("id") or "").strip())
             if not current:
                 raise KeyError("profile not found after import")
-            return self._summary_locked(current)
+            summary = self._summary_locked(current)
+            summary["reused_existing_profile"] = reused_existing_profile
+            return summary
 
     def export_cookies(self, ids: Optional[List[str]] = None) -> List[Dict]:
         selected_ids = None

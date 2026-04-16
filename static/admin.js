@@ -1334,11 +1334,43 @@ document.addEventListener("DOMContentLoaded", async () => {
     return Number.isFinite(value) ? value : 0;
   }
 
+  function getImportRequestDuplicateCount(payload) {
+    const value = Number(payload?.request_duplicate_count ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getImportListDuplicateCount(payload) {
+    const value = Number(payload?.list_duplicate_count ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getImportOverwrittenCount(payload) {
+    const value = Number(payload?.overwritten_count ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  }
+
   function buildImportSummaryText(label, payload) {
     const success = getImportSuccessCount(payload);
     const failed = getImportFailedCount(payload);
     const duplicate = getImportDuplicateCount(payload);
-    return `${label}完成：成功 ${success}，失败 ${failed}，重复 ${duplicate}`;
+    const requestDuplicate = getImportRequestDuplicateCount(payload);
+    const listDuplicate = getImportListDuplicateCount(payload);
+    const overwritten = getImportOverwrittenCount(payload);
+    const parts = [
+      `${label}完成：成功 ${success}`,
+      `失败 ${failed}`,
+      `重复 ${duplicate}`,
+    ];
+    if (requestDuplicate > 0) {
+      parts.push(`本次导入内重复 ${requestDuplicate}`);
+    }
+    if (listDuplicate > 0) {
+      parts.push(`与列表重复 ${listDuplicate}`);
+    }
+    if (overwritten > 0) {
+      parts.push(`已覆盖 ${overwritten}`);
+    }
+    return parts.join("，");
   }
 
   async function importCookies() {

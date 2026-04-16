@@ -43,7 +43,9 @@ def test_import_cookie_reuses_existing_profile_for_same_cookie(tmp_path, monkeyp
         name="Second",
     )
 
+    assert first["reused_existing_profile"] is False
     assert first["id"] == second["id"]
+    assert second["reused_existing_profile"] is True
     assert len(manager.list_profiles()) == 1
     assert manager.list_profiles()[0]["name"] == "Second"
 

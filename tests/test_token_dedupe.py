@@ -8,6 +8,12 @@ def make_token_manager(tmp_path, monkeypatch):
     return token_mgr.TokenManager()
 
 
+def make_refresh_manager(tmp_path, monkeypatch):
+    monkeypatch.setattr(refresh_mgr, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(refresh_mgr, "PROFILE_FILE", tmp_path / "refresh_profile.json")
+    return refresh_mgr.RefreshManager()
+
+
 def test_cookie_import_token_overwrites_existing_token(tmp_path, monkeypatch):
     manager = make_token_manager(tmp_path, monkeypatch)
     original = manager.add("token-A")
@@ -27,6 +33,19 @@ def test_cookie_import_token_overwrites_existing_token(tmp_path, monkeypatch):
     assert manager.tokens[0]["refresh_profile_id"] == "profile-new"
     assert manager.tokens[0]["refresh_profile_name"] == "Imported Account"
     assert manager.tokens[0]["refresh_profile_email"] == "imported@example.com"
+
+
+def test_import_cookie_reuses_existing_profile_for_same_cookie(tmp_path, monkeypatch):
+    manager = make_refresh_manager(tmp_path, monkeypatch)
+    first = manager.import_cookie("cookie: a=1; b=2", name="First")
+    second = manager.import_cookie(
+        [{"name": "b", "value": "2"}, {"name": "a", "value": "1"}],
+        name="Second",
+    )
+
+    assert first["id"] == second["id"]
+    assert len(manager.list_profiles()) == 1
+    assert manager.list_profiles()[0]["name"] == "Second"
 
 
 def test_add_marks_duplicate_token(tmp_path, monkeypatch):

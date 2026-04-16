@@ -291,6 +291,7 @@ class RefreshManager:
         cookie = self._cookie_string_from_input(cookie_input)
         if not cookie:
             raise ValueError("cookie is required")
+        cookie_fingerprint = self.cookie_fingerprint(cookie)
         validated = self._validate_bundle(
             {
                 "endpoint": {
@@ -345,10 +346,72 @@ class RefreshManager:
             },
         }
 
+        removed_profile_ids: List[str] = []
         with self._lock:
-            self._profiles.append(new_profile)
+            target = None
+            retained_profiles: List[Dict] = []
+            for profile in self._profiles:
+                endpoint = (
+                    profile.get("endpoint")
+                    if isinstance(profile.get("endpoint"), dict)
+                    else {}
+                )
+                headers = (
+                    endpoint.get("headers")
+                    if isinstance(endpoint.get("headers"), dict)
+                    else {}
+                )
+                existing_cookie = str(headers.get("Cookie") or "").strip()
+                is_same_cookie = (
+                    bool(cookie_fingerprint)
+                    and self.cookie_fingerprint(existing_cookie) == cookie_fingerprint
+                )
+                if not is_same_cookie:
+                    retained_profiles.append(profile)
+                    continue
+
+                if target is None:
+                    state = (
+                        profile.get("state")
+                        if isinstance(profile.get("state"), dict)
+                        else {}
+                    )
+                    account = (
+                        profile.get("account")
+                        if isinstance(profile.get("account"), dict)
+                        else {}
+                    )
+                    profile["enabled"] = True
+                    profile["imported_at"] = now_ts
+                    profile["endpoint"] = validated["endpoint"]
+                    if str(name or "").strip():
+                        profile["name"] = profile_name
+                    state["last_error"] = ""
+                    state["consecutive_failures"] = 0
+                    state["next_retry_at"] = time.time() + self._refresh_interval_seconds()
+                    profile["state"] = state
+                    profile["account"] = account
+                    target = profile
+                    retained_profiles.append(profile)
+                    continue
+
+                removed_profile_ids.append(str(profile.get("id") or "").strip())
+
+            self._profiles = retained_profiles
+            if target is None:
+                target = new_profile
+                self._profiles.append(target)
             self._save_profiles()
-            return self._summary_locked(new_profile)
+
+        for profile_id in removed_profile_ids:
+            if profile_id:
+                token_manager.remove_auto_refresh_by_profile(profile_id)
+
+        with self._lock:
+            current = self._find_profile_locked(str(target.get("id") or "").strip())
+            if not current:
+                raise KeyError("profile not found after import")
+            return self._summary_locked(current)
 
     def export_cookies(self, ids: Optional[List[str]] = None) -> List[Dict]:
         selected_ids = None

@@ -1029,8 +1029,13 @@ def build_generation_router(
         )
         request_started = time.time()
         _init_async_video_request_log(request)
+        initial_token = token_manager.get_available(
+            strategy=client.token_rotation_strategy
+        )
+        if initial_token:
+            _set_async_video_token_context(request, initial_token, 1)
 
-        def runner(job_id: str) -> None:
+        def runner(job_id: str, first_token: str | None = None) -> None:
             store.update(job_id, status="running", progress=1.0)
             set_request_task_progress(
                 request, task_status="IN_PROGRESS", task_progress=1.0
@@ -1076,9 +1081,12 @@ def build_generation_router(
                 return
 
             for attempt in range(1, max_attempts + 1):
-                token = token_manager.get_available(
-                    strategy=client.token_rotation_strategy
-                )
+                if attempt == 1 and first_token:
+                    token = first_token
+                else:
+                    token = token_manager.get_available(
+                        strategy=client.token_rotation_strategy
+                    )
                 if not token:
                     break
 
@@ -1270,7 +1278,9 @@ def build_generation_router(
                 error_code=error_code,
             )
 
-        threading.Thread(target=runner, args=(job.id,), daemon=True).start()
+        threading.Thread(
+            target=runner, args=(job.id, initial_token), daemon=True
+        ).start()
         return _json_response(
             status_code=202,
             content=_format_video_generation_job(job),

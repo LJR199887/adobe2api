@@ -1633,8 +1633,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const tokenTitle = escapeHtml(tokenTitleParts.join(" | "));
     const accountParts = [];
     accountParts.push(
-      tokenEmail
-        ? `<span class="log-account-email">${escapeHtml(tokenEmail)}</span>`
+      tokenEmail || tokenName || tokenId
+        ? `<span class="log-account-email">${escapeHtml(tokenEmail || tokenName || ("Token " + tokenId))}</span>`
         : `<span class="log-account-email">-</span>`
     );
     const modelText = String(item.model || "-");

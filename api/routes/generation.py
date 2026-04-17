@@ -848,6 +848,110 @@ def build_generation_router(
             payload["error"] = error
         return payload
 
+    def _init_async_video_request_log(request: Request) -> str:
+        log_id = str(getattr(request.state, "log_id", "") or uuid.uuid4().hex[:12])
+        request.state.log_id = log_id
+        request.state.log_has_attempt_logs = True
+        request.state.log_task_status = "IN_PROGRESS"
+        request.state.log_task_progress = 0.0
+        request.state.log_preview_url = None
+        request.state.log_preview_kind = None
+        request.state.log_error = None
+        request.state.log_error_code = None
+        request.state.log_upstream_job_id = None
+        request.state.log_retry_after = None
+        live_request_store.upsert(
+            log_id,
+            {
+                "id": log_id,
+                "ts": time.time(),
+                "method": str(getattr(request, "method", "POST") or "POST").upper(),
+                "path": "/v1/video/generations",
+                "status_code": 102,
+                "duration_sec": 0,
+                "operation": "video.generations",
+                "model": getattr(request.state, "log_model", None),
+                "model_params": getattr(request.state, "log_model_params", None),
+                "prompt_preview": getattr(request.state, "log_prompt_preview", None),
+                "task_status": "IN_PROGRESS",
+                "task_progress": 0.0,
+            },
+        )
+        return log_id
+
+    def _set_async_video_token_context(request: Request, token: str, attempt: int) -> None:
+        meta = token_manager.get_meta_by_value(token)
+        request.state.log_token_id = meta.get("token_id")
+        request.state.log_token_account_name = meta.get("token_account_name")
+        request.state.log_token_account_email = meta.get("token_account_email")
+        request.state.log_token_source = meta.get("token_source")
+        request.state.log_token_attempt = int(attempt)
+        live_request_store.upsert(
+            str(getattr(request.state, "log_id", "") or ""),
+            {
+                "token_id": request.state.log_token_id,
+                "token_account_name": request.state.log_token_account_name,
+                "token_account_email": request.state.log_token_account_email,
+                "token_source": request.state.log_token_source,
+                "token_attempt": request.state.log_token_attempt,
+                "ts": time.time(),
+            },
+        )
+
+    def _finalize_async_video_request_log(
+        request: Request,
+        *,
+        started: float,
+        status_code: int,
+        error: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        log_id = str(getattr(request.state, "log_id", "") or "").strip()
+        if not log_id:
+            return
+        request_log_store.upsert(
+            log_id,
+            {
+                "id": log_id,
+                "ts": time.time(),
+                "method": str(getattr(request, "method", "POST") or "POST").upper(),
+                "path": "/v1/video/generations",
+                "status_code": int(status_code),
+                "duration_sec": int(max(0.0, time.time() - float(started))),
+                "operation": "video.generations",
+                "request_id": log_id,
+                "preview_url": getattr(request.state, "log_preview_url", None),
+                "preview_kind": getattr(request.state, "log_preview_kind", None),
+                "model": getattr(request.state, "log_model", None),
+                "model_params": getattr(request.state, "log_model_params", None),
+                "prompt_preview": getattr(request.state, "log_prompt_preview", None),
+                "error": (
+                    str(error)[:240]
+                    if error
+                    else getattr(request.state, "log_error", None)
+                ),
+                "error_code": (
+                    str(error_code or "")
+                    or getattr(request.state, "log_error_code", None)
+                    or None
+                ),
+                "task_status": getattr(request.state, "log_task_status", None),
+                "task_progress": getattr(request.state, "log_task_progress", None),
+                "upstream_job_id": getattr(request.state, "log_upstream_job_id", None),
+                "retry_after": getattr(request.state, "log_retry_after", None),
+                "token_id": getattr(request.state, "log_token_id", None),
+                "token_account_name": getattr(
+                    request.state, "log_token_account_name", None
+                ),
+                "token_account_email": getattr(
+                    request.state, "log_token_account_email", None
+                ),
+                "token_source": getattr(request.state, "log_token_source", None),
+                "token_attempt": getattr(request.state, "log_token_attempt", None),
+            },
+        )
+        live_request_store.remove(log_id)
+
     def _create_async_video_generation(data: dict, request: Request, prompt: str):
         normalized_data = _normalize_video_request_data(data, prompt)
         model_id = str(normalized_data.get("model") or "").strip()
@@ -923,12 +1027,18 @@ def build_generation_router(
             model=resolved_model_id,
             kind="video",
         )
+        request_started = time.time()
+        _init_async_video_request_log(request)
 
         def runner(job_id: str) -> None:
             store.update(job_id, status="running", progress=1.0)
+            set_request_task_progress(
+                request, task_status="IN_PROGRESS", task_progress=1.0
+            )
             max_attempts = client.retry_max_attempts if client.retry_enabled else 1
             max_attempts = max(1, int(max_attempts))
             last_error = "No active tokens available in the pool"
+            final_status_code = 503
             try:
                 input_images = load_input_images(normalized_data.get("messages") or [])
                 if (
@@ -945,7 +1055,24 @@ def build_generation_router(
                         f"video model supports at most {max_video_inputs} input image(s)"
                     )
             except Exception as exc:
+                set_request_task_progress(
+                    request, task_status="FAILED", task_progress=0.0, error=str(exc)
+                )
                 store.update(job_id, status="failed", progress=0.0, error=str(exc))
+                error_code = set_request_error_detail(
+                    request,
+                    error=exc,
+                    status_code=500,
+                    error_type="server_error",
+                    include_traceback=True,
+                )
+                _finalize_async_video_request_log(
+                    request,
+                    started=request_started,
+                    status_code=500,
+                    error=str(exc),
+                    error_code=error_code,
+                )
                 return
 
             for attempt in range(1, max_attempts + 1):
@@ -956,6 +1083,7 @@ def build_generation_router(
                     break
 
                 try:
+                    _set_async_video_token_context(request, token, attempt)
                     source_image_ids: list[str] = []
                     for image_bytes, _image_mime in input_images[:max_video_inputs]:
                         prepared_bytes, prepared_mime = prepare_video_source_image(
@@ -980,6 +1108,14 @@ def build_generation_router(
                         if error_text:
                             patch["error"] = error_text
                         store.update(job_id, **patch)
+                        set_request_task_progress(
+                            request,
+                            task_status=str(update.get("task_status") or "IN_PROGRESS"),
+                            task_progress=progress_value,
+                            upstream_job_id=update.get("upstream_job_id"),
+                            retry_after=update.get("retry_after"),
+                            error=update.get("error"),
+                        )
 
                     imgbed_upload_enabled = bool(use_imgbed_upload())
                     direct_result_url = (
@@ -1039,6 +1175,10 @@ def build_generation_router(
                         on_generated_file_written(out_path, old_size, new_size)
                         video_url = public_generated_url(request, filename)
 
+                    set_request_preview(request, video_url, kind="video")
+                    set_request_task_progress(
+                        request, task_status="COMPLETED", task_progress=100.0
+                    )
                     store.update(
                         job_id,
                         status="succeeded",
@@ -1046,33 +1186,89 @@ def build_generation_router(
                         image_url=video_url,
                         error=None,
                     )
+                    _finalize_async_video_request_log(
+                        request,
+                        started=request_started,
+                        status_code=200,
+                    )
                     return
                 except quota_error_cls:
                     token_manager.report_exhausted(token)
                     last_error = "Token quota exhausted."
+                    final_status_code = 429
                     retryable = attempt < max_attempts
                 except auth_error_cls:
                     token_manager.report_invalid(token)
                     last_error = "Token invalid or expired."
+                    final_status_code = 401
                     retryable = attempt < max_attempts
                 except upstream_temp_error_cls as exc:
                     last_error = str(exc)
+                    final_status_code = int(getattr(exc, "status_code", 503) or 503)
                     retryable = (
                         attempt < max_attempts
                         and client.should_retry_temporary_error(exc)
                     )
                 except Exception as exc:
+                    final_status_code = 500
+                    set_request_task_progress(
+                        request, task_status="FAILED", task_progress=0.0, error=str(exc)
+                    )
                     store.update(job_id, status="failed", error=str(exc))
+                    error_code = set_request_error_detail(
+                        request,
+                        error=exc,
+                        status_code=500,
+                        error_type="server_error",
+                        include_traceback=True,
+                    )
+                    _finalize_async_video_request_log(
+                        request,
+                        started=request_started,
+                        status_code=500,
+                        error=str(exc),
+                        error_code=error_code,
+                    )
                     return
 
                 if retryable:
                     delay = client._retry_delay_for_attempt(attempt)
+                    set_request_task_progress(
+                        request,
+                        task_status="IN_PROGRESS",
+                        error=f"retry {attempt}/{max_attempts}: {last_error}",
+                        retry_after=int(delay) if delay > 0 else None,
+                    )
                     if delay > 0:
                         time.sleep(delay)
                     continue
                 break
 
+            set_request_task_progress(
+                request, task_status="FAILED", task_progress=0.0, error=last_error
+            )
             store.update(job_id, status="failed", error=last_error)
+            error_type = (
+                "rate_limit_error"
+                if final_status_code == 429
+                else "authentication_error"
+                if final_status_code == 401
+                else "server_error"
+            )
+            error_code = set_request_error_detail(
+                request,
+                error=last_error,
+                status_code=final_status_code,
+                error_type=error_type,
+                include_traceback=False,
+            )
+            _finalize_async_video_request_log(
+                request,
+                started=request_started,
+                status_code=final_status_code,
+                error=last_error,
+                error_code=error_code,
+            )
 
         threading.Thread(target=runner, args=(job.id,), daemon=True).start()
         return _json_response(

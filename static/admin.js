@@ -1583,7 +1583,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     const t = Number(item.duration_sec || 0);
     const status = Number(item.status_code || 0);
     const taskStatus = forceInProgress ? "IN_PROGRESS" : String(item.task_status || "").toUpperCase();
-    const isFailed = !forceInProgress && status >= 400;
+    const previewUrl = normalizePreviewUrl(String(item.preview_url || "").trim());
+    const failedTaskStatuses = new Set(["FAILED", "ERROR", "CANCELLED"]);
+    const generationOperations = new Set(["api.generate", "chat.completions", "images.generations"]);
+    const generationPaths = new Set(["/api/v1/generate", "/v1/chat/completions", "/v1/images/generations"]);
+    const operation = String(item.operation || "").trim();
+    const path = String(item.path || "").trim();
+    const isGenerationRequest = generationOperations.has(operation) || generationPaths.has(path);
+    const missingGenerationResult = status >= 200 && status < 300
+      && taskStatus !== "IN_PROGRESS"
+      && isGenerationRequest
+      && !previewUrl;
+    const isFailed = !forceInProgress && (
+      status >= 400 || failedTaskStatuses.has(taskStatus) || missingGenerationResult
+    );
     const isRunning = !isFailed && taskStatus === "IN_PROGRESS";
     const isSuccess = !isRunning && !isFailed;
     const stateClass = isRunning ? "running" : (isFailed ? "failed" : "success");
@@ -1596,7 +1609,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         ? `<span class="icon-error" aria-hidden="true">!</span>`
         : `<span class="icon-check" aria-hidden="true">✓</span>`);
     const errCode = String(item.error_code || "").trim();
-    const failedStatusText = status > 0 ? String(status) : "-";
+    const failedStatusText = status >= 400 ? String(status) : "\u751f\u6210\u5931\u8d25";
     const failedStateContent = errCode
       ? `<button class="log-state log-state-btn failed" data-error-code="${escapeHtml(errCode)}" type="button">${stateIcon}<span>${escapeHtml(failedStatusText)}</span></button>`
       : `<span class="log-state failed"><span class="icon-error" aria-hidden="true">!</span><span>${escapeHtml(failedStatusText)}</span></span>`;
@@ -1606,7 +1619,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     const progressCell = taskStatus === "IN_PROGRESS"
       ? `<span class="status-badge status-active">${Number.isFinite(taskProgressRaw) ? Math.round(taskProgressRaw) : 0}%</span>`
       : `<span style="color:#7f96ad;">-</span>`;
-    const previewUrl = normalizePreviewUrl(String(item.preview_url || "").trim());
     const previewKind = String(item.preview_kind || "").trim();
     const tokenName = String(item.token_account_name || "").trim();
     const tokenEmail = String(item.token_account_email || "").trim();

@@ -694,13 +694,60 @@ def _run_with_token_retries(
 
         try:
             result = run_once(token)
+            result_status_code = int(getattr(result, "status_code", 200) or 200)
+            preview_url = str(getattr(request.state, "log_preview_url", "") or "").strip()
+            generation_op_without_result = (
+                operation_name
+                in {"api.generate", "chat.completions", "images.generations"}
+                and 200 <= result_status_code < 300
+                and not preview_url
+            )
+            if result_status_code >= 400 or generation_op_without_result:
+                error_message = (
+                    f"HTTP {result_status_code}"
+                    if result_status_code >= 400
+                    else "generation completed without result preview"
+                )
+                err_code = str(getattr(request.state, "log_error_code", "") or "")
+                if not err_code:
+                    err_code = report_error(
+                        request,
+                        error=error_message,
+                        status_code=(
+                            result_status_code if result_status_code >= 400 else 500
+                        ),
+                        error_type=(
+                            "invalid_request_error"
+                            if 400 <= result_status_code < 500
+                            else "server_error"
+                        ),
+                        include_traceback=False,
+                    )
+                _set_request_task_progress(
+                    request,
+                    task_status="FAILED",
+                    task_progress=0.0,
+                    error=error_message,
+                )
+                _append_attempt_log(
+                    request=request,
+                    operation=operation_name,
+                    token_meta=token_meta,
+                    attempt=attempt,
+                    attempt_started=attempt_started,
+                    status_code=result_status_code,
+                    error=error_message,
+                    error_code=err_code,
+                    task_status_override="FAILED",
+                )
+                return result
             _append_attempt_log(
                 request=request,
                 operation=operation_name,
                 token_meta=token_meta,
                 attempt=attempt,
                 attempt_started=attempt_started,
-                status_code=200,
+                status_code=result_status_code,
                 task_status_override="COMPLETED",
             )
             return result

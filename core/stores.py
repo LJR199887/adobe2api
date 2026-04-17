@@ -102,6 +102,18 @@ class RequestLogRecord:
 
 
 class RequestLogStore:
+    _FAILED_TASK_STATUSES = {"FAILED", "ERROR", "CANCELLED"}
+    _GENERATION_OPERATIONS = {
+        "api.generate",
+        "chat.completions",
+        "images.generations",
+    }
+    _GENERATION_PATHS = {
+        "/api/v1/generate",
+        "/v1/chat/completions",
+        "/v1/images/generations",
+    }
+
     def __init__(self, file_path: Path, max_items: int = 500) -> None:
         self._file_path = file_path
         self._lock = threading.Lock()
@@ -168,6 +180,34 @@ class RequestLogStore:
                 return True
         return False
 
+    @classmethod
+    def _is_generation_request(cls, item: dict) -> bool:
+        operation = str(item.get("operation") or "").strip()
+        path = str(item.get("path") or "").strip()
+        return operation in cls._GENERATION_OPERATIONS or path in cls._GENERATION_PATHS
+
+    @classmethod
+    def _is_failed_item(cls, item: dict) -> bool:
+        if not isinstance(item, dict):
+            return False
+        try:
+            status_code = int(item.get("status_code") or 0)
+        except Exception:
+            status_code = 0
+        if status_code >= 400:
+            return True
+
+        task_status = str(item.get("task_status") or "").upper()
+        if task_status in cls._FAILED_TASK_STATUSES:
+            return True
+        if task_status == "IN_PROGRESS":
+            return False
+
+        preview_url = str(item.get("preview_url") or "").strip()
+        if 200 <= status_code < 300 and cls._is_generation_request(item):
+            return not bool(preview_url)
+        return False
+
     @staticmethod
     def _resolve_media_kind(item: dict) -> str:
         if not isinstance(item, dict):
@@ -223,11 +263,7 @@ class RequestLogStore:
             if end_ts is not None and ts_val > float(end_ts):
                 continue
 
-            try:
-                status_code = int(item.get("status_code") or 0)
-            except Exception:
-                status_code = 0
-            if failed_only and status_code < 400:
+            if failed_only and not cls._is_failed_item(item):
                 continue
             if account and not cls._match_account_filter(item, account):
                 continue
@@ -413,7 +449,8 @@ class RequestLogStore:
                 status_code = int(item.get("status_code") or 0)
             except Exception:
                 status_code = 0
-            if status_code >= 400:
+            failed = self._is_failed_item(item)
+            if failed:
                 failed_requests += 1
 
             task_status = str(item.get("task_status") or "").upper()
@@ -421,7 +458,7 @@ class RequestLogStore:
                 in_progress_requests += 1
 
             preview_kind = str(item.get("preview_kind") or "").strip().lower()
-            if 200 <= status_code < 300:
+            if 200 <= status_code < 300 and not failed:
                 if preview_kind == "image":
                     generated_images += 1
                 elif preview_kind == "video":

@@ -72,13 +72,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   const tbody = document.querySelector("#tokenTable tbody");
   const tokenTotalCount = document.getElementById("tokenTotalCount");
   const tokenActiveCount = document.getElementById("tokenActiveCount");
+  const tokenFilteredCount = document.getElementById("tokenFilteredCount");
+  const tokenStatusFilter = document.getElementById("tokenStatusFilter");
+  const tokenCreditsFilter = document.getElementById("tokenCreditsFilter");
+  const clearTokenFiltersBtn = document.getElementById("clearTokenFiltersBtn");
   const tokenPagination = document.getElementById("tokenPagination");
   const tokenPrevBtn = document.getElementById("tokenPrevBtn");
   const tokenNextBtn = document.getElementById("tokenNextBtn");
   const tokenPageInfo = document.getElementById("tokenPageInfo");
   const tokenSelectedIds = new Set();
   let logsAutoTimer = null;
+  let allTokens = [];
   let latestTokens = [];
+  let latestTokenSummary = null;
   const TOKENS_PAGE_SIZE = 20;
   let tokenCurrentPage = 1;
   let tokenTotalPages = 1;
@@ -91,6 +97,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     "disabled": "已禁用"
   };
 
+  function getTokenFilters() {
+    return {
+      status: String(tokenStatusFilter?.value || "").trim().toLowerCase(),
+      credits: String(tokenCreditsFilter?.value || "").trim().toLowerCase(),
+    };
+  }
+
+  function applyTokenFilters(tokens) {
+    const list = Array.isArray(tokens) ? tokens : [];
+    const filters = getTokenFilters();
+    return list.filter((token) => {
+      const status = String(token?.status || "").trim().toLowerCase();
+      if (filters.status && status !== filters.status) return false;
+      if (filters.credits === "error") {
+        const err = String(token?.credits_error || "").trim();
+        if (!err) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderFilteredTokens() {
+    renderTable(applyTokenFilters(allTokens), latestTokenSummary);
+  }
+
+  function resetTokenFilters() {
+    if (tokenStatusFilter) tokenStatusFilter.value = "";
+    if (tokenCreditsFilter) tokenCreditsFilter.value = "";
+    tokenCurrentPage = 1;
+    tokenSelectedIds.clear();
+    renderFilteredTokens();
+  }
+
   async function loadTokens() {
     try {
       const res = await fetch("/api/v1/tokens");
@@ -100,9 +139,13 @@ document.addEventListener("DOMContentLoaded", async () => {
         : Array.isArray(data?.items)
           ? data.items
           : [];
-      renderTable(tokens, data?.summary || null);
+      allTokens = tokens;
+      latestTokenSummary = data?.summary || null;
+      renderFilteredTokens();
     } catch (err) {
       console.error(err);
+      allTokens = [];
+      latestTokenSummary = null;
       renderTokenSummary([]);
       renderTokenPagination(0);
       tbody.innerHTML = `<tr><td colspan="9" class="empty-state" style="color: #ffb4bc;">加载失败</td></tr>`;
@@ -123,6 +166,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const active = Number.isFinite(Number(summary?.active)) ? Number(summary.active) : fallbackActive;
     if (tokenTotalCount) tokenTotalCount.textContent = String(total);
     if (tokenActiveCount) tokenActiveCount.textContent = String(active);
+    if (tokenFilteredCount) tokenFilteredCount.textContent = String(fallbackTotal);
   }
 
   function renderTokenPagination(totalCount) {
@@ -212,7 +256,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     const pageTokens = getCurrentPageTokens();
 
     if (!latestTokens.length) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-state">当前没有可用的 Token，请在上方添加。</td></tr>`;
+      const emptyText = allTokens.length
+        ? "当前没有符合筛选条件的 Token。"
+        : "当前没有可用的 Token，请在上方添加。";
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${emptyText}</td></tr>`;
       syncTokenSelectAllState();
       return;
     }
@@ -339,6 +386,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       showToast("Token 列表刷新失败", true);
     }
   });
+
+  [tokenStatusFilter, tokenCreditsFilter].forEach((filterEl) => {
+    if (!filterEl) return;
+    filterEl.addEventListener("change", () => {
+      tokenCurrentPage = 1;
+      tokenSelectedIds.clear();
+      renderFilteredTokens();
+    });
+  });
+
+  if (clearTokenFiltersBtn) {
+    clearTokenFiltersBtn.addEventListener("click", resetTokenFilters);
+  }
 
   if (tokenSelectAll) {
     tokenSelectAll.addEventListener("change", () => {
@@ -1928,7 +1988,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     tokenPrevBtn.addEventListener("click", () => {
       if (tokenCurrentPage <= 1) return;
       tokenCurrentPage -= 1;
-      renderTable(latestTokens, null);
+      renderTable(latestTokens, latestTokenSummary);
     });
   }
 
@@ -1936,7 +1996,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     tokenNextBtn.addEventListener("click", () => {
       if (tokenCurrentPage >= tokenTotalPages) return;
       tokenCurrentPage += 1;
-      renderTable(latestTokens, null);
+      renderTable(latestTokens, latestTokenSummary);
     });
   }
 

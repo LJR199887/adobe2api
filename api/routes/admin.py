@@ -369,8 +369,25 @@ def build_admin_router(
         require_admin_auth(request)
         if not req.token.strip():
             raise HTTPException(status_code=400, detail="Empty token")
-        token_manager.add(req.token)
-        return {"status": "ok"}
+        normalized_token = token_manager._normalize_token_value(req.token)  # type: ignore[attr-defined]
+        existing_duplicate = any(
+            str(item.get("value") or "").strip() == normalized_token
+            for item in getattr(token_manager, "tokens", [])
+        )
+        result = token_manager.add(req.token)
+        duplicate_count = 1 if bool(result.get("_duplicate")) else 0
+        list_duplicate_count = 1 if duplicate_count and existing_duplicate else 0
+        request_duplicate_count = 1 if duplicate_count and not existing_duplicate else 0
+        success_count = 0 if duplicate_count else 1
+        return {
+            "status": "ok",
+            "success_count": success_count,
+            "failed_count": 0,
+            "duplicate_count": duplicate_count,
+            "request_duplicate_count": request_duplicate_count,
+            "list_duplicate_count": list_duplicate_count,
+            "overwritten_count": list_duplicate_count,
+        }
 
     @router.post("/api/v1/tokens/batch")
     def add_tokens_batch(req: TokenBatchAddRequest, request: Request):
@@ -378,18 +395,50 @@ def build_admin_router(
         if not req.tokens:
             raise HTTPException(status_code=400, detail="tokens is required")
 
-        added_count = 0
+        initial_tokens = {
+            str(item.get("value") or "").strip()
+            for item in getattr(token_manager, "tokens", [])
+            if str(item.get("value") or "").strip()
+        }
+        seen_in_request = set()
+        success_count = 0
+        failed_count = 0
+        duplicate_count = 0
+        request_duplicate_count = 0
+        list_duplicate_count = 0
         for raw in req.tokens:
             token = str(raw or "").strip()
             if not token:
+                failed_count += 1
                 continue
-            token_manager.add(token)
-            added_count += 1
+            normalized_token = token_manager._normalize_token_value(token)  # type: ignore[attr-defined]
+            in_existing_list = normalized_token in initial_tokens
+            in_current_request = normalized_token in seen_in_request
+            result = token_manager.add(token)
+            if bool(result.get("_duplicate")):
+                duplicate_count += 1
+                if in_existing_list:
+                    list_duplicate_count += 1
+                elif in_current_request:
+                    request_duplicate_count += 1
+            else:
+                success_count += 1
+            seen_in_request.add(normalized_token)
 
-        if added_count == 0:
+        if success_count == 0 and duplicate_count == 0:
             raise HTTPException(status_code=400, detail="no valid token provided")
 
-        return {"status": "ok", "added_count": added_count}
+        return {
+            "status": "ok" if failed_count == 0 else "partial",
+            "total": len(req.tokens),
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "duplicate_count": duplicate_count,
+            "request_duplicate_count": request_duplicate_count,
+            "list_duplicate_count": list_duplicate_count,
+            "overwritten_count": list_duplicate_count,
+            "added_count": success_count,
+        }
 
     @router.post("/api/v1/tokens/export")
     def export_tokens(req: ExportSelectionRequest, request: Request):
@@ -867,11 +916,34 @@ def build_admin_router(
                 )
             except Exception as exc:
                 refresh_error = str(exc)
+            duplicate_count = (
+                1
+                if isinstance(refresh_result, dict)
+                and bool(refresh_result.get("token_duplicate"))
+                else 0
+            )
+            list_duplicate_count = (
+                1
+                if bool(profile.get("reused_existing_profile"))
+                or (
+                    isinstance(refresh_result, dict)
+                    and bool(refresh_result.get("token_duplicate"))
+                )
+                else 0
+            )
+            failed_count = 1 if refresh_error else 0
+            success_count = 0 if (failed_count or duplicate_count) else 1
             return {
                 "status": "ok" if not refresh_error else "partial",
                 "profile": profile,
                 "refresh_result": refresh_result,
                 "refresh_error": refresh_error,
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "duplicate_count": duplicate_count,
+                "request_duplicate_count": 0,
+                "list_duplicate_count": list_duplicate_count,
+                "overwritten_count": list_duplicate_count,
             }
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
@@ -888,6 +960,22 @@ def build_admin_router(
         failed = []
         refreshed = []
         refresh_failed = []
+        retained_by_cookie = {}
+        invalid_entries = []
+
+        for idx, item in enumerate(req.items):
+            fingerprint = refresh_manager.cookie_fingerprint(item.cookie)
+            if not fingerprint:
+                invalid_entries.append((idx, item))
+                continue
+            retained_by_cookie[fingerprint] = (idx, item)
+
+        import_entries = sorted(
+            [*retained_by_cookie.values(), *invalid_entries],
+            key=lambda pair: pair[0],
+        )
+        request_duplicate_count = len(req.items) - len(import_entries)
+        list_duplicate_count = 0
 
         def import_one(idx: int, item):
             try:
@@ -933,11 +1021,11 @@ def build_admin_router(
                 "refresh_failed": refresh_failed_item,
             }
 
-        max_workers = min(get_batch_concurrency(), len(req.items))
+        max_workers = min(get_batch_concurrency(), len(import_entries))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(import_one, idx, item)
-                for idx, item in enumerate(req.items)
+                for idx, item in import_entries
             ]
             done_items = [future.result() for future in as_completed(futures)]
 
@@ -949,8 +1037,18 @@ def build_admin_router(
                 failed.append(item["failed"])
             if item["refreshed"] is not None:
                 refreshed.append(item["refreshed"])
+                result = item["refreshed"].get("result") or {}
+                imported_profile = item["imported"] or {}
+                if bool(imported_profile.get("reused_existing_profile")) or bool(
+                    result.get("token_duplicate")
+                ):
+                    list_duplicate_count += 1
             if item["refresh_failed"] is not None:
                 refresh_failed.append(item["refresh_failed"])
+
+        success_count = max(0, len(refreshed) - list_duplicate_count)
+        duplicate_count = request_duplicate_count + list_duplicate_count
+        error_count = len(failed) + len(refresh_failed)
 
         result = {
             "status": (
@@ -959,6 +1057,14 @@ def build_admin_router(
                 else ("partial" if imported else "failed")
             ),
             "total": len(req.items),
+            "processed_count": len(import_entries),
+            "deduplicated_count": request_duplicate_count,
+            "success_count": success_count,
+            "duplicate_count": duplicate_count,
+            "error_count": error_count,
+            "request_duplicate_count": request_duplicate_count,
+            "list_duplicate_count": list_duplicate_count,
+            "overwritten_count": list_duplicate_count,
             "imported_count": len(imported),
             "failed_count": len(failed),
             "refreshed_count": len(refreshed),

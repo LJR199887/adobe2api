@@ -295,30 +295,37 @@ document.addEventListener("DOMContentLoaded", async () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
+
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (_) {
+        data = null;
+      }
+
       if (res.ok) {
         tokenInput.value = "";
         if (tokenFile) tokenFile.value = "";
-        if (tokens.length > 1) {
-          const data = await res.json();
-          const addedCount = Number(data?.added_count || 0);
-          showMsg(addMsg, `批量添加成功（${addedCount} 个）`, false);
-        } else {
-          showMsg(addMsg, "添加成功", false);
-        }
+        showMsg(
+          addMsg,
+          buildImportSummaryText("Token导入", data),
+          getImportFailedCount(data) > 0,
+          { duration: 8000 }
+        );
         loadTokens();
         closeDialog(tokenModal);
       } else {
-        let detail = "添加失败，请重试";
-        try {
-          const body = await res.json();
-          detail = body.detail || detail;
-        } catch (_) {
-          // ignore json parse errors
+        let detail = "导入失败，请重试";
+        const detailPayload = getImportDetailPayload(data);
+        if (detailPayload && typeof detailPayload === "object") {
+          detail = buildImportSummaryText("Token导入", detailPayload);
+        } else if (typeof detailPayload === "string" && detailPayload.trim()) {
+          detail = detailPayload;
         }
         showMsg(addMsg, detail, true);
       }
     } catch (err) {
-      showMsg(addMsg, err.message, true);
+      showMsg(addMsg, err.message || "导入失败", true);
     }
     addBtn.disabled = false;
   });
@@ -1287,6 +1294,85 @@ document.addEventListener("DOMContentLoaded", async () => {
     return [{ name: null, cookie }];
   }
 
+  function getImportDetailPayload(payload) {
+    if (payload && typeof payload === "object" && payload.detail !== undefined) {
+      return payload.detail;
+    }
+    return payload;
+  }
+
+  function getImportSuccessCount(payload) {
+    const value = Number(
+      payload?.success_count != null
+        ? payload.success_count
+        : payload?.added_count != null
+          ? payload.added_count
+          : 0
+    );
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getImportFailedCount(payload) {
+    const value = Number(
+      payload?.error_count != null
+        ? payload.error_count
+        : payload?.failed_count != null
+          ? payload.failed_count
+          : 0
+    );
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getImportDuplicateCount(payload) {
+    const value = Number(
+      payload?.duplicate_count != null
+        ? payload.duplicate_count
+        : payload?.deduplicated_count != null
+          ? payload.deduplicated_count
+          : 0
+    );
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getImportRequestDuplicateCount(payload) {
+    const value = Number(payload?.request_duplicate_count ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getImportListDuplicateCount(payload) {
+    const value = Number(payload?.list_duplicate_count ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function getImportOverwrittenCount(payload) {
+    const value = Number(payload?.overwritten_count ?? 0);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function buildImportSummaryText(label, payload) {
+    const success = getImportSuccessCount(payload);
+    const failed = getImportFailedCount(payload);
+    const duplicate = getImportDuplicateCount(payload);
+    const requestDuplicate = getImportRequestDuplicateCount(payload);
+    const listDuplicate = getImportListDuplicateCount(payload);
+    const overwritten = getImportOverwrittenCount(payload);
+    const parts = [
+      `${label}完成：成功 ${success}`,
+      `失败 ${failed}`,
+      `重复 ${duplicate}`,
+    ];
+    if (requestDuplicate > 0) {
+      parts.push(`本次导入内重复 ${requestDuplicate}`);
+    }
+    if (listDuplicate > 0) {
+      parts.push(`与列表重复 ${listDuplicate}`);
+    }
+    if (overwritten > 0) {
+      parts.push(`已覆盖 ${overwritten}`);
+    }
+    return parts.join("，");
+  }
+
   async function importCookies() {
     const text = String(cookieInput?.value || "").trim();
     if (!text) {
@@ -1313,94 +1399,48 @@ document.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    const batchLimit = Math.max(1, Math.min(100, Number(confBatchConcurrency?.value || currentBatchConcurrency || 5)));
     try {
       if (importCookieBtn) importCookieBtn.disabled = true;
-      const workerCount = Math.min(batchLimit, items.length);
-      const progress = {
-        total: items.length,
-        completed: 0,
-        imported: 0,
-        failed: 0,
-        refreshFailed: 0,
-      };
-      const results = new Array(items.length);
+      showMsg(refreshMsg, `Cookie 导入中，共 ${items.length} 项...`, false, { duration: 0 });
 
-      const updateImportProgress = () => {
-        showMsg(
-          refreshMsg,
-          `已解析 ${progress.total} 个 Cookie，处理中 ${progress.completed}/${progress.total}，导入成功 ${progress.imported}，导入失败 ${progress.failed}，刷新失败 ${progress.refreshFailed}（并行 ${workerCount} 个）...`,
-          progress.failed > 0 || progress.refreshFailed > 0,
-          { duration: 0 }
-        );
-      };
+      const res = await fetch("/api/v1/refresh-profiles/import-cookie-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
 
-      const importOne = async (item) => {
-        const res = await fetch("/api/v1/refresh-profiles/import-cookie", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cookie: item.cookie, name: item.name || null }),
-        });
-        if (!res.ok) {
-          let detailText = "Cookie 导入失败";
-          try {
-            const body = await res.json();
-            if (typeof body?.detail === "string") detailText = body.detail;
-          } catch (_) {
-            const txt = await res.text();
-            if (txt) detailText = txt;
-          }
-          throw new Error(detailText);
-        }
-        return res.json();
-      };
-
-      updateImportProgress();
-      let nextIndex = 0;
-      const runWorker = async () => {
-        while (true) {
-          const currentIndex = nextIndex;
-          nextIndex += 1;
-          if (currentIndex >= items.length) return;
-
-          try {
-            const result = await importOne(items[currentIndex]);
-            results[currentIndex] = result;
-            progress.imported += 1;
-            if (String(result.refresh_error || "").trim()) {
-              progress.refreshFailed += 1;
-            }
-          } catch (err) {
-            results[currentIndex] = { error: err };
-            progress.failed += 1;
-          } finally {
-            progress.completed += 1;
-            updateImportProgress();
-          }
-        }
-      };
-
-      await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
-
-      if (items.length > 1) {
-        showMsg(
-          refreshMsg,
-          `批量 Cookie 导入完成：成功 ${progress.imported}，导入失败 ${progress.failed}，刷新失败 ${progress.refreshFailed}`,
-          progress.failed > 0 || progress.refreshFailed > 0,
-          { duration: 8000 }
-        );
-      } else {
-        const singleResult = results[0];
-        const refreshError = String(singleResult?.refresh_error || "").trim();
-        if (singleResult?.error) {
-          throw singleResult.error;
-        }
-        if (refreshError) {
-          showMsg(refreshMsg, `Cookie 导入成功，但自动刷新失败：${refreshError}`, true, { duration: 8000 });
-        } else {
-          showMsg(refreshMsg, "Cookie 导入成功，并已自动刷新", false, { duration: 8000 });
-        }
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (_) {
+        data = null;
       }
+
+      if (!res.ok) {
+        const detailPayload = getImportDetailPayload(data);
+        if (detailPayload && typeof detailPayload === "object") {
+          showMsg(
+            refreshMsg,
+            buildImportSummaryText("Cookie导入", detailPayload),
+            true,
+            { duration: 8000 }
+          );
+          return;
+        }
+
+        const detailText =
+          (typeof detailPayload === "string" && detailPayload.trim())
+            ? detailPayload
+            : "Cookie 导入失败";
+        throw new Error(detailText);
+      }
+
+      showMsg(
+        refreshMsg,
+        buildImportSummaryText("Cookie导入", data),
+        getImportFailedCount(data) > 0,
+        { duration: 8000 }
+      );
       if (cookieInput) cookieInput.value = "";
       if (cookieFile) cookieFile.value = "";
       await loadTokens();
@@ -1543,7 +1583,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     const t = Number(item.duration_sec || 0);
     const status = Number(item.status_code || 0);
     const taskStatus = forceInProgress ? "IN_PROGRESS" : String(item.task_status || "").toUpperCase();
-    const isFailed = !forceInProgress && status >= 400;
+    const previewUrl = normalizePreviewUrl(String(item.preview_url || "").trim());
+    const failedTaskStatuses = new Set(["FAILED", "ERROR", "CANCELLED"]);
+    const generationOperations = new Set(["api.generate", "chat.completions", "images.generations"]);
+    const generationPaths = new Set(["/api/v1/generate", "/v1/chat/completions", "/v1/images/generations"]);
+    const operation = String(item.operation || "").trim();
+    const path = String(item.path || "").trim();
+    const isGenerationRequest = generationOperations.has(operation) || generationPaths.has(path);
+    const missingGenerationResult = status >= 200 && status < 300
+      && taskStatus !== "IN_PROGRESS"
+      && isGenerationRequest
+      && !previewUrl;
+    const isFailed = !forceInProgress && (
+      status >= 400 || failedTaskStatuses.has(taskStatus) || missingGenerationResult
+    );
     const isRunning = !isFailed && taskStatus === "IN_PROGRESS";
     const isSuccess = !isRunning && !isFailed;
     const stateClass = isRunning ? "running" : (isFailed ? "failed" : "success");
@@ -1556,7 +1609,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         ? `<span class="icon-error" aria-hidden="true">!</span>`
         : `<span class="icon-check" aria-hidden="true">✓</span>`);
     const errCode = String(item.error_code || "").trim();
-    const failedStatusText = status > 0 ? String(status) : "-";
+    const failedStatusText = status >= 400 ? String(status) : "\u751f\u6210\u5931\u8d25";
     const failedStateContent = errCode
       ? `<button class="log-state log-state-btn failed" data-error-code="${escapeHtml(errCode)}" type="button">${stateIcon}<span>${escapeHtml(failedStatusText)}</span></button>`
       : `<span class="log-state failed"><span class="icon-error" aria-hidden="true">!</span><span>${escapeHtml(failedStatusText)}</span></span>`;
@@ -1566,7 +1619,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     const progressCell = taskStatus === "IN_PROGRESS"
       ? `<span class="status-badge status-active">${Number.isFinite(taskProgressRaw) ? Math.round(taskProgressRaw) : 0}%</span>`
       : `<span style="color:#7f96ad;">-</span>`;
-    const previewUrl = normalizePreviewUrl(String(item.preview_url || "").trim());
     const previewKind = String(item.preview_kind || "").trim();
     const tokenName = String(item.token_account_name || "").trim();
     const tokenEmail = String(item.token_account_email || "").trim();

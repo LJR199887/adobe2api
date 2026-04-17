@@ -51,11 +51,16 @@ class TokenManager:
     def save(self):
         DATA_FILE.write_text(json.dumps(self.tokens, indent=2), encoding="utf-8")
 
+    @staticmethod
+    def _normalize_token_value(value: str) -> str:
+        token = str(value or "").strip()
+        if token.startswith("Bearer "):
+            token = token[7:].strip()
+        return token
+
     def add(self, value: str, meta: Optional[Dict] = None):
         with self._lock:
-            value = value.strip()
-            if value.startswith("Bearer "):
-                value = value[7:].strip()
+            value = self._normalize_token_value(value)
             meta = dict(meta or {})
 
             for t in self.tokens:
@@ -63,7 +68,10 @@ class TokenManager:
                     if meta:
                         t.update(meta)
                         self.save()
-                    return t
+                    result = dict(t)
+                    result["_created"] = False
+                    result["_duplicate"] = True
+                    return result
 
             new_token = {
                 "id": uuid.uuid4().hex[:8],
@@ -77,7 +85,10 @@ class TokenManager:
                 new_token.update(meta)
             self.tokens.append(new_token)
             self.save()
-            return new_token
+            result = dict(new_token)
+            result["_created"] = True
+            result["_duplicate"] = False
+            return result
 
     def upsert_auto_refresh_token(
         self,
@@ -87,25 +98,39 @@ class TokenManager:
         profile_email: Optional[str] = None,
     ):
         with self._lock:
-            value = value.strip()
-            if value.startswith("Bearer "):
-                value = value[7:].strip()
+            value = self._normalize_token_value(value)
 
             now_ts = time.time()
             pid = str(profile_id or "").strip()
             if not pid:
                 raise ValueError("profile_id is required")
 
-            target = None
+            value_target = None
+            profile_target = None
             for t in self.tokens:
-                if (
+                if value_target is None and self._normalize_token_value(
+                    t.get("value") or ""
+                ) == value:
+                    value_target = t
+                if profile_target is None and (
                     t.get("auto_refresh") is True
                     and str(t.get("refresh_profile_id") or "").strip() == pid
                 ):
-                    target = t
+                    profile_target = t
+                if value_target is not None and profile_target is not None:
                     break
 
+            # A re-imported cookie may create a new profile but return an access
+            # token that already exists. Keep one token row and make the latest
+            # refresh profile own it.
+            target = value_target or profile_target
             if target is not None:
+                duplicate_token = value_target is not None
+                removed_profile_ids = set()
+                previous_profile_id = str(target.get("refresh_profile_id") or "").strip()
+                if previous_profile_id and previous_profile_id != pid:
+                    removed_profile_ids.add(previous_profile_id)
+
                 target["value"] = value
                 target["status"] = "active"
                 target["fails"] = 0
@@ -116,8 +141,30 @@ class TokenManager:
                 target["refresh_profile_id"] = pid
                 target["refresh_profile_name"] = str(profile_name or "").strip() or pid
                 target["refresh_profile_email"] = str(profile_email or "").strip()
+
+                deduped_tokens = []
+                for item in self.tokens:
+                    if item is target:
+                        deduped_tokens.append(item)
+                        continue
+
+                    item_profile_id = str(item.get("refresh_profile_id") or "").strip()
+                    same_profile = item is profile_target
+                    same_value = self._normalize_token_value(item.get("value") or "") == value
+                    if same_profile or same_value:
+                        if item_profile_id and item_profile_id != pid:
+                            removed_profile_ids.add(item_profile_id)
+                        continue
+                    deduped_tokens.append(item)
+                self.tokens = deduped_tokens
+
                 self.save()
-                return dict(target)
+                result = dict(target)
+                result["_created"] = False
+                result["_duplicate_token"] = duplicate_token
+                if removed_profile_ids:
+                    result["_merged_refresh_profile_ids"] = sorted(removed_profile_ids)
+                return result
 
             new_token = {
                 "id": uuid.uuid4().hex[:8],
@@ -135,7 +182,10 @@ class TokenManager:
             }
             self.tokens.append(new_token)
             self.save()
-            return dict(new_token)
+            result = dict(new_token)
+            result["_created"] = True
+            result["_duplicate_token"] = False
+            return result
 
     def remove(self, tid: str):
         with self._lock:

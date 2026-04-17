@@ -261,10 +261,37 @@ class RefreshManager:
             return "; ".join(pairs)
         return ""
 
+    @classmethod
+    def cookie_fingerprint(cls, cookie_input) -> str:
+        cookie = cls._cookie_string_from_input(cookie_input)
+        if not cookie:
+            return ""
+
+        pairs: List[List[str]] = []
+        for part in cookie.split(";"):
+            text = part.strip()
+            if not text:
+                continue
+            if "=" in text:
+                key, val = text.split("=", 1)
+                key = key.strip()
+                val = val.strip()
+            else:
+                key = text.strip()
+                val = ""
+            if key:
+                pairs.append([key, val])
+
+        if not pairs:
+            return ""
+        pairs.sort(key=lambda item: (item[0].casefold(), item[0], item[1]))
+        return json.dumps(pairs, ensure_ascii=False, separators=(",", ":"))
+
     def import_cookie(self, cookie_input, name: Optional[str] = None) -> Dict:
         cookie = self._cookie_string_from_input(cookie_input)
         if not cookie:
             raise ValueError("cookie is required")
+        cookie_fingerprint = self.cookie_fingerprint(cookie)
         validated = self._validate_bundle(
             {
                 "endpoint": {
@@ -319,10 +346,75 @@ class RefreshManager:
             },
         }
 
+        removed_profile_ids: List[str] = []
         with self._lock:
-            self._profiles.append(new_profile)
+            target = None
+            retained_profiles: List[Dict] = []
+            for profile in self._profiles:
+                endpoint = (
+                    profile.get("endpoint")
+                    if isinstance(profile.get("endpoint"), dict)
+                    else {}
+                )
+                headers = (
+                    endpoint.get("headers")
+                    if isinstance(endpoint.get("headers"), dict)
+                    else {}
+                )
+                existing_cookie = str(headers.get("Cookie") or "").strip()
+                is_same_cookie = (
+                    bool(cookie_fingerprint)
+                    and self.cookie_fingerprint(existing_cookie) == cookie_fingerprint
+                )
+                if not is_same_cookie:
+                    retained_profiles.append(profile)
+                    continue
+
+                if target is None:
+                    state = (
+                        profile.get("state")
+                        if isinstance(profile.get("state"), dict)
+                        else {}
+                    )
+                    account = (
+                        profile.get("account")
+                        if isinstance(profile.get("account"), dict)
+                        else {}
+                    )
+                    profile["enabled"] = True
+                    profile["imported_at"] = now_ts
+                    profile["endpoint"] = validated["endpoint"]
+                    if str(name or "").strip():
+                        profile["name"] = profile_name
+                    state["last_error"] = ""
+                    state["consecutive_failures"] = 0
+                    state["next_retry_at"] = time.time() + self._refresh_interval_seconds()
+                    profile["state"] = state
+                    profile["account"] = account
+                    target = profile
+                    retained_profiles.append(profile)
+                    continue
+
+                removed_profile_ids.append(str(profile.get("id") or "").strip())
+
+            self._profiles = retained_profiles
+            if target is None:
+                target = new_profile
+                self._profiles.append(target)
             self._save_profiles()
-            return self._summary_locked(new_profile)
+
+        reused_existing_profile = str(target.get("id") or "").strip() != profile_id
+        for profile_id in removed_profile_ids:
+            if profile_id:
+                token_manager.remove_auto_refresh_by_profile(profile_id)
+
+        with self._lock:
+            current = self._find_profile_locked(str(target.get("id") or "").strip())
+            if not current:
+                raise KeyError("profile not found after import")
+            summary = self._summary_locked(current)
+            summary["reused_existing_profile"] = reused_existing_profile
+            return summary
 
     def export_cookies(self, ids: Optional[List[str]] = None) -> List[Dict]:
         selected_ids = None
@@ -377,6 +469,20 @@ class RefreshManager:
             self._profiles = [p for p in self._profiles if p.get("id") != profile_id]
             self._save_profiles()
         token_manager.remove_auto_refresh_by_profile(profile_id)
+
+    def _remove_profiles_only(self, profile_ids: List[str]):
+        remove_ids = {str(x or "").strip() for x in profile_ids if str(x or "").strip()}
+        if not remove_ids:
+            return
+        with self._lock:
+            before_count = len(self._profiles)
+            self._profiles = [
+                p
+                for p in self._profiles
+                if str(p.get("id") or "").strip() not in remove_ids
+            ]
+            if len(self._profiles) != before_count:
+                self._save_profiles()
 
     def set_enabled(self, profile_id: str, enabled: bool) -> Dict:
         with self._lock:
@@ -643,6 +749,12 @@ class RefreshManager:
             profile_name=profile_name,
             profile_email=profile_email,
         )
+        merged_profile_ids = [
+            str(x or "").strip()
+            for x in token_record.get("_merged_refresh_profile_ids", [])
+            if str(x or "").strip() and str(x or "").strip() != str(snapshot["id"])
+        ]
+        self._remove_profiles_only(merged_profile_ids)
 
         credits_error = ""
         token_id = str(token_record.get("id") or "").strip()
@@ -662,6 +774,8 @@ class RefreshManager:
             "profile_email": profile_email,
             "expires_in": data.get("expires_in"),
             "credits_error": credits_error,
+            "token_duplicate": bool(token_record.get("_duplicate_token")),
+            "token_created": bool(token_record.get("_created")),
         }
 
     def start(self):

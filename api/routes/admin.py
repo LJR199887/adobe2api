@@ -17,6 +17,7 @@ from api.schemas import (
     RefreshCookieImportRequest,
     RefreshProfileEnabledRequest,
     TokenAddRequest,
+    TokenAutoRefreshBatchRequest,
     TokenBatchAddRequest,
     TokenCreditsBatchRefreshRequest,
 )
@@ -502,6 +503,13 @@ def build_admin_router(
                 detail="exhausted/invalid token cannot be reactivated; replace with a fresh token",
             )
         token_manager.set_status(tid, status)
+        if status == "disabled" and token_info.get("auto_refresh"):
+            profile_id = str(token_info.get("refresh_profile_id") or "").strip()
+            if profile_id:
+                try:
+                    refresh_manager.set_enabled(profile_id, False)
+                except Exception:
+                    pass
         return {"status": "ok"}
 
     @router.post("/api/v1/tokens/{tid}/refresh")
@@ -546,6 +554,54 @@ def build_admin_router(
             return {"status": "ok", "profile": profile}
         except KeyError:
             raise HTTPException(status_code=404, detail="refresh profile not found")
+
+    @router.post("/api/v1/tokens/auto-refresh-batch")
+    def set_tokens_auto_refresh_batch(
+        req: TokenAutoRefreshBatchRequest, request: Request
+    ):
+        require_admin_auth(request)
+        normalized_ids = [
+            str(x or "").strip() for x in (req.ids or []) if str(x or "").strip()
+        ]
+        if not normalized_ids:
+            raise HTTPException(status_code=400, detail="ids is required")
+
+        updated = []
+        skipped = []
+        missing = []
+        failed = []
+        for tid in normalized_ids:
+            token_info = token_manager.get_by_id(tid)
+            if not token_info:
+                missing.append(tid)
+                continue
+            profile_id = str(token_info.get("refresh_profile_id") or "").strip()
+            if not profile_id:
+                skipped.append(tid)
+                continue
+            try:
+                refresh_manager.set_enabled(profile_id, bool(req.enabled))
+                updated.append(tid)
+            except KeyError:
+                missing.append(tid)
+            except Exception as exc:
+                failed.append({"id": tid, "detail": str(exc)})
+
+        if not updated and not skipped and not missing and not failed:
+            raise HTTPException(status_code=400, detail="no token updated")
+
+        return {
+            "status": "ok" if not (skipped or missing or failed) else "partial",
+            "enabled": bool(req.enabled),
+            "updated_count": len(updated),
+            "skipped_count": len(skipped),
+            "missing_count": len(missing),
+            "failed_count": len(failed),
+            "updated_ids": updated,
+            "skipped_ids": skipped,
+            "missing_ids": missing,
+            "failed": failed,
+        }
 
     @router.post("/api/v1/tokens/{tid}/credits/refresh")
     def refresh_token_credits(tid: str, request: Request):

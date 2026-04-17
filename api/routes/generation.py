@@ -234,6 +234,7 @@ def build_generation_router(
     extract_prompt_from_messages: Callable[[Any], str],
     sse_chat_stream: Callable[[dict], Any],
     on_generated_file_written: Callable[[Path, int, int], None],
+    report_token_exhausted: Callable[[str], Any],
     quota_error_cls,
     auth_error_cls,
     upstream_temp_error_cls,
@@ -720,7 +721,7 @@ def build_generation_router(
                     )
                     return
                 except quota_error_cls:
-                    token_manager.report_exhausted(token)
+                    report_token_exhausted(token)
                     last_error = "Token quota exhausted."
                     retryable = attempt < max_attempts
                 except auth_error_cls:
@@ -1201,7 +1202,7 @@ def build_generation_router(
                     )
                     return
                 except quota_error_cls:
-                    token_manager.report_exhausted(token)
+                    report_token_exhausted(token)
                     last_error = "Token quota exhausted."
                     final_status_code = 429
                     retryable = attempt < max_attempts

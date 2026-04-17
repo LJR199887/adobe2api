@@ -416,6 +416,24 @@ def _set_request_token_context(request: Request, token: str, attempt: int) -> di
     return meta
 
 
+def _disable_auto_refresh_for_token(token_info: Optional[dict]) -> None:
+    if not isinstance(token_info, dict) or not bool(token_info.get("auto_refresh")):
+        return
+    profile_id = str(token_info.get("refresh_profile_id") or "").strip()
+    if not profile_id:
+        return
+    try:
+        refresh_manager.set_enabled(profile_id, False)
+    except Exception:
+        pass
+
+
+def _report_token_exhausted(token: str) -> Optional[dict]:
+    token_info = token_manager.report_exhausted(token)
+    _disable_auto_refresh_for_token(token_info)
+    return token_info
+
+
 def _append_attempt_log(
     request: Request,
     operation: str,
@@ -752,7 +770,7 @@ def _run_with_token_retries(
             )
             return result
         except QuotaExhaustedError as exc:
-            token_manager.report_exhausted(token)
+            _report_token_exhausted(token)
             last_exc = exc
             upstream_job_created = bool(
                 str(getattr(request.state, "log_upstream_job_id", "") or "").strip()
@@ -1464,6 +1482,7 @@ app.include_router(
         extract_prompt_from_messages=_extract_prompt_from_messages,
         sse_chat_stream=_sse_chat_stream,
         on_generated_file_written=_on_generated_file_written,
+        report_token_exhausted=_report_token_exhausted,
         quota_error_cls=QuotaExhaustedError,
         auth_error_cls=AuthError,
         upstream_temp_error_cls=UpstreamTemporaryError,

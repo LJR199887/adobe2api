@@ -64,6 +64,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const exportTokensBtn = document.getElementById("exportTokensBtn");
   const exportCookiesBtn = document.getElementById("exportCookiesBtn");
   const deleteTokensBatchBtn = document.getElementById("deleteTokensBatchBtn");
+  const enableAutoRefreshBatchBtn = document.getElementById("enableAutoRefreshBatchBtn");
+  const disableAutoRefreshBatchBtn = document.getElementById("disableAutoRefreshBatchBtn");
   const refreshModal = document.getElementById("refreshModal");
   const refreshModalCloseBtn = document.getElementById("refreshModalCloseBtn");
   const refreshBtn = document.getElementById("refreshBtn");
@@ -178,6 +180,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const selectedCount = tokenSelectedIds.size;
     if (tokenSelectedCount) tokenSelectedCount.textContent = String(selectedCount);
     if (clearTokenSelectionBtn) clearTokenSelectionBtn.disabled = selectedCount <= 0;
+    if (enableAutoRefreshBatchBtn) enableAutoRefreshBatchBtn.disabled = selectedCount <= 0;
+    if (disableAutoRefreshBatchBtn) disableAutoRefreshBatchBtn.disabled = selectedCount <= 0;
     if (selectAllFilteredTokensBtn) {
       const filteredCount = Array.isArray(latestTokens) ? latestTokens.length : 0;
       selectAllFilteredTokensBtn.disabled = filteredCount <= 0 || selectedCount >= filteredCount;
@@ -594,6 +598,66 @@ document.addEventListener("DOMContentLoaded", async () => {
       alert("自动刷新设置失败");
     }
   };
+
+  async function setSelectedAutoRefresh(enabled) {
+    const selectedIds = Array.from(tokenSelectedIds);
+    if (!selectedIds.length) {
+      alert("请先选择要操作的 Token");
+      return;
+    }
+    const actionText = enabled ? "开启" : "关闭";
+    const targetBtn = enabled ? enableAutoRefreshBatchBtn : disableAutoRefreshBatchBtn;
+    if (enableAutoRefreshBatchBtn) enableAutoRefreshBatchBtn.disabled = true;
+    if (disableAutoRefreshBatchBtn) disableAutoRefreshBatchBtn.disabled = true;
+    showToast(`批量${actionText}自动刷新中...`, false, { duration: 0 });
+    try {
+      const res = await fetch("/api/v1/tokens/auto-refresh-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedIds, enabled }),
+      });
+      if (!res.ok) {
+        let detail = `批量${actionText}自动刷新失败`;
+        try {
+          const body = await res.json();
+          detail = body.detail || JSON.stringify(body);
+        } catch (_) {
+          detail = await res.text();
+        }
+        showToast(detail || `批量${actionText}自动刷新失败`, true);
+        return;
+      }
+      const data = await res.json();
+      const updated = Number(data.updated_count || 0);
+      const skipped = Number(data.skipped_count || 0);
+      const missing = Number(data.missing_count || 0);
+      const failed = Number(data.failed_count || 0);
+      await loadTokens();
+      showToast(
+        `批量${actionText}完成：成功 ${updated}，跳过 ${skipped}，未找到 ${missing}，失败 ${failed}`,
+        failed > 0,
+        { duration: 5000 }
+      );
+    } catch (err) {
+      showToast(`批量${actionText}自动刷新失败`, true);
+    } finally {
+      if (enableAutoRefreshBatchBtn) enableAutoRefreshBatchBtn.disabled = false;
+      if (disableAutoRefreshBatchBtn) disableAutoRefreshBatchBtn.disabled = false;
+      if (targetBtn) targetBtn.disabled = false;
+    }
+  }
+
+  if (enableAutoRefreshBatchBtn) {
+    enableAutoRefreshBatchBtn.addEventListener("click", () => {
+      setSelectedAutoRefresh(true);
+    });
+  }
+
+  if (disableAutoRefreshBatchBtn) {
+    disableAutoRefreshBatchBtn.addEventListener("click", () => {
+      setSelectedAutoRefresh(false);
+    });
+  }
 
   if (refreshCreditsBatchBtn) {
     refreshCreditsBatchBtn.addEventListener("click", async () => {

@@ -50,6 +50,7 @@
           <span>Token 总数：<strong id="tokenTotalCount">0</strong></span>
           <span>当前生效：<strong id="tokenActiveCount">0</strong></span>
           <span>筛选结果：<strong id="tokenFilteredCount">0</strong></span>
+          <span>已选择：<strong id="tokenSelectedCount">0</strong></span>
         </div>
         <div class="token-filters">
           <label>
@@ -69,6 +70,8 @@
             </select>
           </label>
           <button id="clearTokenFiltersBtn" class="secondary" type="button">清空筛选</button>
+          <button id="selectAllFilteredTokensBtn" class="secondary" type="button">全选当前列表</button>
+          <button id="clearTokenSelectionBtn" class="secondary" type="button">取消选择</button>
         </div>
         <div class="table-wrapper">
           <table id="tokenTable">

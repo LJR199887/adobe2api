@@ -73,9 +73,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const tokenTotalCount = document.getElementById("tokenTotalCount");
   const tokenActiveCount = document.getElementById("tokenActiveCount");
   const tokenFilteredCount = document.getElementById("tokenFilteredCount");
+  const tokenSelectedCount = document.getElementById("tokenSelectedCount");
   const tokenStatusFilter = document.getElementById("tokenStatusFilter");
   const tokenCreditsFilter = document.getElementById("tokenCreditsFilter");
   const clearTokenFiltersBtn = document.getElementById("clearTokenFiltersBtn");
+  const selectAllFilteredTokensBtn = document.getElementById("selectAllFilteredTokensBtn");
+  const clearTokenSelectionBtn = document.getElementById("clearTokenSelectionBtn");
   const tokenPagination = document.getElementById("tokenPagination");
   const tokenPrevBtn = document.getElementById("tokenPrevBtn");
   const tokenNextBtn = document.getElementById("tokenNextBtn");
@@ -146,6 +149,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       console.error(err);
       allTokens = [];
       latestTokenSummary = null;
+      tokenSelectedIds.clear();
       renderTokenSummary([]);
       renderTokenPagination(0);
       tbody.innerHTML = `<tr><td colspan="9" class="empty-state" style="color: #ffb4bc;">加载失败</td></tr>`;
@@ -167,6 +171,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (tokenTotalCount) tokenTotalCount.textContent = String(total);
     if (tokenActiveCount) tokenActiveCount.textContent = String(active);
     if (tokenFilteredCount) tokenFilteredCount.textContent = String(fallbackTotal);
+    updateTokenSelectionSummary();
+  }
+
+  function updateTokenSelectionSummary() {
+    const selectedCount = tokenSelectedIds.size;
+    if (tokenSelectedCount) tokenSelectedCount.textContent = String(selectedCount);
+    if (clearTokenSelectionBtn) clearTokenSelectionBtn.disabled = selectedCount <= 0;
+    if (selectAllFilteredTokensBtn) {
+      const filteredCount = Array.isArray(latestTokens) ? latestTokens.length : 0;
+      selectAllFilteredTokensBtn.disabled = filteredCount <= 0 || selectedCount >= filteredCount;
+    }
   }
 
   function renderTokenPagination(totalCount) {
@@ -190,10 +205,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (total === 0) {
       tokenSelectAll.indeterminate = false;
       tokenSelectAll.checked = false;
+      updateTokenSelectionSummary();
       return;
     }
     tokenSelectAll.indeterminate = selectedCount > 0 && selectedCount < total;
     tokenSelectAll.checked = total > 0 && selectedCount === total;
+    updateTokenSelectionSummary();
   }
 
   function openDialog(modalEl) {
@@ -398,6 +415,23 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (clearTokenFiltersBtn) {
     clearTokenFiltersBtn.addEventListener("click", resetTokenFilters);
+  }
+
+  if (selectAllFilteredTokensBtn) {
+    selectAllFilteredTokensBtn.addEventListener("click", () => {
+      latestTokens.forEach((token) => {
+        const tid = String(token?.id || "").trim();
+        if (tid) tokenSelectedIds.add(tid);
+      });
+      renderTable(latestTokens, latestTokenSummary);
+    });
+  }
+
+  if (clearTokenSelectionBtn) {
+    clearTokenSelectionBtn.addEventListener("click", () => {
+      tokenSelectedIds.clear();
+      renderTable(latestTokens, latestTokenSummary);
+    });
   }
 
   if (tokenSelectAll) {

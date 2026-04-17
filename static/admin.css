@@ -466,6 +466,11 @@ button.small:hover {
   height: 36px;
 }
 
+.token-filters button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

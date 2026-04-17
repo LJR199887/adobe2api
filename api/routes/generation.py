@@ -244,6 +244,55 @@ def build_generation_router(
     def _json_response(status_code: int, content: dict, request: Request) -> JSONResponse:
         return JSONResponse(status_code=status_code, content=content)
 
+    def _normalize_image_request_data(data: dict, prompt: str) -> dict:
+        normalized = dict(data or {})
+        messages = normalized.get("messages")
+        if isinstance(messages, list) and messages:
+            return normalized
+
+        image_urls: list[str] = []
+        seen_urls: set[str] = set()
+
+        def _append_image_url(value: Any) -> None:
+            raw_value = value
+            if isinstance(raw_value, dict):
+                raw_value = (
+                    raw_value.get("url")
+                    or raw_value.get("image_url")
+                    or raw_value.get("src")
+                )
+            text = str(raw_value or "").strip()
+            if not text or text in seen_urls:
+                return
+            seen_urls.add(text)
+            image_urls.append(text)
+
+        for key in (
+            "image_url",
+            "image_urls",
+            "input_image",
+            "input_images",
+            "reference_image",
+            "reference_images",
+        ):
+            value = normalized.get(key)
+            if isinstance(value, list):
+                for item in value:
+                    _append_image_url(item)
+            else:
+                _append_image_url(value)
+
+        if not image_urls:
+            return normalized
+
+        content: list[dict[str, Any]] = []
+        if prompt:
+            content.append({"type": "text", "text": prompt})
+        for image_url in image_urls[:6]:
+            content.append({"type": "image_url", "image_url": {"url": image_url}})
+        normalized["messages"] = [{"role": "user", "content": content}]
+        return normalized
+
     @router.get("/v1/models")
     def list_models(request: Request):
         require_service_api_key(request)
@@ -296,7 +345,10 @@ def build_generation_router(
     def openai_generate(data: dict, request: Request):
         require_service_api_key(request)
 
-        prompt = data.get("prompt", "").strip()
+        prompt = str(data.get("prompt") or "").strip()
+        normalized_data = _normalize_image_request_data(data, prompt)
+        if not prompt:
+            prompt = extract_prompt_from_messages(normalized_data.get("messages") or [])
         if not prompt:
             return _json_response(
                 status_code=400,
@@ -310,7 +362,7 @@ def build_generation_router(
             )
         _validate_prompt_length(prompt)
 
-        model_id = data.get("model")
+        model_id = normalized_data.get("model")
         if str(model_id or "").strip() in video_model_catalog:
             return _json_response(
                 status_code=400,
@@ -323,16 +375,25 @@ def build_generation_router(
                 request=request,
             )
         ratio, output_resolution, resolved_model_id = resolve_ratio_and_resolution(
-            data, model_id
+            normalized_data, model_id
         )
         model_conf = resolve_model(resolved_model_id)
 
         try:
+            input_images = load_input_images(normalized_data.get("messages") or [])
             set_request_task_progress(
                 request, task_status="IN_PROGRESS", task_progress=0.0
             )
 
             def _run_once(token: str):
+                source_image_ids: list[str] = []
+                for image_bytes, image_mime in input_images:
+                    source_image_ids.append(
+                        client.upload_image(
+                            token, image_bytes, image_mime or "image/jpeg"
+                        )
+                    )
+
                 def _image_progress_cb(update: dict):
                     set_request_task_progress(
                         request,
@@ -366,6 +427,7 @@ def build_generation_router(
                     upstream_model_version=str(
                         model_conf.get("upstream_model_version") or "nano-banana-2"
                     ),
+                    source_image_ids=source_image_ids,
                     timeout=client.generate_timeout,
                     out_path=None if direct_result_url else out_path,
                     progress_cb=_image_progress_cb,

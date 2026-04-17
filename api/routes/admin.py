@@ -502,6 +502,13 @@ def build_admin_router(
                 detail="exhausted/invalid token cannot be reactivated; replace with a fresh token",
             )
         token_manager.set_status(tid, status)
+        if status == "disabled" and token_info.get("auto_refresh"):
+            profile_id = str(token_info.get("refresh_profile_id") or "").strip()
+            if profile_id:
+                try:
+                    refresh_manager.set_enabled(profile_id, False)
+                except Exception:
+                    pass
         return {"status": "ok"}
 
     @router.post("/api/v1/tokens/{tid}/refresh")

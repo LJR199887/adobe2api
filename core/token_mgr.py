@@ -319,13 +319,16 @@ class TokenManager:
             picked = self._pick_active_token_locked(strategy=strategy)
             return (picked or chosen)["value"]
 
-    def report_exhausted(self, value: str):
+    def report_exhausted(self, value: str) -> Optional[Dict]:
+        updated = None
         with self._lock:
             for t in self.tokens:
                 if t["value"] == value:
                     t["status"] = "exhausted"
                     t["error_until"] = 0
+                    updated = dict(t)
             self.save()
+        return updated
 
     def report_invalid(self, value: str):
         with self._lock:

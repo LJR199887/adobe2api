@@ -370,11 +370,7 @@ def build_admin_router(
         require_admin_auth(request)
         if not req.token.strip():
             raise HTTPException(status_code=400, detail="Empty token")
-        normalized_token = token_manager._normalize_token_value(req.token)  # type: ignore[attr-defined]
-        existing_duplicate = any(
-            str(item.get("value") or "").strip() == normalized_token
-            for item in getattr(token_manager, "tokens", [])
-        )
+        existing_duplicate = token_manager.has_value(req.token)
         result = token_manager.add(req.token)
         duplicate_count = 1 if bool(result.get("_duplicate")) else 0
         list_duplicate_count = 1 if duplicate_count and existing_duplicate else 0
@@ -396,12 +392,8 @@ def build_admin_router(
         if not req.tokens:
             raise HTTPException(status_code=400, detail="tokens is required")
 
-        initial_tokens = {
-            str(item.get("value") or "").strip()
-            for item in getattr(token_manager, "tokens", [])
-            if str(item.get("value") or "").strip()
-        }
         seen_in_request = set()
+        existing_by_token = {}
         success_count = 0
         failed_count = 0
         duplicate_count = 0
@@ -413,8 +405,12 @@ def build_admin_router(
                 failed_count += 1
                 continue
             normalized_token = token_manager._normalize_token_value(token)  # type: ignore[attr-defined]
-            in_existing_list = normalized_token in initial_tokens
             in_current_request = normalized_token in seen_in_request
+            if normalized_token not in existing_by_token:
+                existing_by_token[normalized_token] = token_manager.has_value(
+                    normalized_token
+                )
+            in_existing_list = bool(existing_by_token.get(normalized_token))
             result = token_manager.add(token)
             if bool(result.get("_duplicate")):
                 duplicate_count += 1

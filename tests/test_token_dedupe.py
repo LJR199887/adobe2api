@@ -73,18 +73,14 @@ def test_auto_refresh_upsert_merges_duplicate_value_and_profile(tmp_path, monkey
             "refresh_profile_id": "profile-old",
         },
     )
-    manager.tokens.append(
-        {
+    manager.add(
+        "token-old",
+        meta={
             "id": "profile-row",
-            "value": "token-old",
-            "status": "active",
-            "fails": 0,
-            "added_at": 1,
-            "error_until": 0,
             "source": "auto_refresh",
             "auto_refresh": True,
             "refresh_profile_id": "profile-new",
-        }
+        },
     )
 
     result = manager.upsert_auto_refresh_token("token-A", profile_id="profile-new")

@@ -21,6 +21,9 @@ class TokenManager:
     def __init__(self):
         self._lock = threading.Lock()
         self.tokens: List[Dict] = []
+        self._id_index: Dict[str, Dict] = {}
+        self._value_index: Dict[str, Dict] = {}
+        self._auto_refresh_profile_index: Dict[str, Dict] = {}
         self._rr_index = 0
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         self.load()
@@ -47,6 +50,7 @@ class TokenManager:
                         )
                 except Exception:
                     self.tokens = []
+            self._rebuild_indexes_locked()
 
     def save(self):
         DATA_FILE.write_text(json.dumps(self.tokens, indent=2), encoding="utf-8")
@@ -58,20 +62,109 @@ class TokenManager:
             token = token[7:].strip()
         return token
 
+    @staticmethod
+    def _token_id_key(token: Dict) -> str:
+        return str(token.get("id") or "").strip()
+
+    @classmethod
+    def _token_value_key(cls, token: Dict) -> str:
+        return cls._normalize_token_value(token.get("value") or "")
+
+    @staticmethod
+    def _token_profile_key(token: Dict) -> str:
+        if token.get("auto_refresh") is not True:
+            return ""
+        return str(token.get("refresh_profile_id") or "").strip()
+
+    def _index_token_locked(self, token: Dict):
+        tid = self._token_id_key(token)
+        if tid:
+            self._id_index[tid] = token
+
+        value = self._token_value_key(token)
+        if value and value not in self._value_index:
+            self._value_index[value] = token
+
+        profile_id = self._token_profile_key(token)
+        if profile_id and profile_id not in self._auto_refresh_profile_index:
+            self._auto_refresh_profile_index[profile_id] = token
+
+    def _drop_index_keys_locked(
+        self,
+        token: Dict,
+        tid: str = "",
+        value: str = "",
+        profile_id: str = "",
+    ):
+        if tid and self._id_index.get(tid) is token:
+            self._id_index.pop(tid, None)
+        if value and self._value_index.get(value) is token:
+            self._value_index.pop(value, None)
+        if profile_id and self._auto_refresh_profile_index.get(profile_id) is token:
+            self._auto_refresh_profile_index.pop(profile_id, None)
+
+    def _reindex_token_locked(
+        self,
+        token: Dict,
+        old_tid: str = "",
+        old_value: str = "",
+        old_profile_id: str = "",
+    ):
+        self._drop_index_keys_locked(
+            token,
+            tid=old_tid,
+            value=old_value,
+            profile_id=old_profile_id,
+        )
+        self._index_token_locked(token)
+
+    def _remove_token_locked(self, token: Dict):
+        self._drop_index_keys_locked(
+            token,
+            tid=self._token_id_key(token),
+            value=self._token_value_key(token),
+            profile_id=self._token_profile_key(token),
+        )
+        self.tokens = [item for item in self.tokens if item is not token]
+
+    def _rebuild_indexes_locked(self):
+        self._id_index = {}
+        self._value_index = {}
+        self._auto_refresh_profile_index = {}
+        for token in self.tokens:
+            if isinstance(token, dict):
+                self._index_token_locked(token)
+
+    def has_value(self, value: str) -> bool:
+        value = self._normalize_token_value(value)
+        if not value:
+            return False
+        with self._lock:
+            return value in self._value_index
+
     def add(self, value: str, meta: Optional[Dict] = None):
         with self._lock:
             value = self._normalize_token_value(value)
             meta = dict(meta or {})
 
-            for t in self.tokens:
-                if t["value"] == value:
-                    if meta:
-                        t.update(meta)
-                        self.save()
-                    result = dict(t)
-                    result["_created"] = False
-                    result["_duplicate"] = True
-                    return result
+            existing = self._value_index.get(value)
+            if existing is not None:
+                if meta:
+                    old_tid = self._token_id_key(existing)
+                    old_value = self._token_value_key(existing)
+                    old_profile_id = self._token_profile_key(existing)
+                    existing.update(meta)
+                    self._reindex_token_locked(
+                        existing,
+                        old_tid=old_tid,
+                        old_value=old_value,
+                        old_profile_id=old_profile_id,
+                    )
+                    self.save()
+                result = dict(existing)
+                result["_created"] = False
+                result["_duplicate"] = True
+                return result
 
             new_token = {
                 "id": uuid.uuid4().hex[:8],
@@ -84,6 +177,7 @@ class TokenManager:
             if meta:
                 new_token.update(meta)
             self.tokens.append(new_token)
+            self._index_token_locked(new_token)
             self.save()
             result = dict(new_token)
             result["_created"] = True
@@ -105,20 +199,8 @@ class TokenManager:
             if not pid:
                 raise ValueError("profile_id is required")
 
-            value_target = None
-            profile_target = None
-            for t in self.tokens:
-                if value_target is None and self._normalize_token_value(
-                    t.get("value") or ""
-                ) == value:
-                    value_target = t
-                if profile_target is None and (
-                    t.get("auto_refresh") is True
-                    and str(t.get("refresh_profile_id") or "").strip() == pid
-                ):
-                    profile_target = t
-                if value_target is not None and profile_target is not None:
-                    break
+            value_target = self._value_index.get(value)
+            profile_target = self._auto_refresh_profile_index.get(pid)
 
             # A re-imported cookie may create a new profile but return an access
             # token that already exists. Keep one token row and make the latest
@@ -131,6 +213,10 @@ class TokenManager:
                 if previous_profile_id and previous_profile_id != pid:
                     removed_profile_ids.add(previous_profile_id)
 
+                old_tid = self._token_id_key(target)
+                old_value = self._token_value_key(target)
+                old_profile_id = self._token_profile_key(target)
+
                 target["value"] = value
                 target["status"] = "active"
                 target["fails"] = 0
@@ -142,21 +228,20 @@ class TokenManager:
                 target["refresh_profile_name"] = str(profile_name or "").strip() or pid
                 target["refresh_profile_email"] = str(profile_email or "").strip()
 
-                deduped_tokens = []
-                for item in self.tokens:
-                    if item is target:
-                        deduped_tokens.append(item)
-                        continue
+                if profile_target is not None and profile_target is not target:
+                    profile_target_id = str(
+                        profile_target.get("refresh_profile_id") or ""
+                    ).strip()
+                    if profile_target_id and profile_target_id != pid:
+                        removed_profile_ids.add(profile_target_id)
+                    self._remove_token_locked(profile_target)
 
-                    item_profile_id = str(item.get("refresh_profile_id") or "").strip()
-                    same_profile = item is profile_target
-                    same_value = self._normalize_token_value(item.get("value") or "") == value
-                    if same_profile or same_value:
-                        if item_profile_id and item_profile_id != pid:
-                            removed_profile_ids.add(item_profile_id)
-                        continue
-                    deduped_tokens.append(item)
-                self.tokens = deduped_tokens
+                self._reindex_token_locked(
+                    target,
+                    old_tid=old_tid,
+                    old_value=old_value,
+                    old_profile_id=old_profile_id,
+                )
 
                 self.save()
                 result = dict(target)
@@ -181,6 +266,7 @@ class TokenManager:
                 "refresh_profile_email": str(profile_email or "").strip(),
             }
             self.tokens.append(new_token)
+            self._index_token_locked(new_token)
             self.save()
             result = dict(new_token)
             result["_created"] = True
@@ -189,37 +275,33 @@ class TokenManager:
 
     def remove(self, tid: str):
         with self._lock:
-            self.tokens = [t for t in self.tokens if t["id"] != tid]
-            self.save()
+            target = self._id_index.get(str(tid or "").strip())
+            if target is not None:
+                self._remove_token_locked(target)
+                self.save()
 
     def remove_auto_refresh_by_profile(self, profile_id: str):
         pid = str(profile_id or "").strip()
         if not pid:
             return
         with self._lock:
-            self.tokens = [
-                t
-                for t in self.tokens
-                if not (
-                    t.get("auto_refresh") is True
-                    and str(t.get("refresh_profile_id") or "").strip() == pid
-                )
-            ]
-            self.save()
+            target = self._auto_refresh_profile_index.get(pid)
+            if target is not None:
+                self._remove_token_locked(target)
+                self.save()
 
     def get_by_id(self, tid: str) -> Optional[Dict]:
         with self._lock:
-            for t in self.tokens:
-                if t.get("id") == tid:
-                    return dict(t)
+            token = self._id_index.get(str(tid or "").strip())
+            if token is not None:
+                return dict(token)
         return None
 
     def get_meta_by_value(self, value: str) -> Dict:
-        token_value = str(value or "").strip()
+        token_value = self._normalize_token_value(value)
         with self._lock:
-            for t in self.tokens:
-                if str(t.get("value") or "").strip() != token_value:
-                    continue
+            t = self._value_index.get(token_value)
+            if t is not None:
                 return {
                     "token_id": t.get("id"),
                     "token_account_name": t.get("refresh_profile_name") or "",
@@ -235,19 +317,18 @@ class TokenManager:
 
     def set_status(self, tid: str, status: str):
         with self._lock:
-            for t in self.tokens:
-                if t["id"] == tid:
-                    t["status"] = status
-                    t["fails"] = 0 if status == "active" else t["fails"]
-                    if status == "active":
-                        t["error_until"] = 0
+            t = self._id_index.get(str(tid or "").strip())
+            if t is not None:
+                t["status"] = status
+                t["fails"] = 0 if status == "active" else t["fails"]
+                if status == "active":
+                    t["error_until"] = 0
             self.save()
 
     def set_credits(self, tid: str, credits: Dict):
         with self._lock:
-            for t in self.tokens:
-                if t.get("id") != tid:
-                    continue
+            t = self._id_index.get(str(tid or "").strip())
+            if t is not None:
                 t["credits_total"] = credits.get("total")
                 t["credits_used"] = credits.get("used")
                 t["credits_available"] = credits.get("available")
@@ -260,9 +341,8 @@ class TokenManager:
 
     def set_credits_error(self, tid: str, error_message: str):
         with self._lock:
-            for t in self.tokens:
-                if t.get("id") != tid:
-                    continue
+            t = self._id_index.get(str(tid or "").strip())
+            if t is not None:
                 t["credits_error"] = str(error_message or "")[:300]
                 t["credits_updated_at"] = int(time.time())
                 self.save()
@@ -322,39 +402,39 @@ class TokenManager:
     def report_exhausted(self, value: str) -> Optional[Dict]:
         updated = None
         with self._lock:
-            for t in self.tokens:
-                if t["value"] == value:
-                    t["status"] = "exhausted"
-                    t["error_until"] = 0
-                    updated = dict(t)
+            t = self._value_index.get(self._normalize_token_value(value))
+            if t is not None:
+                t["status"] = "exhausted"
+                t["error_until"] = 0
+                updated = dict(t)
             self.save()
         return updated
 
     def report_invalid(self, value: str):
         with self._lock:
-            for t in self.tokens:
-                if t["value"] == value:
-                    t["status"] = "invalid"
-                    t["error_until"] = 0
+            t = self._value_index.get(self._normalize_token_value(value))
+            if t is not None:
+                t["status"] = "invalid"
+                t["error_until"] = 0
             self.save()
 
     def report_error(self, value: str):
         with self._lock:
-            for t in self.tokens:
-                if t["value"] == value:
-                    t["fails"] += 1
-                    t["status"] = "error"
-                    t["error_until"] = time.time() + self.ERROR_COOLDOWN_SECONDS
+            t = self._value_index.get(self._normalize_token_value(value))
+            if t is not None:
+                t["fails"] += 1
+                t["status"] = "error"
+                t["error_until"] = time.time() + self.ERROR_COOLDOWN_SECONDS
             self.save()
 
     def report_success(self, value: str):
         with self._lock:
-            for t in self.tokens:
-                if t["value"] == value:
-                    t["fails"] = max(0, int(t.get("fails", 0)) - 1)
-                    if t["status"] == "error":
-                        t["status"] = "active"
-                        t["error_until"] = 0
+            t = self._value_index.get(self._normalize_token_value(value))
+            if t is not None:
+                t["fails"] = max(0, int(t.get("fails", 0)) - 1)
+                if t["status"] == "error":
+                    t["status"] = "active"
+                    t["error_until"] = 0
             self.save()
 
     @staticmethod

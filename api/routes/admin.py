@@ -1,3 +1,4 @@
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -27,6 +28,32 @@ from core.proxy_utils import (
     test_authorized_endpoint,
     test_proxy_endpoint,
 )
+
+
+logger = logging.getLogger("uvicorn.error")
+
+
+def _elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000, 3)
+
+
+def _timing_value(payload: Any, key: str) -> float:
+    if not isinstance(payload, dict):
+        return 0.0
+    try:
+        return float(payload.get(key) or 0)
+    except Exception:
+        return 0.0
+
+
+def _index_success_from_timing(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return int(payload.get("token_value_index_size") or 0) > 0 and (
+        "token_upsert_index_ms" in payload
+        or "token_index_ms_sum" in payload
+        or "token_index_ms_max" in payload
+    )
 
 
 def build_admin_router(
@@ -957,17 +984,24 @@ def build_admin_router(
     def refresh_profiles_import_cookie(
         req: RefreshCookieImportRequest, request: Request
     ):
+        route_started = time.perf_counter()
         require_admin_auth(request)
+        profile_import_ms = 0.0
+        refresh_call_ms = 0.0
         try:
+            profile_import_started = time.perf_counter()
             profile = refresh_manager.import_cookie(req.cookie, name=req.name)
+            profile_import_ms = _elapsed_ms(profile_import_started)
             refresh_result = None
             refresh_error = ""
+            refresh_started = time.perf_counter()
             try:
                 refresh_result = refresh_manager.refresh_once(
                     str(profile.get("id") or "")
                 )
             except Exception as exc:
                 refresh_error = str(exc)
+            refresh_call_ms = _elapsed_ms(refresh_started)
             duplicate_count = (
                 1
                 if isinstance(refresh_result, dict)
@@ -985,7 +1019,7 @@ def build_admin_router(
             )
             failed_count = 1 if refresh_error else 0
             success_count = 0 if (failed_count or duplicate_count) else 1
-            return {
+            result = {
                 "status": "ok" if not refresh_error else "partial",
                 "profile": profile,
                 "refresh_result": refresh_result,
@@ -997,13 +1031,92 @@ def build_admin_router(
                 "list_duplicate_count": list_duplicate_count,
                 "overwritten_count": list_duplicate_count,
             }
+            timing = (
+                refresh_result.get("timing") or {}
+                if isinstance(refresh_result, dict)
+                else {}
+            )
+            response_timing = {
+                "profile_import_ms": profile_import_ms,
+                "refresh_call_ms": refresh_call_ms,
+                "prepare_ms": _timing_value(timing, "prepare_ms"),
+                "adobe_refresh_ms": _timing_value(timing, "adobe_refresh_ms"),
+                "response_parse_ms": _timing_value(timing, "response_parse_ms"),
+                "account_ms": _timing_value(timing, "account_ms"),
+                "token_upsert_ms": _timing_value(timing, "token_upsert_ms"),
+                "token_upsert_index_ms": _timing_value(
+                    timing, "token_upsert_index_ms"
+                ),
+                "token_index_ms_sum": _timing_value(
+                    timing, "token_upsert_index_ms"
+                ),
+                "token_index_ms_max": _timing_value(
+                    timing, "token_upsert_index_ms"
+                ),
+                "token_upsert_total_ms": _timing_value(
+                    timing, "token_upsert_total_ms"
+                ),
+                "credits_ms": _timing_value(timing, "credits_ms"),
+                "total_ms": _elapsed_ms(route_started),
+                "token_value_index_size": timing.get("token_value_index_size", 0)
+                if isinstance(timing, dict)
+                else 0,
+                "token_profile_index_size": timing.get("token_profile_index_size", 0)
+                if isinstance(timing, dict)
+                else 0,
+            }
+            response_timing["token_index_success"] = _index_success_from_timing(
+                response_timing
+            )
+            result["timing"] = response_timing
+            logger.info(
+                "import_cookie_timing status=%s success=%s failed=%s duplicate=%s "
+                "list_duplicate=%s overwritten=%s profile_import_ms=%.3f "
+                "refresh_call_ms=%.3f prepare_ms=%.3f adobe_refresh_ms=%.3f "
+                "response_parse_ms=%.3f account_ms=%.3f token_upsert_ms=%.3f "
+                "token_index_ms=%.3f token_upsert_total_ms=%.3f credits_ms=%.3f "
+                "total_ms=%.3f token_value_index_size=%s token_profile_index_size=%s",
+                result["status"],
+                success_count,
+                failed_count,
+                duplicate_count,
+                list_duplicate_count,
+                list_duplicate_count,
+                profile_import_ms,
+                refresh_call_ms,
+                _timing_value(timing, "prepare_ms"),
+                _timing_value(timing, "adobe_refresh_ms"),
+                _timing_value(timing, "response_parse_ms"),
+                _timing_value(timing, "account_ms"),
+                _timing_value(timing, "token_upsert_ms"),
+                _timing_value(timing, "token_upsert_index_ms"),
+                _timing_value(timing, "token_upsert_total_ms"),
+                _timing_value(timing, "credits_ms"),
+                response_timing["total_ms"],
+                timing.get("token_value_index_size", 0)
+                if isinstance(timing, dict)
+                else 0,
+                timing.get("token_profile_index_size", 0)
+                if isinstance(timing, dict)
+                else 0,
+            )
+            return result
         except ValueError as exc:
+            logger.info(
+                "import_cookie_timing status=failed success=0 failed=1 duplicate=0 "
+                "list_duplicate=0 overwritten=0 profile_import_ms=%.3f "
+                "refresh_call_ms=%.3f total_ms=%.3f error_stage=import",
+                profile_import_ms,
+                refresh_call_ms,
+                _elapsed_ms(route_started),
+            )
             raise HTTPException(status_code=400, detail=str(exc))
 
     @router.post("/api/v1/refresh-profiles/import-cookie-batch")
     def refresh_profiles_import_cookie_batch(
         req: RefreshCookieBatchImportRequest, request: Request
     ):
+        route_started = time.perf_counter()
         require_admin_auth(request)
         if not req.items:
             raise HTTPException(status_code=400, detail="items is required")
@@ -1015,12 +1128,14 @@ def build_admin_router(
         retained_by_cookie = {}
         invalid_entries = []
 
+        request_dedupe_started = time.perf_counter()
         for idx, item in enumerate(req.items):
             fingerprint = refresh_manager.cookie_fingerprint(item.cookie)
             if not fingerprint:
                 invalid_entries.append((idx, item))
                 continue
             retained_by_cookie[fingerprint] = (idx, item)
+        request_dedupe_ms = _elapsed_ms(request_dedupe_started)
 
         import_entries = sorted(
             [*retained_by_cookie.values(), *invalid_entries],
@@ -1030,6 +1145,7 @@ def build_admin_router(
         list_duplicate_count = 0
 
         def import_one(idx: int, item):
+            profile_import_started = time.perf_counter()
             try:
                 profile = refresh_manager.import_cookie(item.cookie, name=item.name)
             except ValueError as exc:
@@ -1043,14 +1159,22 @@ def build_admin_router(
                     },
                     "refreshed": None,
                     "refresh_failed": None,
+                    "timing": {
+                        "profile_import_ms": _elapsed_ms(profile_import_started),
+                        "refresh_call_ms": 0,
+                    },
                 }
+            profile_import_ms = _elapsed_ms(profile_import_started)
 
             refreshed_item = None
             refresh_failed_item = None
+            refresh_started = time.perf_counter()
+            refresh_call_ms = 0.0
             try:
                 refresh_result = refresh_manager.refresh_once(
                     str(profile.get("id") or "")
                 )
+                refresh_call_ms = _elapsed_ms(refresh_started)
                 refreshed_item = {
                     "index": idx,
                     "profile_id": profile.get("id"),
@@ -1058,6 +1182,7 @@ def build_admin_router(
                     "result": refresh_result,
                 }
             except Exception as exc:
+                refresh_call_ms = _elapsed_ms(refresh_started)
                 refresh_failed_item = {
                     "index": idx,
                     "profile_id": profile.get("id"),
@@ -1071,15 +1196,21 @@ def build_admin_router(
                 "failed": None,
                 "refreshed": refreshed_item,
                 "refresh_failed": refresh_failed_item,
+                "timing": {
+                    "profile_import_ms": profile_import_ms,
+                    "refresh_call_ms": refresh_call_ms,
+                },
             }
 
         max_workers = min(get_batch_concurrency(), len(import_entries))
+        worker_started = time.perf_counter()
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(import_one, idx, item)
                 for idx, item in import_entries
             ]
             done_items = [future.result() for future in as_completed(futures)]
+        worker_ms = _elapsed_ms(worker_started)
 
         done_items.sort(key=lambda item: item["index"])
         for item in done_items:
@@ -1101,6 +1232,50 @@ def build_admin_router(
         success_count = max(0, len(refreshed) - list_duplicate_count)
         duplicate_count = request_duplicate_count + list_duplicate_count
         error_count = len(failed) + len(refresh_failed)
+        profile_import_ms_sum = 0.0
+        refresh_call_ms_sum = 0.0
+        prepare_ms_sum = 0.0
+        adobe_refresh_ms_sum = 0.0
+        response_parse_ms_sum = 0.0
+        account_ms_sum = 0.0
+        token_upsert_ms_sum = 0.0
+        token_index_ms_sum = 0.0
+        token_index_ms_max = 0.0
+        token_upsert_total_ms_sum = 0.0
+        credits_ms_sum = 0.0
+        token_value_index_size = 0
+        token_profile_index_size = 0
+
+        for item in done_items:
+            item_timing = item.get("timing") or {}
+            profile_import_ms_sum += _timing_value(
+                item_timing, "profile_import_ms"
+            )
+            refresh_call_ms_sum += _timing_value(item_timing, "refresh_call_ms")
+            refreshed_item = item.get("refreshed") or {}
+            refresh_result = refreshed_item.get("result") or {}
+            timing = refresh_result.get("timing") or {}
+            prepare_ms_sum += _timing_value(timing, "prepare_ms")
+            adobe_refresh_ms_sum += _timing_value(timing, "adobe_refresh_ms")
+            response_parse_ms_sum += _timing_value(timing, "response_parse_ms")
+            account_ms_sum += _timing_value(timing, "account_ms")
+            token_upsert_ms_sum += _timing_value(timing, "token_upsert_ms")
+            token_index_ms = _timing_value(timing, "token_upsert_index_ms")
+            token_index_ms_sum += token_index_ms
+            token_index_ms_max = max(token_index_ms_max, token_index_ms)
+            token_upsert_total_ms_sum += _timing_value(
+                timing, "token_upsert_total_ms"
+            )
+            credits_ms_sum += _timing_value(timing, "credits_ms")
+            if isinstance(timing, dict):
+                token_value_index_size = max(
+                    token_value_index_size,
+                    int(timing.get("token_value_index_size") or 0),
+                )
+                token_profile_index_size = max(
+                    token_profile_index_size,
+                    int(timing.get("token_profile_index_size") or 0),
+                )
 
         result = {
             "status": (
@@ -1126,6 +1301,65 @@ def build_admin_router(
             "refreshed": refreshed,
             "refresh_failed": refresh_failed,
         }
+        response_timing = {
+            "request_dedupe_ms": request_dedupe_ms,
+            "worker_ms": worker_ms,
+            "profile_import_ms_sum": profile_import_ms_sum,
+            "refresh_call_ms_sum": refresh_call_ms_sum,
+            "prepare_ms_sum": prepare_ms_sum,
+            "adobe_refresh_ms_sum": adobe_refresh_ms_sum,
+            "response_parse_ms_sum": response_parse_ms_sum,
+            "account_ms_sum": account_ms_sum,
+            "token_upsert_ms_sum": token_upsert_ms_sum,
+            "token_index_ms_sum": token_index_ms_sum,
+            "token_index_ms_max": token_index_ms_max,
+            "token_upsert_total_ms_sum": token_upsert_total_ms_sum,
+            "credits_ms_sum": credits_ms_sum,
+            "total_ms": _elapsed_ms(route_started),
+            "token_value_index_size": token_value_index_size,
+            "token_profile_index_size": token_profile_index_size,
+        }
+        response_timing["token_index_success"] = _index_success_from_timing(
+            response_timing
+        )
+        result["timing"] = response_timing
+        logger.info(
+            "import_cookie_batch_timing status=%s total=%s processed=%s success=%s "
+            "failed=%s duplicate=%s request_duplicate=%s list_duplicate=%s "
+            "overwritten=%s request_dedupe_ms=%.3f worker_ms=%.3f "
+            "profile_import_ms_sum=%.3f refresh_call_ms_sum=%.3f "
+            "prepare_ms_sum=%.3f adobe_refresh_ms_sum=%.3f "
+            "response_parse_ms_sum=%.3f account_ms_sum=%.3f "
+            "token_upsert_ms_sum=%.3f token_index_ms_sum=%.3f "
+            "token_index_ms_max=%.3f token_upsert_total_ms_sum=%.3f "
+            "credits_ms_sum=%.3f total_ms=%.3f token_value_index_size=%s "
+            "token_profile_index_size=%s",
+            result["status"],
+            len(req.items),
+            len(import_entries),
+            success_count,
+            error_count,
+            duplicate_count,
+            request_duplicate_count,
+            list_duplicate_count,
+            list_duplicate_count,
+            request_dedupe_ms,
+            worker_ms,
+            profile_import_ms_sum,
+            refresh_call_ms_sum,
+            prepare_ms_sum,
+            adobe_refresh_ms_sum,
+            response_parse_ms_sum,
+            account_ms_sum,
+            token_upsert_ms_sum,
+            token_index_ms_sum,
+            token_index_ms_max,
+            token_upsert_total_ms_sum,
+            credits_ms_sum,
+            response_timing["total_ms"],
+            token_value_index_size,
+            token_profile_index_size,
+        )
         if not imported:
             raise HTTPException(status_code=400, detail=result)
         return result

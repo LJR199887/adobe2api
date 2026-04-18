@@ -191,6 +191,7 @@ class TokenManager:
         profile_name: Optional[str] = None,
         profile_email: Optional[str] = None,
     ):
+        total_started = time.perf_counter()
         with self._lock:
             value = self._normalize_token_value(value)
 
@@ -199,8 +200,21 @@ class TokenManager:
             if not pid:
                 raise ValueError("profile_id is required")
 
+            lookup_started = time.perf_counter()
             value_target = self._value_index.get(value)
             profile_target = self._auto_refresh_profile_index.get(pid)
+            index_lookup_ms = round((time.perf_counter() - lookup_started) * 1000, 3)
+
+            def build_timing() -> Dict:
+                return {
+                    "index_lookup_ms": index_lookup_ms,
+                    "upsert_total_ms": round(
+                        (time.perf_counter() - total_started) * 1000, 3
+                    ),
+                    "value_index_size": len(self._value_index),
+                    "id_index_size": len(self._id_index),
+                    "profile_index_size": len(self._auto_refresh_profile_index),
+                }
 
             # A re-imported cookie may create a new profile but return an access
             # token that already exists. Keep one token row and make the latest
@@ -247,6 +261,7 @@ class TokenManager:
                 result = dict(target)
                 result["_created"] = False
                 result["_duplicate_token"] = duplicate_token
+                result["_timing"] = build_timing()
                 if removed_profile_ids:
                     result["_merged_refresh_profile_ids"] = sorted(removed_profile_ids)
                 return result
@@ -271,6 +286,7 @@ class TokenManager:
             result = dict(new_token)
             result["_created"] = True
             result["_duplicate_token"] = False
+            result["_timing"] = build_timing()
             return result
 
     def remove(self, tid: str):

@@ -1507,6 +1507,59 @@ document.addEventListener("DOMContentLoaded", async () => {
     return Number.isFinite(value) ? value : 0;
   }
 
+  function getImportTiming(payload) {
+    if (payload?.timing && typeof payload.timing === "object") {
+      return payload.timing;
+    }
+    if (payload?.refresh_result?.timing && typeof payload.refresh_result.timing === "object") {
+      return payload.refresh_result.timing;
+    }
+    return null;
+  }
+
+  function getTimingNumber(timing, keys) {
+    for (const key of keys) {
+      const value = Number(timing?.[key]);
+      if (Number.isFinite(value) && value > 0) return value;
+    }
+    return 0;
+  }
+
+  function formatTimingMs(value) {
+    const ms = Number(value || 0);
+    if (!Number.isFinite(ms) || ms <= 0) return "";
+    if (ms >= 1000) return `${(ms / 1000).toFixed(1)} 秒`;
+    if (ms < 1) return `${ms.toFixed(3)} ms`;
+    return `${ms.toFixed(1)} ms`;
+  }
+
+  function buildImportDiagnostics(payload) {
+    const timing = getImportTiming(payload);
+    if (!timing) return null;
+    const totalMs = getTimingNumber(timing, ["total_ms"]);
+    const adobeMs = getTimingNumber(timing, ["adobe_refresh_ms_sum", "adobe_refresh_ms"]);
+    const creditsMs = getTimingNumber(timing, ["credits_ms_sum", "credits_ms"]);
+    const tokenWriteMs = getTimingNumber(timing, ["token_upsert_ms_sum", "token_upsert_ms"]);
+    const indexMs = getTimingNumber(timing, [
+      "token_index_ms_sum",
+      "token_upsert_index_ms",
+      "token_index_ms_max",
+    ]);
+    const indexSize = Number(timing.token_value_index_size || 0);
+    const lines = ["诊断详情"];
+    if (adobeMs > 0) lines.push(`Adobe 刷新：${formatTimingMs(adobeMs)}`);
+    if (creditsMs > 0) lines.push(`积分刷新：${formatTimingMs(creditsMs)}`);
+    if (tokenWriteMs > 0) lines.push(`Token 写入：${formatTimingMs(tokenWriteMs)}`);
+    if (indexMs > 0) lines.push(`索引查找：${formatTimingMs(indexMs)}`);
+    if (Number.isFinite(indexSize) && indexSize > 0) {
+      lines.push(`Token索引数量：${indexSize}`);
+    }
+    return {
+      totalMs,
+      text: lines.join("\n"),
+    };
+  }
+
   function buildImportSummaryText(label, payload) {
     const success = getImportSuccessCount(payload);
     const failed = getImportFailedCount(payload);
@@ -1528,7 +1581,27 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (overwritten > 0) {
       parts.push(`已覆盖 ${overwritten}`);
     }
+    const diagnostics = buildImportDiagnostics(payload);
+    if (diagnostics?.totalMs > 0) {
+      parts.push(`总耗时 ${formatTimingMs(diagnostics.totalMs)}`);
+    }
     return parts.join("，");
+  }
+
+  function showImportResultMsg(el, label, payload, isError = false, options = {}) {
+    const summary = buildImportSummaryText(label, payload);
+    showMsg(el, summary, isError, options);
+    const diagnostics = buildImportDiagnostics(payload);
+    if (!el || !diagnostics) return;
+    const details = document.createElement("details");
+    details.className = "import-diagnostic";
+    const summaryEl = document.createElement("summary");
+    summaryEl.textContent = "诊断详情";
+    const pre = document.createElement("pre");
+    pre.textContent = diagnostics.text;
+    details.appendChild(summaryEl);
+    details.appendChild(pre);
+    el.appendChild(details);
   }
 
   async function importCookies() {
@@ -1577,11 +1650,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!res.ok) {
         const detailPayload = getImportDetailPayload(data);
         if (detailPayload && typeof detailPayload === "object") {
-          showMsg(
+          showImportResultMsg(
             refreshMsg,
-            buildImportSummaryText("Cookie导入", detailPayload),
+            "Cookie导入",
+            detailPayload,
             true,
-            { duration: 8000 }
+            { duration: 0 }
           );
           return;
         }
@@ -1593,11 +1667,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         throw new Error(detailText);
       }
 
-      showMsg(
+      showImportResultMsg(
         refreshMsg,
-        buildImportSummaryText("Cookie导入", data),
+        "Cookie导入",
+        data,
         getImportFailedCount(data) > 0,
-        { duration: 8000 }
+        { duration: 0 }
       );
       if (cookieInput) cookieInput.value = "";
       if (cookieFile) cookieFile.value = "";

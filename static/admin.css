@@ -370,6 +370,31 @@ button.small:hover {
   font-size: 14px;
 }
 
+.import-diagnostic {
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+.import-diagnostic summary {
+  cursor: pointer;
+  color: var(--text);
+  font-size: 13px;
+  user-select: none;
+}
+
+.import-diagnostic pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
 /* Table */
 .list-head {
   display: flex;

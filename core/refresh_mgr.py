@@ -693,7 +693,12 @@ class RefreshManager:
             self._save_profiles()
 
     def refresh_once(self, profile_id: str) -> Dict:
+        total_started = time.perf_counter()
+        prepare_started = time.perf_counter()
         snapshot = self._prepare_refresh(profile_id)
+        prepare_ms = round((time.perf_counter() - prepare_started) * 1000, 3)
+
+        request_started = time.perf_counter()
         resp = requests.post(
             snapshot["url"],
             headers=snapshot["headers"],
@@ -701,6 +706,7 @@ class RefreshManager:
             timeout=30,
             proxies=self._requests_proxies(),
         )
+        adobe_refresh_ms = round((time.perf_counter() - request_started) * 1000, 3)
 
         if resp.status_code != 200:
             self._mark_failure(
@@ -712,6 +718,7 @@ class RefreshManager:
                 f"refresh request failed: {resp.status_code} {resp.text[:200]}"
             )
 
+        parse_started = time.perf_counter()
         try:
             data = resp.json()
         except Exception:
@@ -721,6 +728,7 @@ class RefreshManager:
                 http_status=resp.status_code,
             )
             raise RuntimeError("refresh response is not valid json")
+        response_parse_ms = round((time.perf_counter() - parse_started) * 1000, 3)
 
         token = str(data.get("access_token") or "").strip()
         if not token:
@@ -731,9 +739,11 @@ class RefreshManager:
             )
             raise RuntimeError("refresh response missing access_token")
 
+        account_started = time.perf_counter()
         account = self._fetch_account_info(token)
         if account:
             self._set_profile_account(profile_id, account)
+        account_ms = round((time.perf_counter() - account_started) * 1000, 3)
 
         profile_name = str(
             account.get("display_name")
@@ -743,12 +753,14 @@ class RefreshManager:
         ).strip()
         profile_email = str(account.get("email") or "").strip()
 
+        upsert_started = time.perf_counter()
         token_record = token_manager.upsert_auto_refresh_token(
             token,
             profile_id=snapshot["id"],
             profile_name=profile_name,
             profile_email=profile_email,
         )
+        token_upsert_ms = round((time.perf_counter() - upsert_started) * 1000, 3)
         merged_profile_ids = [
             str(x or "").strip()
             for x in token_record.get("_merged_refresh_profile_ids", [])
@@ -758,15 +770,18 @@ class RefreshManager:
 
         credits_error = ""
         token_id = str(token_record.get("id") or "").strip()
+        credits_started = time.perf_counter()
         if token_id:
             try:
                 self.refresh_credits_for_token_id(token_id)
             except Exception as exc:
                 credits_error = str(exc)
                 token_manager.set_credits_error(token_id, credits_error)
+        credits_ms = round((time.perf_counter() - credits_started) * 1000, 3)
 
         self._mark_success(profile_id, http_status=resp.status_code)
 
+        token_timing = token_record.get("_timing") or {}
         return {
             "status": "ok",
             "profile_id": snapshot["id"],
@@ -776,6 +791,20 @@ class RefreshManager:
             "credits_error": credits_error,
             "token_duplicate": bool(token_record.get("_duplicate_token")),
             "token_created": bool(token_record.get("_created")),
+            "timing": {
+                "prepare_ms": prepare_ms,
+                "adobe_refresh_ms": adobe_refresh_ms,
+                "response_parse_ms": response_parse_ms,
+                "account_ms": account_ms,
+                "token_upsert_ms": token_upsert_ms,
+                "token_upsert_index_ms": token_timing.get("index_lookup_ms", 0),
+                "token_upsert_total_ms": token_timing.get("upsert_total_ms", 0),
+                "credits_ms": credits_ms,
+                "total_ms": round((time.perf_counter() - total_started) * 1000, 3),
+                "token_value_index_size": token_timing.get("value_index_size", 0),
+                "token_id_index_size": token_timing.get("id_index_size", 0),
+                "token_profile_index_size": token_timing.get("profile_index_size", 0),
+            },
         }
 
     def start(self):

@@ -768,6 +768,15 @@ def _run_with_token_retries(
                 status_code=result_status_code,
                 task_status_override="COMPLETED",
             )
+            token_info = token_manager.report_success_with_auto_disable(
+                token,
+                auto_disable_enabled=client.token_success_auto_disable_enabled,
+                auto_disable_threshold=client.token_success_auto_disable_threshold,
+            )
+            if isinstance(token_info, dict) and bool(
+                token_info.get("_disabled_by_success_limit")
+            ):
+                _disable_auto_refresh_for_token(token_info)
             return result
         except QuotaExhaustedError as exc:
             _report_token_exhausted(token)
@@ -1483,6 +1492,7 @@ app.include_router(
         sse_chat_stream=_sse_chat_stream,
         on_generated_file_written=_on_generated_file_written,
         report_token_exhausted=_report_token_exhausted,
+        disable_auto_refresh_for_token=_disable_auto_refresh_for_token,
         quota_error_cls=QuotaExhaustedError,
         auth_error_cls=AuthError,
         upstream_temp_error_cls=UpstreamTemporaryError,

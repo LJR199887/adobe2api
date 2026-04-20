@@ -349,7 +349,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         <td><span class="status-badge ${statusClass}">${displayStatus}</span></td>
         <td>${autoRefreshCell}</td>
         <td style="font-size:12px; line-height:1.35;">${formatCredits(t)}</td>
-        <td style="color: ${t.fails > 0 ? '#ffb4bc' : '#a8bfd8'};">${t.fails}</td>
+        <td style="color: ${Number(t.success_count || 0) > 0 ? '#4de2c4' : '#a8bfd8'};">${Number(t.success_count || 0)}</td>
         <td style="font-size:12px; line-height:1.35;">${formatExpiry(t)}</td>
         <td>${actionsGrid}</td>
       `;
@@ -853,6 +853,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confRetryOnStatusCodes = document.getElementById("confRetryOnStatusCodes");
   const confRetryOnErrorTypes = document.getElementById("confRetryOnErrorTypes");
   const confTokenRotationStrategy = document.getElementById("confTokenRotationStrategy");
+  const confTokenSuccessAutoDisableEnabled = document.getElementById("confTokenSuccessAutoDisableEnabled");
+  const confTokenSuccessAutoDisableThreshold = document.getElementById("confTokenSuccessAutoDisableThreshold");
   const confRefreshIntervalHours = document.getElementById("confRefreshIntervalHours");
   const confBatchConcurrency = document.getElementById("confBatchConcurrency");
   const confGeneratedMaxSizeMb = document.getElementById("confGeneratedMaxSizeMb");
@@ -862,6 +864,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confImgBedApiUrl = document.getElementById("confImgBedApiUrl");
   const confImgBedApiKey = document.getElementById("confImgBedApiKey");
   const generatedUsageInfo = document.getElementById("generatedUsageInfo");
+  const overwriteSuccessCountsBtn = document.getElementById("overwriteSuccessCountsBtn");
+  const overwriteSuccessCountsResult = document.getElementById("overwriteSuccessCountsResult");
   const configCatBtns = document.querySelectorAll(".config-cat-btn");
   const configCatPanes = document.querySelectorAll(".config-cat-pane");
   const saveConfigBtn = document.getElementById("saveConfigBtn");
@@ -1020,6 +1024,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           ? data.retry_on_error_types.join(",")
           : "timeout,connection,proxy";
         confTokenRotationStrategy.value = String(data.token_rotation_strategy || "round_robin");
+        confTokenSuccessAutoDisableEnabled.checked = Boolean(data.token_success_auto_disable_enabled || false);
+        confTokenSuccessAutoDisableThreshold.value = Number(data.token_success_auto_disable_threshold || 2);
         confRefreshIntervalHours.value = Number(data.refresh_interval_hours || 15);
         currentBatchConcurrency = Math.max(1, Math.min(100, Number(data.batch_concurrency || 5)));
         confBatchConcurrency.value = currentBatchConcurrency;
@@ -1070,6 +1076,8 @@ document.addEventListener("DOMContentLoaded", async () => {
           .map(s => String(s).trim().toLowerCase())
           .filter(Boolean),
         token_rotation_strategy: String(confTokenRotationStrategy.value || "round_robin").trim() || "round_robin",
+        token_success_auto_disable_enabled: confTokenSuccessAutoDisableEnabled.checked,
+        token_success_auto_disable_threshold: Math.max(1, Math.min(100000, Number(confTokenSuccessAutoDisableThreshold.value || 2))),
         refresh_interval_hours: Number(confRefreshIntervalHours.value || 15),
         batch_concurrency: Math.max(1, Math.min(100, Number(confBatchConcurrency.value || 5))),
         generated_max_size_mb: Math.max(100, Math.min(102400, Number(confGeneratedMaxSizeMb.value || 1024))),
@@ -1124,6 +1132,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       if (!["round_robin", "random"].includes(payload.token_rotation_strategy)) {
         throw new Error("Token 轮换策略无效");
+      }
+      if (!Number.isInteger(payload.token_success_auto_disable_threshold) || payload.token_success_auto_disable_threshold < 1 || payload.token_success_auto_disable_threshold > 100000) {
+        throw new Error("Token 自动禁用成功次数必须是 1-100000 的整数");
       }
 
       const res = await fetch("/api/v1/config", {
@@ -1291,6 +1302,52 @@ document.addEventListener("DOMContentLoaded", async () => {
         showToast(err.message || "代理与业务权限检测失败", true);
       } finally {
         testProxyBtn.disabled = false;
+      }
+    });
+  }
+
+  if (overwriteSuccessCountsBtn) {
+    overwriteSuccessCountsBtn.addEventListener("click", async () => {
+      const confirmed = window.confirm(
+        "将根据历史成功生成日志，全量覆盖所有 Token 的成功次数。这个操作会直接重写当前 success_count，是否继续？"
+      );
+      if (!confirmed) return;
+      overwriteSuccessCountsBtn.disabled = true;
+      if (overwriteSuccessCountsResult) {
+        overwriteSuccessCountsResult.textContent = "正在全量覆盖回填成功次数...";
+      }
+      try {
+        const res = await fetch("/api/v1/tokens/success-counts/overwrite-from-logs", {
+          method: "POST",
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (_) {
+          data = null;
+        }
+        if (!res.ok) {
+          const detail = getImportDetailPayload(data);
+          throw new Error(
+            (typeof detail === "string" && detail.trim()) || "全量覆盖回填失败"
+          );
+        }
+        if (overwriteSuccessCountsResult) {
+          overwriteSuccessCountsResult.textContent = formatSuccessCountOverwriteResult(data);
+        }
+        showMsg(configMsg, "成功次数已按历史日志全量覆盖回填", false);
+        showToast("成功次数已按历史日志全量覆盖回填", false);
+        tokenCurrentPage = 1;
+        await loadTokens();
+      } catch (err) {
+        const message = err?.message || "全量覆盖回填失败";
+        if (overwriteSuccessCountsResult) {
+          overwriteSuccessCountsResult.textContent = message;
+        }
+        showMsg(configMsg, message, true);
+        showToast(message, true);
+      } finally {
+        overwriteSuccessCountsBtn.disabled = false;
       }
     });
   }
@@ -1646,6 +1703,30 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearTimeout(importRefreshJobTimer);
       importRefreshJobTimer = null;
     }
+  }
+
+  function formatSuccessCountOverwriteResult(payload) {
+    if (!payload || typeof payload !== "object") {
+      return "未返回回填结果";
+    }
+    return [
+      "全量覆盖回填完成",
+      `扫描日志：${Number(payload.scanned_logs || 0)}`,
+      `生成日志：${Number(payload.generation_logs || 0)}`,
+      `成功日志：${Number(payload.success_logs || 0)}`,
+      `未识别成功日志：${Number(payload.unidentified_success_logs || 0)}`,
+      `Token总数：${Number(payload.total_tokens || 0)}`,
+      `命中Token：${Number(payload.matched_tokens || 0)}`,
+      `按Token ID命中：${Number(payload.matched_by_token_id || 0)}`,
+      `按邮箱命中：${Number(payload.matched_by_email || 0)}`,
+      `按账号名命中：${Number(payload.matched_by_name || 0)}`,
+      `变更Token：${Number(payload.changed_tokens || 0)}`,
+      `重置为0：${Number(payload.reset_to_zero_tokens || 0)}`,
+      `非零成功次数Token：${Number(payload.nonzero_success_tokens || 0)}`,
+      `总成功次数：${Number(payload.total_success_count || 0)}`,
+      `按阈值转为额度耗尽：${Number(payload.exhausted_by_threshold || 0)}`,
+      `自动关闭刷新Profile：${Number(payload.disabled_auto_refresh_profiles || 0)}`,
+    ].join("\n");
   }
 
   function pollImportRefreshJob(jobId) {

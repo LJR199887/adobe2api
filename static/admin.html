@@ -85,7 +85,7 @@
                 <th>状态</th>
                 <th>自动刷新</th>
                 <th>积分</th>
-                <th>失败次数</th>
+                <th>成功次数</th>
                 <th>有效期</th>
                 <th>操作</th>
               </tr>
@@ -225,6 +225,26 @@
                 <option value="round_robin">round_robin（始终轮换）</option>
                 <option value="random">random（随机轮换）</option>
               </select>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label" style="user-select: none;">
+                <input type="checkbox" id="confTokenSuccessAutoDisableEnabled" />
+                启用 Token 成功次数自动禁用
+              </label>
+              <p class="help">开启后，单个 token 成功完成任务达到设定次数，会自动标记为额度耗尽并禁用。</p>
+            </div>
+
+            <div class="form-group">
+              <label for="confTokenSuccessAutoDisableThreshold">Token 自动禁用成功次数</label>
+              <input type="number" id="confTokenSuccessAutoDisableThreshold" class="input-text" min="1" max="100000" step="1" placeholder="默认 2" />
+              <p class="help">例如填 2 并开启后，一个 token 成功完成 2 次任务就会自动禁用；填 5 则成功 5 次后自动禁用。</p>
+            </div>
+
+            <div class="form-group">
+              <button id="overwriteSuccessCountsBtn" type="button" class="secondary">全量覆盖回填成功次数</button>
+              <p class="help">会根据历史成功生成日志，重新统计每个 token 的成功次数，并直接覆盖当前 success_count。</p>
+              <pre id="overwriteSuccessCountsResult" class="help" style="white-space: pre-wrap; margin: 10px 0 0 0;">点击按钮后，将在这里显示覆盖回填结果。</pre>
             </div>
           </section>
 

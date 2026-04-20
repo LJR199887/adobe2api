@@ -62,6 +62,8 @@ class AdobeClient:
         self.retry_on_status_codes = [429, 451, 500, 502, 503, 504]
         self.retry_on_error_types = {"timeout", "connection", "proxy"}
         self.token_rotation_strategy = "round_robin"
+        self.token_success_auto_disable_enabled = False
+        self.token_success_auto_disable_threshold = 2
         self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
         self.sec_ch_ua = (
             '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"'
@@ -165,6 +167,14 @@ class AdobeClient:
         if strategy not in {"round_robin", "random"}:
             strategy = "round_robin"
         self.token_rotation_strategy = strategy
+        self.token_success_auto_disable_enabled = bool(
+            cfg.get("token_success_auto_disable_enabled", False)
+        )
+        try:
+            threshold = int(cfg.get("token_success_auto_disable_threshold", 2))
+        except Exception:
+            threshold = 2
+        self.token_success_auto_disable_threshold = max(1, min(threshold, 100000))
         if self.basic_proxy:
             logger.warning(
                 "basic proxy enabled for upstream requests: %s", self.basic_proxy

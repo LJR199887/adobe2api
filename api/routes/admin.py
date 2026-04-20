@@ -1069,6 +1069,66 @@ def build_admin_router(
             "failed": failed,
         }
 
+    @router.post("/api/v1/tokens/success-counts/overwrite-from-logs")
+    def overwrite_token_success_counts_from_logs(request: Request):
+        require_admin_auth(request)
+        log_summary = log_store.compute_generation_success_counts()
+        result = token_manager.overwrite_success_counts(
+            counts_by_token_id=log_summary.get("counts_by_token_id") or {},
+            counts_by_email=log_summary.get("counts_by_email") or {},
+            counts_by_name=log_summary.get("counts_by_name") or {},
+            auto_disable_enabled=bool(
+                config_manager.get("token_success_auto_disable_enabled", False)
+            ),
+            auto_disable_threshold=int(
+                config_manager.get("token_success_auto_disable_threshold", 2) or 2
+            ),
+        )
+        disabled_auto_refresh_profiles = 0
+        for profile_id in result.get("exhausted_profile_ids") or []:
+            pid = str(profile_id or "").strip()
+            if not pid:
+                continue
+            try:
+                refresh_manager.set_enabled(pid, False)
+                disabled_auto_refresh_profiles += 1
+            except Exception:
+                continue
+        response = {
+            "status": "ok",
+            "scanned_logs": int(log_summary.get("scanned_logs") or 0),
+            "generation_logs": int(log_summary.get("generation_logs") or 0),
+            "success_logs": int(log_summary.get("success_logs") or 0),
+            "unidentified_success_logs": int(
+                log_summary.get("unidentified_success_logs") or 0
+            ),
+            "disabled_auto_refresh_profiles": disabled_auto_refresh_profiles,
+            **result,
+        }
+        logger.info(
+            "token_success_backfill_overwrite scanned_logs=%s generation_logs=%s "
+            "success_logs=%s unidentified_success_logs=%s matched_tokens=%s "
+            "matched_by_token_id=%s matched_by_email=%s matched_by_name=%s "
+            "changed_tokens=%s reset_to_zero_tokens=%s nonzero_success_tokens=%s "
+            "total_success_count=%s exhausted_by_threshold=%s "
+            "disabled_auto_refresh_profiles=%s",
+            response["scanned_logs"],
+            response["generation_logs"],
+            response["success_logs"],
+            response["unidentified_success_logs"],
+            response["matched_tokens"],
+            response["matched_by_token_id"],
+            response["matched_by_email"],
+            response["matched_by_name"],
+            response["changed_tokens"],
+            response["reset_to_zero_tokens"],
+            response["nonzero_success_tokens"],
+            response["total_success_count"],
+            response["exhausted_by_threshold"],
+            response["disabled_auto_refresh_profiles"],
+        )
+        return response
+
     @router.get("/api/v1/config")
     def get_config(request: Request):
         require_admin_auth(request)
@@ -1218,6 +1278,31 @@ def build_admin_router(
                     detail="token_rotation_strategy must be one of: round_robin, random",
                 )
             update_data["token_rotation_strategy"] = strategy
+        if "token_success_auto_disable_enabled" in incoming:
+            update_data["token_success_auto_disable_enabled"] = bool(
+                incoming["token_success_auto_disable_enabled"]
+            )
+        if "token_success_auto_disable_threshold" in incoming:
+            try:
+                token_success_auto_disable_threshold = int(
+                    incoming["token_success_auto_disable_threshold"]
+                )
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail="token_success_auto_disable_threshold must be an integer between 1 and 100000",
+                )
+            if (
+                token_success_auto_disable_threshold < 1
+                or token_success_auto_disable_threshold > 100000
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="token_success_auto_disable_threshold must be between 1 and 100000",
+                )
+            update_data["token_success_auto_disable_threshold"] = (
+                token_success_auto_disable_threshold
+            )
         if "batch_concurrency" in incoming:
             try:
                 batch_concurrency = int(incoming["batch_concurrency"])

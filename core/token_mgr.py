@@ -500,55 +500,131 @@ class TokenManager:
 
         return created_at_val + expires_in_val
 
+    @staticmethod
+    def _token_sort_ts(token: Dict) -> float:
+        for key in ("updated_at", "added_at"):
+            try:
+                value = float(token.get(key) or 0)
+            except Exception:
+                value = 0
+            if value > 0:
+                return value
+        return 0
+
+    @staticmethod
+    def _token_matches_filters(token: Dict, status: str = "", credits: str = "") -> bool:
+        status_filter = str(status or "").strip().lower()
+        credits_filter = str(credits or "").strip().lower()
+        if status_filter and str(token.get("status") or "").strip().lower() != status_filter:
+            return False
+        if credits_filter == "error" and not str(token.get("credits_error") or "").strip():
+            return False
+        return True
+
+    def _public_token_locked(self, token: Dict, now_ts: int) -> Dict:
+        val = str(token.get("value") or "")
+        masked = val[:15] + "..." + val[-10:] if len(val) > 30 else "***"
+        exp_ts = self._decode_jwt_exp(val)
+        remaining_seconds = None
+        exp_readable = None
+        if exp_ts is not None:
+            remaining_seconds = exp_ts - now_ts
+            try:
+                exp_readable = datetime.fromtimestamp(exp_ts).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            except Exception:
+                exp_readable = str(exp_ts)
+        return {
+            "id": token.get("id"),
+            "value": masked,
+            "status": token.get("status", "active"),
+            "fails": token.get("fails", 0),
+            "added_at": token.get("added_at", 0),
+            "updated_at": token.get("updated_at"),
+            "error_until": token.get("error_until", 0),
+            "source": token.get("source", "manual"),
+            "auto_refresh": bool(token.get("auto_refresh", False)),
+            "refresh_profile_id": token.get("refresh_profile_id"),
+            "refresh_profile_name": token.get("refresh_profile_name"),
+            "refresh_profile_email": token.get("refresh_profile_email"),
+            "credits_total": token.get("credits_total"),
+            "credits_used": token.get("credits_used"),
+            "credits_available": token.get("credits_available"),
+            "credits_available_until": token.get("credits_available_until"),
+            "credits_updated_at": token.get("credits_updated_at"),
+            "credits_error": token.get("credits_error", ""),
+            "expires_at": exp_ts,
+            "expires_at_text": exp_readable,
+            "remaining_seconds": remaining_seconds,
+            "is_expired": bool(
+                exp_ts is not None
+                and remaining_seconds is not None
+                and remaining_seconds <= 0
+            ),
+        }
+
+    def count(self) -> int:
+        with self._lock:
+            return len(self.tokens)
+
+    def list_page(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        status: str = "",
+        credits: str = "",
+    ) -> Dict:
+        page = max(1, int(page or 1))
+        page_size = max(1, min(200, int(page_size or 50)))
+        with self._lock:
+            total_count = len(self.tokens)
+            active_count = sum(
+                1
+                for token in self.tokens
+                if str(token.get("status") or "").strip().lower() == "active"
+            )
+            filtered = [
+                token
+                for token in self.tokens
+                if isinstance(token, dict)
+                and self._token_matches_filters(token, status=status, credits=credits)
+            ]
+            filtered.sort(key=self._token_sort_ts, reverse=True)
+            filtered_count = len(filtered)
+            total_pages = max(1, (filtered_count + page_size - 1) // page_size)
+            page = min(page, total_pages)
+            start = (page - 1) * page_size
+            page_items = filtered[start : start + page_size]
+            now_ts = int(time.time())
+            return {
+                "tokens": [
+                    self._public_token_locked(token, now_ts) for token in page_items
+                ],
+                "summary": {
+                    "total": total_count,
+                    "active": active_count,
+                    "filtered": filtered_count,
+                },
+                "pagination": {
+                    "page": page,
+                    "page_size": page_size,
+                    "total": filtered_count,
+                    "total_pages": total_pages,
+                },
+            }
+
     def list_all(self):
         with self._lock:
-            res = []
+            sorted_tokens = sorted(
+                [token for token in self.tokens if isinstance(token, dict)],
+                key=self._token_sort_ts,
+                reverse=True,
+            )
             now_ts = int(time.time())
-            for t in self.tokens:
-                # mask value
-                val = t["value"]
-                masked = val[:15] + "..." + val[-10:] if len(val) > 30 else "***"
-                exp_ts = self._decode_jwt_exp(val)
-                remaining_seconds = None
-                exp_readable = None
-                if exp_ts is not None:
-                    remaining_seconds = exp_ts - now_ts
-                    try:
-                        exp_readable = datetime.fromtimestamp(exp_ts).strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        )
-                    except Exception:
-                        exp_readable = str(exp_ts)
-                res.append(
-                    {
-                        "id": t["id"],
-                        "value": masked,
-                        "status": t["status"],
-                        "fails": t["fails"],
-                        "added_at": t["added_at"],
-                        "error_until": t.get("error_until", 0),
-                        "source": t.get("source", "manual"),
-                        "auto_refresh": bool(t.get("auto_refresh", False)),
-                        "refresh_profile_id": t.get("refresh_profile_id"),
-                        "refresh_profile_name": t.get("refresh_profile_name"),
-                        "refresh_profile_email": t.get("refresh_profile_email"),
-                        "credits_total": t.get("credits_total"),
-                        "credits_used": t.get("credits_used"),
-                        "credits_available": t.get("credits_available"),
-                        "credits_available_until": t.get("credits_available_until"),
-                        "credits_updated_at": t.get("credits_updated_at"),
-                        "credits_error": t.get("credits_error", ""),
-                        "expires_at": exp_ts,
-                        "expires_at_text": exp_readable,
-                        "remaining_seconds": remaining_seconds,
-                        "is_expired": bool(
-                            exp_ts is not None
-                            and remaining_seconds is not None
-                            and remaining_seconds <= 0
-                        ),
-                    }
-                )
-            return res
+            return [
+                self._public_token_locked(token, now_ts) for token in sorted_tokens
+            ]
 
     def export_tokens(self, ids: Optional[List[str]] = None) -> List[Dict]:
         selected_ids = None

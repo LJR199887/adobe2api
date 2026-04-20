@@ -180,7 +180,7 @@ def build_admin_router(
     def health():
         return {
             "status": "ok",
-            "pool_size": len(token_manager.list_all()),
+            "pool_size": token_manager.count(),
             "redis": get_redis_health(),
         }
 
@@ -370,26 +370,31 @@ def build_admin_router(
         return {"status": "ok"}
 
     @router.get("/api/v1/tokens")
-    def list_tokens(request: Request):
+    def list_tokens(
+        request: Request,
+        page: int = 1,
+        page_size: int = 50,
+        status: str = "",
+        credits: str = "",
+    ):
         require_admin_auth(request)
-        tokens = token_manager.list_all()
+        payload = token_manager.list_page(
+            page=page,
+            page_size=page_size,
+            status=status,
+            credits=credits,
+        )
+        tokens = payload.get("tokens") or []
         for item in tokens:
             if not bool(item.get("auto_refresh")):
                 item["auto_refresh_enabled"] = None
                 continue
             pid = str(item.get("refresh_profile_id") or "").strip()
             item["auto_refresh_enabled"] = refresh_manager.is_profile_enabled(pid)
-        total_count = len(tokens)
-        active_count = 0
-        for item in tokens:
-            if str(item.get("status") or "").strip().lower() == "active":
-                active_count += 1
         return {
             "tokens": tokens,
-            "summary": {
-                "total": total_count,
-                "active": active_count,
-            },
+            "summary": payload.get("summary") or {},
+            "pagination": payload.get("pagination") or {},
         }
 
     @router.post("/api/v1/tokens")

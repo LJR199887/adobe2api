@@ -1,9 +1,12 @@
+import copy
 import logging
+import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, List
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -32,6 +35,11 @@ from core.proxy_utils import (
 
 logger = logging.getLogger("uvicorn.error")
 
+_IMPORT_REFRESH_JOB_TTL_SECONDS = 1800
+_IMPORT_REFRESH_JOB_LOCK = threading.Lock()
+_IMPORT_REFRESH_JOBS: Dict[str, Dict[str, Any]] = {}
+_IMPORT_REFRESH_JOB_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+
 
 def _elapsed_ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 3)
@@ -53,6 +61,372 @@ def _index_success_from_timing(payload: Any) -> bool:
         "token_upsert_index_ms" in payload
         or "token_index_ms_sum" in payload
         or "token_index_ms_max" in payload
+    )
+
+
+def _cleanup_import_refresh_jobs(now_ts: Optional[float] = None) -> None:
+    current = float(now_ts or time.time())
+    expired_ids = []
+    for job_id, job in _IMPORT_REFRESH_JOBS.items():
+        completed_at = float(job.get("completed_at") or 0)
+        if completed_at and (current - completed_at) > _IMPORT_REFRESH_JOB_TTL_SECONDS:
+            expired_ids.append(job_id)
+    for job_id in expired_ids:
+        _IMPORT_REFRESH_JOBS.pop(job_id, None)
+
+
+def _create_import_refresh_job(
+    *,
+    total_requested: int,
+    request_duplicate_count: int,
+    request_dedupe_ms: float,
+    imported_entries: List[Dict[str, Any]],
+    failed_entries: List[Dict[str, Any]],
+) -> str:
+    now_ts = time.time()
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "id": job_id,
+        "status": "queued",
+        "created_at": now_ts,
+        "started_at": None,
+        "completed_at": None,
+        "created_perf": time.perf_counter(),
+        "completed_perf": None,
+        "total_requested": int(total_requested or 0),
+        "request_duplicate_count": int(request_duplicate_count or 0),
+        "request_dedupe_ms": float(request_dedupe_ms or 0),
+        "failed": copy.deepcopy(failed_entries),
+        "items": [],
+    }
+    for entry in imported_entries:
+        profile = (
+            copy.deepcopy(entry.get("profile"))
+            if isinstance(entry.get("profile"), dict)
+            else {}
+        )
+        job["items"].append(
+            {
+                "index": int(entry.get("index") or 0),
+                "profile": profile,
+                "profile_id": str(profile.get("id") or "").strip(),
+                "profile_name": str(profile.get("name") or "").strip(),
+                "reused_existing_profile": bool(
+                    profile.get("reused_existing_profile")
+                ),
+                "status": "queued",
+                "refresh_result": None,
+                "refresh_error": "",
+                "profile_import_ms": float(entry.get("profile_import_ms") or 0),
+                "refresh_call_ms": 0.0,
+            }
+        )
+    with _IMPORT_REFRESH_JOB_LOCK:
+        _cleanup_import_refresh_jobs(now_ts)
+        _IMPORT_REFRESH_JOBS[job_id] = job
+    return job_id
+
+
+def _mark_import_refresh_job_started(job_id: str) -> None:
+    with _IMPORT_REFRESH_JOB_LOCK:
+        job = _IMPORT_REFRESH_JOBS.get(job_id)
+        if not job:
+            return
+        if not job.get("started_at"):
+            job["started_at"] = time.time()
+        job["status"] = "running"
+
+
+def _mark_import_refresh_job_item_running(job_id: str, index: int) -> None:
+    with _IMPORT_REFRESH_JOB_LOCK:
+        job = _IMPORT_REFRESH_JOBS.get(job_id)
+        if not job:
+            return
+        items = job.get("items") or []
+        if 0 <= index < len(items):
+            items[index]["status"] = "running"
+
+
+def _mark_import_refresh_job_item_result(
+    job_id: str,
+    index: int,
+    *,
+    refresh_result: Optional[Dict[str, Any]] = None,
+    refresh_error: str = "",
+    refresh_call_ms: float = 0.0,
+) -> None:
+    with _IMPORT_REFRESH_JOB_LOCK:
+        job = _IMPORT_REFRESH_JOBS.get(job_id)
+        if not job:
+            return
+        items = job.get("items") or []
+        if not (0 <= index < len(items)):
+            return
+        item = items[index]
+        item["refresh_call_ms"] = float(refresh_call_ms or 0)
+        if isinstance(refresh_result, dict):
+            item["refresh_result"] = copy.deepcopy(refresh_result)
+            item["refresh_error"] = ""
+            item["status"] = "succeeded"
+            return
+        item["refresh_result"] = None
+        item["refresh_error"] = str(refresh_error or "").strip()
+        item["status"] = "failed"
+
+
+def _mark_import_refresh_job_completed(job_id: str) -> None:
+    with _IMPORT_REFRESH_JOB_LOCK:
+        job = _IMPORT_REFRESH_JOBS.get(job_id)
+        if not job:
+            return
+        job["status"] = "completed"
+        job["completed_at"] = time.time()
+        job["completed_perf"] = time.perf_counter()
+
+
+def _build_import_refresh_payload(job_id: str) -> Optional[Dict[str, Any]]:
+    with _IMPORT_REFRESH_JOB_LOCK:
+        _cleanup_import_refresh_jobs()
+        raw_job = _IMPORT_REFRESH_JOBS.get(job_id)
+        if raw_job is None:
+            return None
+        job = copy.deepcopy(raw_job)
+
+    items = job.get("items") or []
+    failed = job.get("failed") or []
+    refreshed = []
+    refresh_failed = []
+    profile_import_ms_sum = 0.0
+    refresh_call_ms_sum = 0.0
+    prepare_ms_sum = 0.0
+    adobe_refresh_ms_sum = 0.0
+    response_parse_ms_sum = 0.0
+    account_ms_sum = 0.0
+    token_upsert_ms_sum = 0.0
+    token_index_ms_sum = 0.0
+    token_index_ms_max = 0.0
+    token_upsert_total_ms_sum = 0.0
+    credits_ms_sum = 0.0
+    token_value_index_size = 0
+    token_profile_index_size = 0
+    list_duplicate_count = 0
+    queued_count = 0
+    running_count = 0
+
+    for item in items:
+        profile_import_ms_sum += _timing_value(item, "profile_import_ms")
+        refresh_call_ms_sum += _timing_value(item, "refresh_call_ms")
+        item_status = str(item.get("status") or "").strip().lower()
+        if item_status == "queued":
+            queued_count += 1
+        elif item_status == "running":
+            running_count += 1
+
+        refresh_result = item.get("refresh_result") or {}
+        if isinstance(refresh_result, dict) and refresh_result:
+            refreshed_item = {
+                "index": item.get("index"),
+                "profile_id": item.get("profile_id"),
+                "profile_name": item.get("profile_name"),
+                "result": refresh_result,
+            }
+            refreshed.append(refreshed_item)
+            if bool(item.get("reused_existing_profile")) or bool(
+                refresh_result.get("token_duplicate")
+            ):
+                list_duplicate_count += 1
+            timing = refresh_result.get("timing") or {}
+            prepare_ms_sum += _timing_value(timing, "prepare_ms")
+            adobe_refresh_ms_sum += _timing_value(timing, "adobe_refresh_ms")
+            response_parse_ms_sum += _timing_value(timing, "response_parse_ms")
+            account_ms_sum += _timing_value(timing, "account_ms")
+            token_upsert_ms_sum += _timing_value(timing, "token_upsert_ms")
+            token_index_ms = _timing_value(timing, "token_upsert_index_ms")
+            token_index_ms_sum += token_index_ms
+            token_index_ms_max = max(token_index_ms_max, token_index_ms)
+            token_upsert_total_ms_sum += _timing_value(
+                timing, "token_upsert_total_ms"
+            )
+            credits_ms_sum += _timing_value(timing, "credits_ms")
+            if isinstance(timing, dict):
+                token_value_index_size = max(
+                    token_value_index_size,
+                    int(timing.get("token_value_index_size") or 0),
+                )
+                token_profile_index_size = max(
+                    token_profile_index_size,
+                    int(timing.get("token_profile_index_size") or 0),
+                )
+
+        if item_status == "failed":
+            refresh_failed.append(
+                {
+                    "index": item.get("index"),
+                    "profile_id": item.get("profile_id"),
+                    "profile_name": item.get("profile_name"),
+                    "detail": str(item.get("refresh_error") or "").strip(),
+                }
+            )
+
+    completed_count = len(refreshed) + len(refresh_failed)
+    pending_count = queued_count + running_count
+    success_count = max(0, len(refreshed) - list_duplicate_count)
+    duplicate_count = int(job.get("request_duplicate_count") or 0) + list_duplicate_count
+    error_count = len(failed) + len(refresh_failed)
+    imported_profiles = [
+        copy.deepcopy(item.get("profile"))
+        for item in items
+        if isinstance(item.get("profile"), dict)
+    ]
+    job_completed = pending_count == 0 and (
+        str(job.get("status") or "").strip().lower() == "completed"
+    )
+    job_status = "running"
+    if job_completed:
+        if not failed and not refresh_failed:
+            job_status = "ok"
+        elif refreshed:
+            job_status = "partial"
+        else:
+            job_status = "failed"
+    elif completed_count == 0:
+        job_status = "queued"
+
+    end_perf = job.get("completed_perf") if job_completed else time.perf_counter()
+    total_ms = round(
+        max(0.0, float(end_perf or 0) - float(job.get("created_perf") or 0)) * 1000,
+        3,
+    )
+    response_timing = {
+        "request_dedupe_ms": _timing_value(job, "request_dedupe_ms"),
+        "profile_import_ms_sum": profile_import_ms_sum,
+        "refresh_call_ms_sum": refresh_call_ms_sum,
+        "prepare_ms_sum": prepare_ms_sum,
+        "adobe_refresh_ms_sum": adobe_refresh_ms_sum,
+        "response_parse_ms_sum": response_parse_ms_sum,
+        "account_ms_sum": account_ms_sum,
+        "token_upsert_ms_sum": token_upsert_ms_sum,
+        "token_index_ms_sum": token_index_ms_sum,
+        "token_index_ms_max": token_index_ms_max,
+        "token_upsert_total_ms_sum": token_upsert_total_ms_sum,
+        "credits_ms_sum": credits_ms_sum,
+        "total_ms": total_ms,
+        "token_value_index_size": token_value_index_size,
+        "token_profile_index_size": token_profile_index_size,
+    }
+    response_timing["token_index_success"] = _index_success_from_timing(
+        response_timing
+    )
+    return {
+        "status": job_status,
+        "total": int(job.get("total_requested") or 0),
+        "processed_count": len(items) + len(failed),
+        "deduplicated_count": int(job.get("request_duplicate_count") or 0),
+        "success_count": success_count,
+        "duplicate_count": duplicate_count,
+        "error_count": error_count,
+        "request_duplicate_count": int(job.get("request_duplicate_count") or 0),
+        "list_duplicate_count": list_duplicate_count,
+        "overwritten_count": list_duplicate_count,
+        "imported_count": len(imported_profiles),
+        "failed_count": len(failed),
+        "refreshed_count": len(refreshed),
+        "refresh_failed_count": len(refresh_failed),
+        "profiles": imported_profiles,
+        "failed": failed,
+        "refreshed": refreshed,
+        "refresh_failed": refresh_failed,
+        "timing": response_timing,
+        "background_refresh": {
+            "job_id": str(job.get("id") or "").strip(),
+            "status": str(job.get("status") or "").strip().lower(),
+            "total_count": len(items),
+            "queued_count": queued_count,
+            "running_count": running_count,
+            "completed_count": completed_count,
+            "pending_count": pending_count,
+            "completed": job_completed,
+        },
+    }
+
+
+def _run_import_refresh_job(
+    job_id: str,
+    *,
+    refresh_manager: Any,
+    concurrency: int,
+) -> None:
+    payload = _build_import_refresh_payload(job_id)
+    if not payload:
+        return
+    background = payload.get("background_refresh") or {}
+    total_count = int(background.get("total_count") or 0)
+    if total_count <= 0:
+        _mark_import_refresh_job_completed(job_id)
+        return
+
+    _mark_import_refresh_job_started(job_id)
+    max_workers = min(max(1, int(concurrency or 1)), total_count)
+    logger.info(
+        "import_cookie_background_refresh_started job_id=%s total=%s concurrency=%s",
+        job_id,
+        total_count,
+        max_workers,
+    )
+
+    with _IMPORT_REFRESH_JOB_LOCK:
+        job = _IMPORT_REFRESH_JOBS.get(job_id) or {}
+        items = copy.deepcopy(job.get("items") or [])
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {}
+        for index, item in enumerate(items):
+            profile_id = str(item.get("profile_id") or "").strip()
+            if not profile_id:
+                _mark_import_refresh_job_item_result(
+                    job_id,
+                    index,
+                    refresh_error="missing profile id",
+                )
+                continue
+            _mark_import_refresh_job_item_running(job_id, index)
+            refresh_started = time.perf_counter()
+            future = executor.submit(refresh_manager.refresh_once, profile_id)
+            future_map[future] = (index, refresh_started)
+
+        for future in as_completed(future_map):
+            index, refresh_started = future_map[future]
+            refresh_call_ms = _elapsed_ms(refresh_started)
+            try:
+                refresh_result = future.result()
+            except Exception as exc:
+                _mark_import_refresh_job_item_result(
+                    job_id,
+                    index,
+                    refresh_error=str(exc),
+                    refresh_call_ms=refresh_call_ms,
+                )
+                continue
+            _mark_import_refresh_job_item_result(
+                job_id,
+                index,
+                refresh_result=refresh_result,
+                refresh_call_ms=refresh_call_ms,
+            )
+
+    _mark_import_refresh_job_completed(job_id)
+    summary = _build_import_refresh_payload(job_id) or {}
+    logger.info(
+        "import_cookie_background_refresh_completed job_id=%s status=%s success=%s "
+        "failed=%s duplicate=%s refreshed=%s refresh_failed=%s total_ms=%.3f",
+        job_id,
+        summary.get("status"),
+        summary.get("success_count"),
+        summary.get("error_count"),
+        summary.get("duplicate_count"),
+        summary.get("refreshed_count"),
+        summary.get("refresh_failed_count"),
+        _timing_value(summary.get("timing"), "total_ms"),
     )
 
 
@@ -1121,15 +1495,12 @@ def build_admin_router(
     def refresh_profiles_import_cookie_batch(
         req: RefreshCookieBatchImportRequest, request: Request
     ):
-        route_started = time.perf_counter()
         require_admin_auth(request)
         if not req.items:
             raise HTTPException(status_code=400, detail="items is required")
 
         imported = []
         failed = []
-        refreshed = []
-        refresh_failed = []
         retained_by_cookie = {}
         invalid_entries = []
 
@@ -1147,7 +1518,6 @@ def build_admin_router(
             key=lambda pair: pair[0],
         )
         request_duplicate_count = len(req.items) - len(import_entries)
-        list_duplicate_count = 0
 
         def import_one(idx: int, item):
             profile_import_started = time.perf_counter()
@@ -1166,208 +1536,88 @@ def build_admin_router(
                     "refresh_failed": None,
                     "timing": {
                         "profile_import_ms": _elapsed_ms(profile_import_started),
-                        "refresh_call_ms": 0,
                     },
                 }
             profile_import_ms = _elapsed_ms(profile_import_started)
-
-            refreshed_item = None
-            refresh_failed_item = None
-            refresh_started = time.perf_counter()
-            refresh_call_ms = 0.0
-            try:
-                refresh_result = refresh_manager.refresh_once(
-                    str(profile.get("id") or "")
-                )
-                refresh_call_ms = _elapsed_ms(refresh_started)
-                refreshed_item = {
-                    "index": idx,
-                    "profile_id": profile.get("id"),
-                    "profile_name": profile.get("name"),
-                    "result": refresh_result,
-                }
-            except Exception as exc:
-                refresh_call_ms = _elapsed_ms(refresh_started)
-                refresh_failed_item = {
-                    "index": idx,
-                    "profile_id": profile.get("id"),
-                    "profile_name": profile.get("name"),
-                    "detail": str(exc),
-                }
 
             return {
                 "index": idx,
                 "imported": profile,
                 "failed": None,
-                "refreshed": refreshed_item,
-                "refresh_failed": refresh_failed_item,
                 "timing": {
                     "profile_import_ms": profile_import_ms,
-                    "refresh_call_ms": refresh_call_ms,
                 },
             }
 
         max_workers = min(get_batch_concurrency(), len(import_entries))
-        worker_started = time.perf_counter()
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(import_one, idx, item)
-                for idx, item in import_entries
-            ]
-            done_items = [future.result() for future in as_completed(futures)]
-        worker_ms = _elapsed_ms(worker_started)
+        if max_workers > 0:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(import_one, idx, item)
+                    for idx, item in import_entries
+                ]
+                done_items = [future.result() for future in as_completed(futures)]
+        else:
+            done_items = []
 
         done_items.sort(key=lambda item: item["index"])
+        imported_entries = []
         for item in done_items:
             if item["imported"] is not None:
                 imported.append(item["imported"])
+                imported_entries.append(
+                    {
+                        "index": item["index"],
+                        "profile": item["imported"],
+                        "profile_import_ms": _timing_value(
+                            item.get("timing"), "profile_import_ms"
+                        ),
+                    }
+                )
             if item["failed"] is not None:
                 failed.append(item["failed"])
-            if item["refreshed"] is not None:
-                refreshed.append(item["refreshed"])
-                result = item["refreshed"].get("result") or {}
-                imported_profile = item["imported"] or {}
-                if bool(imported_profile.get("reused_existing_profile")) or bool(
-                    result.get("token_duplicate")
-                ):
-                    list_duplicate_count += 1
-            if item["refresh_failed"] is not None:
-                refresh_failed.append(item["refresh_failed"])
-
-        success_count = max(0, len(refreshed) - list_duplicate_count)
-        duplicate_count = request_duplicate_count + list_duplicate_count
-        error_count = len(failed) + len(refresh_failed)
-        profile_import_ms_sum = 0.0
-        refresh_call_ms_sum = 0.0
-        prepare_ms_sum = 0.0
-        adobe_refresh_ms_sum = 0.0
-        response_parse_ms_sum = 0.0
-        account_ms_sum = 0.0
-        token_upsert_ms_sum = 0.0
-        token_index_ms_sum = 0.0
-        token_index_ms_max = 0.0
-        token_upsert_total_ms_sum = 0.0
-        credits_ms_sum = 0.0
-        token_value_index_size = 0
-        token_profile_index_size = 0
-
-        for item in done_items:
-            item_timing = item.get("timing") or {}
-            profile_import_ms_sum += _timing_value(
-                item_timing, "profile_import_ms"
-            )
-            refresh_call_ms_sum += _timing_value(item_timing, "refresh_call_ms")
-            refreshed_item = item.get("refreshed") or {}
-            refresh_result = refreshed_item.get("result") or {}
-            timing = refresh_result.get("timing") or {}
-            prepare_ms_sum += _timing_value(timing, "prepare_ms")
-            adobe_refresh_ms_sum += _timing_value(timing, "adobe_refresh_ms")
-            response_parse_ms_sum += _timing_value(timing, "response_parse_ms")
-            account_ms_sum += _timing_value(timing, "account_ms")
-            token_upsert_ms_sum += _timing_value(timing, "token_upsert_ms")
-            token_index_ms = _timing_value(timing, "token_upsert_index_ms")
-            token_index_ms_sum += token_index_ms
-            token_index_ms_max = max(token_index_ms_max, token_index_ms)
-            token_upsert_total_ms_sum += _timing_value(
-                timing, "token_upsert_total_ms"
-            )
-            credits_ms_sum += _timing_value(timing, "credits_ms")
-            if isinstance(timing, dict):
-                token_value_index_size = max(
-                    token_value_index_size,
-                    int(timing.get("token_value_index_size") or 0),
-                )
-                token_profile_index_size = max(
-                    token_profile_index_size,
-                    int(timing.get("token_profile_index_size") or 0),
-                )
-
-        result = {
-            "status": (
-                "ok"
-                if (not failed and not refresh_failed)
-                else ("partial" if imported else "failed")
-            ),
-            "total": len(req.items),
-            "processed_count": len(import_entries),
-            "deduplicated_count": request_duplicate_count,
-            "success_count": success_count,
-            "duplicate_count": duplicate_count,
-            "error_count": error_count,
-            "request_duplicate_count": request_duplicate_count,
-            "list_duplicate_count": list_duplicate_count,
-            "overwritten_count": list_duplicate_count,
-            "imported_count": len(imported),
-            "failed_count": len(failed),
-            "refreshed_count": len(refreshed),
-            "refresh_failed_count": len(refresh_failed),
-            "profiles": imported,
-            "failed": failed,
-            "refreshed": refreshed,
-            "refresh_failed": refresh_failed,
-        }
-        response_timing = {
-            "request_dedupe_ms": request_dedupe_ms,
-            "worker_ms": worker_ms,
-            "profile_import_ms_sum": profile_import_ms_sum,
-            "refresh_call_ms_sum": refresh_call_ms_sum,
-            "prepare_ms_sum": prepare_ms_sum,
-            "adobe_refresh_ms_sum": adobe_refresh_ms_sum,
-            "response_parse_ms_sum": response_parse_ms_sum,
-            "account_ms_sum": account_ms_sum,
-            "token_upsert_ms_sum": token_upsert_ms_sum,
-            "token_index_ms_sum": token_index_ms_sum,
-            "token_index_ms_max": token_index_ms_max,
-            "token_upsert_total_ms_sum": token_upsert_total_ms_sum,
-            "credits_ms_sum": credits_ms_sum,
-            "total_ms": _elapsed_ms(route_started),
-            "token_value_index_size": token_value_index_size,
-            "token_profile_index_size": token_profile_index_size,
-        }
-        response_timing["token_index_success"] = _index_success_from_timing(
-            response_timing
+        job_id = _create_import_refresh_job(
+            total_requested=len(req.items),
+            request_duplicate_count=request_duplicate_count,
+            request_dedupe_ms=request_dedupe_ms,
+            imported_entries=imported_entries,
+            failed_entries=failed,
         )
-        result["timing"] = response_timing
         logger.info(
-            "import_cookie_batch_timing status=%s total=%s processed=%s success=%s "
-            "failed=%s duplicate=%s request_duplicate=%s list_duplicate=%s "
-            "overwritten=%s request_dedupe_ms=%.3f worker_ms=%.3f "
-            "profile_import_ms_sum=%.3f refresh_call_ms_sum=%.3f "
-            "prepare_ms_sum=%.3f adobe_refresh_ms_sum=%.3f "
-            "response_parse_ms_sum=%.3f account_ms_sum=%.3f "
-            "token_upsert_ms_sum=%.3f token_index_ms_sum=%.3f "
-            "token_index_ms_max=%.3f token_upsert_total_ms_sum=%.3f "
-            "credits_ms_sum=%.3f total_ms=%.3f token_value_index_size=%s "
-            "token_profile_index_size=%s",
-            result["status"],
+            "import_cookie_batch_queued status=%s total=%s processed=%s imported=%s "
+            "failed=%s request_duplicate=%s job_id=%s request_dedupe_ms=%.3f",
+            "queued" if imported else "failed",
             len(req.items),
             len(import_entries),
-            success_count,
-            error_count,
-            duplicate_count,
+            len(imported),
+            len(failed),
             request_duplicate_count,
-            list_duplicate_count,
-            list_duplicate_count,
+            job_id,
             request_dedupe_ms,
-            worker_ms,
-            profile_import_ms_sum,
-            refresh_call_ms_sum,
-            prepare_ms_sum,
-            adobe_refresh_ms_sum,
-            response_parse_ms_sum,
-            account_ms_sum,
-            token_upsert_ms_sum,
-            token_index_ms_sum,
-            token_index_ms_max,
-            token_upsert_total_ms_sum,
-            credits_ms_sum,
-            response_timing["total_ms"],
-            token_value_index_size,
-            token_profile_index_size,
         )
         if not imported:
+            result = _build_import_refresh_payload(job_id) or {
+                "status": "failed",
+                "failed": failed,
+            }
             raise HTTPException(status_code=400, detail=result)
+
+        _IMPORT_REFRESH_JOB_EXECUTOR.submit(
+            _run_import_refresh_job,
+            job_id,
+            refresh_manager=refresh_manager,
+            concurrency=get_batch_concurrency(),
+        )
+        result = _build_import_refresh_payload(job_id) or {}
         return result
+
+    @router.get("/api/v1/refresh-profiles/import-cookie-jobs/{job_id}")
+    def refresh_profiles_import_cookie_job(job_id: str, request: Request):
+        require_admin_auth(request)
+        payload = _build_import_refresh_payload(job_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="import job not found")
+        return payload
 
     @router.post("/api/v1/refresh-profiles/{profile_id}/refresh-now")
     def refresh_profiles_refresh_now(profile_id: str, request: Request):

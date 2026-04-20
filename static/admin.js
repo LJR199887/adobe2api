@@ -95,6 +95,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const TOKENS_PAGE_SIZE = 50;
   let tokenCurrentPage = 1;
   let tokenTotalPages = 1;
+  let importRefreshJobTimer = null;
+  let activeImportRefreshJobId = "";
 
   const STATUS_MAP = {
     "active": "生效中",
@@ -1524,6 +1526,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     return Number.isFinite(value) ? value : 0;
   }
 
+  function getImportBackgroundRefresh(payload) {
+    if (payload?.background_refresh && typeof payload.background_refresh === "object") {
+      return payload.background_refresh;
+    }
+    return null;
+  }
+
   function getImportTiming(payload) {
     if (payload?.timing && typeof payload.timing === "object") {
       return payload.timing;
@@ -1584,6 +1593,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const requestDuplicate = getImportRequestDuplicateCount(payload);
     const listDuplicate = getImportListDuplicateCount(payload);
     const overwritten = getImportOverwrittenCount(payload);
+    const background = getImportBackgroundRefresh(payload);
     const parts = [
       `${label}完成：成功 ${success}`,
       `失败 ${failed}`,
@@ -1597,6 +1607,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (overwritten > 0) {
       parts.push(`已覆盖 ${overwritten}`);
+    }
+    if (background) {
+      const completedCount = Number(background.completed_count || 0);
+      const totalCount = Number(background.total_count || 0);
+      if (background.completed) {
+        parts.push("后台刷新已完成");
+      } else if (totalCount > 0) {
+        parts.push(`后台刷新中 ${completedCount}/${totalCount}`);
+      }
     }
     const diagnostics = buildImportDiagnostics(payload);
     if (diagnostics?.totalMs > 0) {
@@ -1619,6 +1638,59 @@ document.addEventListener("DOMContentLoaded", async () => {
     details.appendChild(summaryEl);
     details.appendChild(pre);
     el.appendChild(details);
+  }
+
+  function stopImportRefreshPolling() {
+    activeImportRefreshJobId = "";
+    if (importRefreshJobTimer) {
+      clearTimeout(importRefreshJobTimer);
+      importRefreshJobTimer = null;
+    }
+  }
+
+  function pollImportRefreshJob(jobId) {
+    stopImportRefreshPolling();
+    const normalizedJobId = String(jobId || "").trim();
+    if (!normalizedJobId) return;
+    activeImportRefreshJobId = normalizedJobId;
+
+    const runPoll = async () => {
+      if (activeImportRefreshJobId !== normalizedJobId) return;
+      try {
+        const res = await fetch(
+          `/api/v1/refresh-profiles/import-cookie-jobs/${encodeURIComponent(normalizedJobId)}`
+        );
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (_) {
+          data = null;
+        }
+        if (!res.ok) {
+          throw new Error("Cookie 后台刷新状态获取失败");
+        }
+        if (activeImportRefreshJobId !== normalizedJobId) return;
+        showImportResultMsg(
+          refreshMsg,
+          "Cookie导入",
+          data,
+          getImportFailedCount(data) > 0,
+          { duration: 0 }
+        );
+        const background = getImportBackgroundRefresh(data);
+        if (background?.completed) {
+          stopImportRefreshPolling();
+          tokenCurrentPage = 1;
+          await loadTokens();
+          return;
+        }
+      } catch (_) {
+        if (activeImportRefreshJobId !== normalizedJobId) return;
+      }
+      importRefreshJobTimer = setTimeout(runPoll, 1200);
+    };
+
+    importRefreshJobTimer = setTimeout(runPoll, 1200);
   }
 
   async function importCookies() {
@@ -1648,6 +1720,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
 
     try {
+      stopImportRefreshPolling();
       if (importCookieBtn) importCookieBtn.disabled = true;
       showMsg(refreshMsg, `Cookie 导入中，共 ${items.length} 项...`, false, { duration: 0 });
 
@@ -1694,7 +1767,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (cookieInput) cookieInput.value = "";
       if (cookieFile) cookieFile.value = "";
       tokenCurrentPage = 1;
-      await loadTokens();
+      const background = getImportBackgroundRefresh(data);
+      if (background?.job_id && !background.completed) {
+        pollImportRefreshJob(background.job_id);
+      } else {
+        await loadTokens();
+      }
     } catch (err) {
       showMsg(refreshMsg, err.message || "Cookie 导入失败", true, { duration: 8000 });
     } finally {

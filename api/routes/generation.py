@@ -1110,9 +1110,20 @@ def build_generation_router(
                             progress_value = float(progress)
                         except Exception:
                             progress_value = None
-                        patch = {"status": "running"}
+                        task_status = str(
+                            update.get("task_status") or "IN_PROGRESS"
+                        ).upper()
+                        failed_statuses = {"FAILED", "ERROR", "CANCELLED", "CANCELED"}
+                        patch = {
+                            "status": "failed"
+                            if task_status in failed_statuses
+                            else "running"
+                        }
                         if progress_value is not None:
-                            patch["progress"] = max(1.0, min(progress_value, 99.0))
+                            if task_status in failed_statuses:
+                                patch["progress"] = max(0.0, min(progress_value, 99.0))
+                            else:
+                                patch["progress"] = max(1.0, min(progress_value, 99.0))
                         error_text = str(update.get("error") or "").strip()
                         if error_text:
                             patch["error"] = error_text

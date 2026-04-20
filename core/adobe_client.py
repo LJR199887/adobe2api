@@ -577,6 +577,108 @@ class AdobeClient:
             "STARTED",
         }
 
+    @staticmethod
+    def _normalize_task_status(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        normalized = text.upper().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "SUCCESS": "COMPLETED",
+            "SUCCEEDED": "COMPLETED",
+            "DONE": "COMPLETED",
+            "COMPLETE": "COMPLETED",
+            "FAILURE": "FAILED",
+            "FAIL": "FAILED",
+            "CANCELED": "CANCELLED",
+        }
+        return aliases.get(normalized, normalized)
+
+    @staticmethod
+    def _is_failed_status(status_val: str) -> bool:
+        return AdobeClient._normalize_task_status(status_val) in {
+            "FAILED",
+            "CANCELLED",
+            "ERROR",
+        }
+
+    @staticmethod
+    def _has_error_signal(obj: Any) -> bool:
+        if not isinstance(obj, dict):
+            return False
+        for key in (
+            "error",
+            "errors",
+            "failure",
+            "failureReason",
+            "failure_reason",
+            "cancelReason",
+            "cancel_reason",
+        ):
+            raw = obj.get(key)
+            if raw is None or raw is False:
+                continue
+            if isinstance(raw, str):
+                if raw.strip():
+                    return True
+                continue
+            if isinstance(raw, (list, tuple, dict, set)):
+                if len(raw) > 0:
+                    return True
+                continue
+            return True
+        return False
+
+    def _extract_task_status(self, latest: dict, poll_resp) -> str:
+        if not isinstance(latest, dict):
+            latest = {}
+
+        task_obj = latest.get("task") if isinstance(latest.get("task"), dict) else {}
+        result_obj = (
+            latest.get("result") if isinstance(latest.get("result"), dict) else {}
+        )
+        meta_obj = latest.get("meta") if isinstance(latest.get("meta"), dict) else {}
+        metadata_obj = (
+            latest.get("metadata") if isinstance(latest.get("metadata"), dict) else {}
+        )
+
+        candidates: list[Any] = [
+            latest.get("status"),
+            latest.get("state"),
+            latest.get("task_status"),
+            latest.get("taskStatus"),
+            task_obj.get("status"),
+            task_obj.get("state"),
+            task_obj.get("task_status"),
+            task_obj.get("taskStatus"),
+            result_obj.get("status"),
+            result_obj.get("state"),
+            result_obj.get("task_status"),
+            result_obj.get("taskStatus"),
+            meta_obj.get("status"),
+            meta_obj.get("state"),
+            metadata_obj.get("status"),
+            metadata_obj.get("state"),
+            poll_resp.headers.get("x-task-status"),
+            poll_resp.headers.get("x-status"),
+        ]
+
+        first_status = ""
+        for raw in candidates:
+            status = self._normalize_task_status(raw)
+            if status:
+                first_status = status
+                break
+
+        has_error = False
+        for obj in (latest, task_obj, result_obj, meta_obj, metadata_obj):
+            if self._has_error_signal(obj):
+                has_error = True
+                break
+        if has_error and (not first_status or self._is_in_progress_status(first_status)):
+            return "FAILED"
+        return first_status
+
     def _extract_progress_percent(self, latest: dict, poll_resp) -> Optional[float]:
         if not isinstance(latest, dict):
             latest = {}
@@ -879,8 +981,7 @@ class AdobeClient:
                     )
 
                 latest = poll_resp.json()
-                status_header = str(poll_resp.headers.get("x-task-status") or "").upper()
-                status_val = str(latest.get("status") or "").upper() or status_header
+                status_val = self._extract_task_status(latest, poll_resp)
                 progress_val = self._extract_progress_percent(latest, poll_resp)
                 if progress_val is not None:
                     last_progress = progress_val
@@ -942,7 +1043,7 @@ class AdobeClient:
                             pass
                     return video_bytes, latest
 
-                if status_val in {"FAILED", "CANCELLED", "ERROR"}:
+                if self._is_failed_status(status_val):
                     if progress_cb:
                         try:
                             progress_cb(
@@ -1126,8 +1227,7 @@ class AdobeClient:
                     )
 
                 latest = poll_resp.json()
-                status_header = str(poll_resp.headers.get("x-task-status") or "").upper()
-                status_val = str(latest.get("status") or "").upper() or status_header
+                status_val = self._extract_task_status(latest, poll_resp)
                 progress_val = self._extract_progress_percent(latest, poll_resp)
                 if progress_val is not None:
                     last_progress = progress_val
@@ -1189,7 +1289,7 @@ class AdobeClient:
                             pass
                     return image_bytes, latest
 
-                if status_val in {"FAILED", "CANCELLED", "ERROR"}:
+                if self._is_failed_status(status_val):
                     if progress_cb:
                         try:
                             progress_cb(

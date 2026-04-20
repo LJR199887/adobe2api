@@ -1218,6 +1218,31 @@ def build_admin_router(
                     detail="token_rotation_strategy must be one of: round_robin, random",
                 )
             update_data["token_rotation_strategy"] = strategy
+        if "token_success_auto_disable_enabled" in incoming:
+            update_data["token_success_auto_disable_enabled"] = bool(
+                incoming["token_success_auto_disable_enabled"]
+            )
+        if "token_success_auto_disable_threshold" in incoming:
+            try:
+                token_success_auto_disable_threshold = int(
+                    incoming["token_success_auto_disable_threshold"]
+                )
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail="token_success_auto_disable_threshold must be an integer between 1 and 100000",
+                )
+            if (
+                token_success_auto_disable_threshold < 1
+                or token_success_auto_disable_threshold > 100000
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="token_success_auto_disable_threshold must be between 1 and 100000",
+                )
+            update_data["token_success_auto_disable_threshold"] = (
+                token_success_auto_disable_threshold
+            )
         if "batch_concurrency" in incoming:
             try:
                 batch_concurrency = int(incoming["batch_concurrency"])

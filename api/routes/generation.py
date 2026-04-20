@@ -719,6 +719,11 @@ def build_generation_router(
                         progress=max(progress, 100.0),
                         image_url=image_url,
                     )
+                    token_manager.report_success_with_auto_disable(
+                        token,
+                        auto_disable_enabled=client.token_success_auto_disable_enabled,
+                        auto_disable_threshold=client.token_success_auto_disable_threshold,
+                    )
                     return
                 except quota_error_cls:
                     report_token_exhausted(token)
@@ -1205,6 +1210,11 @@ def build_generation_router(
                         progress=100.0,
                         image_url=video_url,
                         error=None,
+                    )
+                    token_manager.report_success_with_auto_disable(
+                        token,
+                        auto_disable_enabled=client.token_success_auto_disable_enabled,
+                        auto_disable_threshold=client.token_success_auto_disable_threshold,
                     )
                     _finalize_async_video_request_log(
                         request,

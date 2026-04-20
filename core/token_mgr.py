@@ -42,6 +42,7 @@ class TokenManager:
                         t.setdefault("value", "")
                         t.setdefault("status", "active")
                         t.setdefault("fails", 0)
+                        t.setdefault("success_count", 0)
                         t.setdefault("added_at", now_ts)
                         t.setdefault("error_until", 0)
                     if source == LEGACY_DATA_FILE and not DATA_FILE.exists():
@@ -171,6 +172,7 @@ class TokenManager:
                 "value": value,
                 "status": "active",
                 "fails": 0,
+                "success_count": 0,
                 "added_at": time.time(),
                 "error_until": 0,
             }
@@ -235,6 +237,7 @@ class TokenManager:
                 target["status"] = "active"
                 target["fails"] = 0
                 target["error_until"] = 0
+                target.setdefault("success_count", 0)
                 target["updated_at"] = now_ts
                 target["source"] = "auto_refresh"
                 target["auto_refresh"] = True
@@ -271,6 +274,7 @@ class TokenManager:
                 "value": value,
                 "status": "active",
                 "fails": 0,
+                "success_count": 0,
                 "added_at": now_ts,
                 "updated_at": now_ts,
                 "error_until": 0,
@@ -448,10 +452,44 @@ class TokenManager:
             t = self._value_index.get(self._normalize_token_value(value))
             if t is not None:
                 t["fails"] = max(0, int(t.get("fails", 0)) - 1)
+                t["success_count"] = max(0, int(t.get("success_count", 0))) + 1
                 if t["status"] == "error":
                     t["status"] = "active"
                     t["error_until"] = 0
             self.save()
+
+    def report_success_with_auto_disable(
+        self,
+        value: str,
+        *,
+        auto_disable_enabled: bool = False,
+        auto_disable_threshold: int = 0,
+    ) -> Optional[Dict]:
+        with self._lock:
+            t = self._value_index.get(self._normalize_token_value(value))
+            if t is None:
+                self.save()
+                return None
+            t["fails"] = max(0, int(t.get("fails", 0)) - 1)
+            success_count = max(0, int(t.get("success_count", 0))) + 1
+            t["success_count"] = success_count
+            if t["status"] == "error":
+                t["status"] = "active"
+                t["error_until"] = 0
+            disabled_by_limit = False
+            try:
+                threshold = int(auto_disable_threshold or 0)
+            except Exception:
+                threshold = 0
+            if bool(auto_disable_enabled) and threshold > 0 and success_count >= threshold:
+                t["status"] = "exhausted"
+                t["error_until"] = 0
+                disabled_by_limit = True
+            self.save()
+            result = dict(t)
+            result["_disabled_by_success_limit"] = disabled_by_limit
+            result["_success_count"] = success_count
+            return result
 
     @staticmethod
     def _decode_jwt_payload(value: str) -> Optional[dict]:
@@ -540,6 +578,7 @@ class TokenManager:
             "value": masked,
             "status": token.get("status", "active"),
             "fails": token.get("fails", 0),
+            "success_count": token.get("success_count", 0),
             "added_at": token.get("added_at", 0),
             "updated_at": token.get("updated_at"),
             "error_until": token.get("error_until", 0),

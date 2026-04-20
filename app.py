@@ -768,6 +768,11 @@ def _run_with_token_retries(
                 status_code=result_status_code,
                 task_status_override="COMPLETED",
             )
+            token_manager.report_success_with_auto_disable(
+                token,
+                auto_disable_enabled=client.token_success_auto_disable_enabled,
+                auto_disable_threshold=client.token_success_auto_disable_threshold,
+            )
             return result
         except QuotaExhaustedError as exc:
             _report_token_exhausted(token)

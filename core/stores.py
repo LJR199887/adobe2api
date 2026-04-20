@@ -107,11 +107,13 @@ class RequestLogStore:
         "api.generate",
         "chat.completions",
         "images.generations",
+        "video.generations",
     }
     _GENERATION_PATHS = {
         "/api/v1/generate",
         "/v1/chat/completions",
         "/v1/images/generations",
+        "/v1/video/generations",
     }
 
     def __init__(self, file_path: Path, max_items: int = 500) -> None:
@@ -478,6 +480,70 @@ class RequestLogStore:
             with self._file_path.open("w", encoding="utf-8") as f:
                 f.write("")
             self._append_since_truncate = 0
+
+    def compute_generation_success_counts(self) -> dict:
+        with self._lock:
+            items = self._read_payloads_locked()
+
+        latest_by_id: dict[str, dict] = {}
+        anonymous_items: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "").strip()
+            if item_id:
+                latest_by_id[item_id] = item
+            else:
+                anonymous_items.append(item)
+
+        deduped_items = [*latest_by_id.values(), *anonymous_items]
+        counts_by_token_id: dict[str, int] = {}
+        counts_by_email: dict[str, int] = {}
+        counts_by_name: dict[str, int] = {}
+        scanned_logs = len(deduped_items)
+        generation_logs = 0
+        success_logs = 0
+        unidentified_success_logs = 0
+
+        for item in deduped_items:
+            if not isinstance(item, dict) or not self._is_generation_request(item):
+                continue
+            generation_logs += 1
+            if self._is_failed_item(item):
+                continue
+            try:
+                status_code = int(item.get("status_code") or 0)
+            except Exception:
+                status_code = 0
+            if not (200 <= status_code < 300):
+                continue
+
+            success_logs += 1
+            token_id = str(item.get("token_id") or "").strip()
+            email = str(item.get("token_account_email") or "").strip().casefold()
+            name = str(item.get("token_account_name") or "").strip().casefold()
+            identified = False
+            if token_id:
+                counts_by_token_id[token_id] = counts_by_token_id.get(token_id, 0) + 1
+                identified = True
+            if email:
+                counts_by_email[email] = counts_by_email.get(email, 0) + 1
+                identified = True
+            if name:
+                counts_by_name[name] = counts_by_name.get(name, 0) + 1
+                identified = True
+            if not identified:
+                unidentified_success_logs += 1
+
+        return {
+            "scanned_logs": scanned_logs,
+            "generation_logs": generation_logs,
+            "success_logs": success_logs,
+            "unidentified_success_logs": unidentified_success_logs,
+            "counts_by_token_id": counts_by_token_id,
+            "counts_by_email": counts_by_email,
+            "counts_by_name": counts_by_name,
+        }
 
 
 @dataclass

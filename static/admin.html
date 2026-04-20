@@ -240,6 +240,12 @@
               <input type="number" id="confTokenSuccessAutoDisableThreshold" class="input-text" min="1" max="100000" step="1" placeholder="默认 2" />
               <p class="help">例如填 2 并开启后，一个 token 成功完成 2 次任务就会自动禁用；填 5 则成功 5 次后自动禁用。</p>
             </div>
+
+            <div class="form-group">
+              <button id="overwriteSuccessCountsBtn" type="button" class="secondary">全量覆盖回填成功次数</button>
+              <p class="help">会根据历史成功生成日志，重新统计每个 token 的成功次数，并直接覆盖当前 success_count。</p>
+              <pre id="overwriteSuccessCountsResult" class="help" style="white-space: pre-wrap; margin: 10px 0 0 0;">点击按钮后，将在这里显示覆盖回填结果。</pre>
+            </div>
           </section>
 
           <section id="cfg-storage" class="config-cat-pane">

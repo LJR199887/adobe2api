@@ -864,6 +864,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   const confImgBedApiUrl = document.getElementById("confImgBedApiUrl");
   const confImgBedApiKey = document.getElementById("confImgBedApiKey");
   const generatedUsageInfo = document.getElementById("generatedUsageInfo");
+  const overwriteSuccessCountsBtn = document.getElementById("overwriteSuccessCountsBtn");
+  const overwriteSuccessCountsResult = document.getElementById("overwriteSuccessCountsResult");
   const configCatBtns = document.querySelectorAll(".config-cat-btn");
   const configCatPanes = document.querySelectorAll(".config-cat-pane");
   const saveConfigBtn = document.getElementById("saveConfigBtn");
@@ -1304,6 +1306,52 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  if (overwriteSuccessCountsBtn) {
+    overwriteSuccessCountsBtn.addEventListener("click", async () => {
+      const confirmed = window.confirm(
+        "将根据历史成功生成日志，全量覆盖所有 Token 的成功次数。这个操作会直接重写当前 success_count，是否继续？"
+      );
+      if (!confirmed) return;
+      overwriteSuccessCountsBtn.disabled = true;
+      if (overwriteSuccessCountsResult) {
+        overwriteSuccessCountsResult.textContent = "正在全量覆盖回填成功次数...";
+      }
+      try {
+        const res = await fetch("/api/v1/tokens/success-counts/overwrite-from-logs", {
+          method: "POST",
+        });
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (_) {
+          data = null;
+        }
+        if (!res.ok) {
+          const detail = getImportDetailPayload(data);
+          throw new Error(
+            (typeof detail === "string" && detail.trim()) || "全量覆盖回填失败"
+          );
+        }
+        if (overwriteSuccessCountsResult) {
+          overwriteSuccessCountsResult.textContent = formatSuccessCountOverwriteResult(data);
+        }
+        showMsg(configMsg, "成功次数已按历史日志全量覆盖回填", false);
+        showToast("成功次数已按历史日志全量覆盖回填", false);
+        tokenCurrentPage = 1;
+        await loadTokens();
+      } catch (err) {
+        const message = err?.message || "全量覆盖回填失败";
+        if (overwriteSuccessCountsResult) {
+          overwriteSuccessCountsResult.textContent = message;
+        }
+        showMsg(configMsg, message, true);
+        showToast(message, true);
+      } finally {
+        overwriteSuccessCountsBtn.disabled = false;
+      }
+    });
+  }
+
   function formatTs(ts) {
     if (!ts) return "-";
     const d = new Date(Number(ts) * 1000);
@@ -1655,6 +1703,29 @@ document.addEventListener("DOMContentLoaded", async () => {
       clearTimeout(importRefreshJobTimer);
       importRefreshJobTimer = null;
     }
+  }
+
+  function formatSuccessCountOverwriteResult(payload) {
+    if (!payload || typeof payload !== "object") {
+      return "未返回回填结果";
+    }
+    return [
+      "全量覆盖回填完成",
+      `扫描日志：${Number(payload.scanned_logs || 0)}`,
+      `生成日志：${Number(payload.generation_logs || 0)}`,
+      `成功日志：${Number(payload.success_logs || 0)}`,
+      `未识别成功日志：${Number(payload.unidentified_success_logs || 0)}`,
+      `Token总数：${Number(payload.total_tokens || 0)}`,
+      `命中Token：${Number(payload.matched_tokens || 0)}`,
+      `按Token ID命中：${Number(payload.matched_by_token_id || 0)}`,
+      `按邮箱命中：${Number(payload.matched_by_email || 0)}`,
+      `按账号名命中：${Number(payload.matched_by_name || 0)}`,
+      `变更Token：${Number(payload.changed_tokens || 0)}`,
+      `重置为0：${Number(payload.reset_to_zero_tokens || 0)}`,
+      `非零成功次数Token：${Number(payload.nonzero_success_tokens || 0)}`,
+      `总成功次数：${Number(payload.total_success_count || 0)}`,
+      `按阈值转为额度耗尽：${Number(payload.exhausted_by_threshold || 0)}`,
+    ].join("\n");
   }
 
   function pollImportRefreshJob(jobId) {

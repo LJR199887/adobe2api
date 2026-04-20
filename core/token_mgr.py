@@ -491,6 +491,124 @@ class TokenManager:
             result["_success_count"] = success_count
             return result
 
+    def overwrite_success_counts(
+        self,
+        *,
+        counts_by_token_id: Dict[str, int],
+        counts_by_email: Optional[Dict[str, int]] = None,
+        counts_by_name: Optional[Dict[str, int]] = None,
+        auto_disable_enabled: bool = False,
+        auto_disable_threshold: int = 0,
+    ) -> Dict:
+        normalized_by_id = {
+            str(k or "").strip(): max(0, int(v or 0))
+            for k, v in dict(counts_by_token_id or {}).items()
+            if str(k or "").strip()
+        }
+        normalized_by_email = {
+            str(k or "").strip().casefold(): max(0, int(v or 0))
+            for k, v in dict(counts_by_email or {}).items()
+            if str(k or "").strip()
+        }
+        normalized_by_name = {
+            str(k or "").strip().casefold(): max(0, int(v or 0))
+            for k, v in dict(counts_by_name or {}).items()
+            if str(k or "").strip()
+        }
+        try:
+            threshold = int(auto_disable_threshold or 0)
+        except Exception:
+            threshold = 0
+
+        with self._lock:
+            email_matches: Dict[str, List[Dict]] = {}
+            name_matches: Dict[str, List[Dict]] = {}
+            for token in self.tokens:
+                if not isinstance(token, dict):
+                    continue
+                email = str(token.get("refresh_profile_email") or "").strip().casefold()
+                name = str(token.get("refresh_profile_name") or "").strip().casefold()
+                if email:
+                    email_matches.setdefault(email, []).append(token)
+                if name:
+                    name_matches.setdefault(name, []).append(token)
+
+            matched_token_ids = set()
+            matched_by_id = 0
+            matched_by_email = 0
+            matched_by_name = 0
+            changed_tokens = 0
+            reset_to_zero_tokens = 0
+            exhausted_by_threshold = 0
+            total_success_count = 0
+
+            for token in self.tokens:
+                if not isinstance(token, dict):
+                    continue
+                token_id = self._token_id_key(token)
+                email = str(token.get("refresh_profile_email") or "").strip().casefold()
+                name = str(token.get("refresh_profile_name") or "").strip().casefold()
+                old_count = max(0, int(token.get("success_count", 0) or 0))
+                new_count = 0
+                matched = False
+
+                if token_id and token_id in normalized_by_id:
+                    new_count = normalized_by_id[token_id]
+                    matched = True
+                    matched_by_id += 1
+                elif email and len(email_matches.get(email) or []) == 1:
+                    new_count = normalized_by_email.get(email, 0)
+                    matched = email in normalized_by_email
+                    if matched:
+                        matched_by_email += 1
+                elif name and len(name_matches.get(name) or []) == 1:
+                    new_count = normalized_by_name.get(name, 0)
+                    matched = name in normalized_by_name
+                    if matched:
+                        matched_by_name += 1
+
+                token["success_count"] = new_count
+                total_success_count += new_count
+                if matched and token_id:
+                    matched_token_ids.add(token_id)
+                if old_count != new_count:
+                    changed_tokens += 1
+                if old_count > 0 and new_count == 0:
+                    reset_to_zero_tokens += 1
+                if (
+                    bool(auto_disable_enabled)
+                    and threshold > 0
+                    and new_count >= threshold
+                    and str(token.get("status") or "").strip().lower()
+                    not in {"invalid"}
+                ):
+                    if str(token.get("status") or "").strip().lower() != "exhausted":
+                        exhausted_by_threshold += 1
+                    token["status"] = "exhausted"
+                    token["error_until"] = 0
+
+            self.save()
+            nonzero_tokens = sum(
+                1
+                for token in self.tokens
+                if isinstance(token, dict)
+                and int(token.get("success_count", 0) or 0) > 0
+            )
+            return {
+                "total_tokens": len([t for t in self.tokens if isinstance(t, dict)]),
+                "matched_tokens": len(matched_token_ids)
+                if matched_token_ids
+                else (matched_by_id + matched_by_email + matched_by_name),
+                "matched_by_token_id": matched_by_id,
+                "matched_by_email": matched_by_email,
+                "matched_by_name": matched_by_name,
+                "changed_tokens": changed_tokens,
+                "reset_to_zero_tokens": reset_to_zero_tokens,
+                "nonzero_success_tokens": nonzero_tokens,
+                "total_success_count": total_success_count,
+                "exhausted_by_threshold": exhausted_by_threshold,
+            }
+
     @staticmethod
     def _decode_jwt_payload(value: str) -> Optional[dict]:
         token = str(value or "").strip()

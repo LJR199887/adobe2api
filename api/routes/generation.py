@@ -235,6 +235,7 @@ def build_generation_router(
     sse_chat_stream: Callable[[dict], Any],
     on_generated_file_written: Callable[[Path, int, int], None],
     report_token_exhausted: Callable[[str], Any],
+    disable_auto_refresh_for_token: Callable[[dict | None], None],
     quota_error_cls,
     auth_error_cls,
     upstream_temp_error_cls,
@@ -719,11 +720,15 @@ def build_generation_router(
                         progress=max(progress, 100.0),
                         image_url=image_url,
                     )
-                    token_manager.report_success_with_auto_disable(
+                    token_info = token_manager.report_success_with_auto_disable(
                         token,
                         auto_disable_enabled=client.token_success_auto_disable_enabled,
                         auto_disable_threshold=client.token_success_auto_disable_threshold,
                     )
+                    if isinstance(token_info, dict) and bool(
+                        token_info.get("_disabled_by_success_limit")
+                    ):
+                        disable_auto_refresh_for_token(token_info)
                     return
                 except quota_error_cls:
                     report_token_exhausted(token)
@@ -1211,11 +1216,15 @@ def build_generation_router(
                         image_url=video_url,
                         error=None,
                     )
-                    token_manager.report_success_with_auto_disable(
+                    token_info = token_manager.report_success_with_auto_disable(
                         token,
                         auto_disable_enabled=client.token_success_auto_disable_enabled,
                         auto_disable_threshold=client.token_success_auto_disable_threshold,
                     )
+                    if isinstance(token_info, dict) and bool(
+                        token_info.get("_disabled_by_success_limit")
+                    ):
+                        disable_auto_refresh_for_token(token_info)
                     _finalize_async_video_request_log(
                         request,
                         started=request_started,

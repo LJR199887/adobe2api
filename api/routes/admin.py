@@ -1084,6 +1084,16 @@ def build_admin_router(
                 config_manager.get("token_success_auto_disable_threshold", 2) or 2
             ),
         )
+        disabled_auto_refresh_profiles = 0
+        for profile_id in result.get("exhausted_profile_ids") or []:
+            pid = str(profile_id or "").strip()
+            if not pid:
+                continue
+            try:
+                refresh_manager.set_enabled(pid, False)
+                disabled_auto_refresh_profiles += 1
+            except Exception:
+                continue
         response = {
             "status": "ok",
             "scanned_logs": int(log_summary.get("scanned_logs") or 0),
@@ -1092,6 +1102,7 @@ def build_admin_router(
             "unidentified_success_logs": int(
                 log_summary.get("unidentified_success_logs") or 0
             ),
+            "disabled_auto_refresh_profiles": disabled_auto_refresh_profiles,
             **result,
         }
         logger.info(
@@ -1099,7 +1110,8 @@ def build_admin_router(
             "success_logs=%s unidentified_success_logs=%s matched_tokens=%s "
             "matched_by_token_id=%s matched_by_email=%s matched_by_name=%s "
             "changed_tokens=%s reset_to_zero_tokens=%s nonzero_success_tokens=%s "
-            "total_success_count=%s exhausted_by_threshold=%s",
+            "total_success_count=%s exhausted_by_threshold=%s "
+            "disabled_auto_refresh_profiles=%s",
             response["scanned_logs"],
             response["generation_logs"],
             response["success_logs"],
@@ -1113,6 +1125,7 @@ def build_admin_router(
             response["nonzero_success_tokens"],
             response["total_success_count"],
             response["exhausted_by_threshold"],
+            response["disabled_auto_refresh_profiles"],
         )
         return response
 

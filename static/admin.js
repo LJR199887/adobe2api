@@ -1725,6 +1725,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       `非零成功次数Token：${Number(payload.nonzero_success_tokens || 0)}`,
       `总成功次数：${Number(payload.total_success_count || 0)}`,
       `按阈值转为额度耗尽：${Number(payload.exhausted_by_threshold || 0)}`,
+      `自动关闭刷新Profile：${Number(payload.disabled_auto_refresh_profiles || 0)}`,
     ].join("\n");
   }
 

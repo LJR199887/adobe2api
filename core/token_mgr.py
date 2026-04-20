@@ -541,6 +541,7 @@ class TokenManager:
             reset_to_zero_tokens = 0
             exhausted_by_threshold = 0
             total_success_count = 0
+            exhausted_profile_ids: set[str] = set()
 
             for token in self.tokens:
                 if not isinstance(token, dict):
@@ -586,6 +587,9 @@ class TokenManager:
                         exhausted_by_threshold += 1
                     token["status"] = "exhausted"
                     token["error_until"] = 0
+                    profile_id = str(token.get("refresh_profile_id") or "").strip()
+                    if bool(token.get("auto_refresh")) and profile_id:
+                        exhausted_profile_ids.add(profile_id)
 
             self.save()
             nonzero_tokens = sum(
@@ -607,6 +611,7 @@ class TokenManager:
                 "nonzero_success_tokens": nonzero_tokens,
                 "total_success_count": total_success_count,
                 "exhausted_by_threshold": exhausted_by_threshold,
+                "exhausted_profile_ids": sorted(exhausted_profile_ids),
             }
 
     @staticmethod

@@ -66,6 +66,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const deleteTokensBatchBtn = document.getElementById("deleteTokensBatchBtn");
   const enableAutoRefreshBatchBtn = document.getElementById("enableAutoRefreshBatchBtn");
   const disableAutoRefreshBatchBtn = document.getElementById("disableAutoRefreshBatchBtn");
+  const refreshTokensBatchBtn = document.getElementById("refreshTokensBatchBtn");
   const refreshModal = document.getElementById("refreshModal");
   const refreshModalCloseBtn = document.getElementById("refreshModalCloseBtn");
   const refreshBtn = document.getElementById("refreshBtn");
@@ -187,6 +188,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (clearTokenSelectionBtn) clearTokenSelectionBtn.disabled = selectedCount <= 0;
     if (enableAutoRefreshBatchBtn) enableAutoRefreshBatchBtn.disabled = selectedCount <= 0;
     if (disableAutoRefreshBatchBtn) disableAutoRefreshBatchBtn.disabled = selectedCount <= 0;
+    if (refreshTokensBatchBtn) refreshTokensBatchBtn.disabled = selectedCount <= 0;
     if (selectAllFilteredTokensBtn) {
       const filteredCount = Array.isArray(latestTokens) ? latestTokens.length : 0;
       selectAllFilteredTokensBtn.disabled = filteredCount <= 0 || selectedCount >= filteredCount;
@@ -675,6 +677,48 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (disableAutoRefreshBatchBtn) {
     disableAutoRefreshBatchBtn.addEventListener("click", () => {
       setSelectedAutoRefresh(false);
+    });
+  }
+
+  if (refreshTokensBatchBtn) {
+    refreshTokensBatchBtn.addEventListener("click", async () => {
+      const selectedIds = Array.from(tokenSelectedIds);
+      if (!selectedIds.length) {
+        alert("请先选择要刷新 Token 的账号");
+        return;
+      }
+
+      refreshTokensBatchBtn.disabled = true;
+      showToast(`批量刷新 Token 中...`, false, { duration: 0 });
+      try {
+        const res = await fetch("/api/v1/tokens/refresh-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: selectedIds }),
+        });
+        if (!res.ok) {
+          let detail = "批量刷新 Token 失败";
+          try {
+            const body = await res.json();
+            detail = body.detail || JSON.stringify(body);
+          } catch (_) {
+            detail = await res.text();
+          }
+          showToast(`批量刷新 Token 失败: ${detail || "unknown error"}`, true);
+          return;
+        }
+        const data = await res.json();
+        const ok = Number(data.refreshed_count || 0);
+        const skipped = Number(data.skipped_count || 0);
+        const fail = Number(data.failed_count || 0);
+        showToast(`批量刷新 Token 完成: 成功 ${ok}, 跳过 ${skipped}, 失败 ${fail}`, fail > 0);
+        await loadTokens();
+      } catch (err) {
+        showToast("批量刷新 Token 失败", true);
+      } finally {
+        refreshTokensBatchBtn.disabled = false;
+        updateTokenSelectionSummary();
+      }
     });
   }
 

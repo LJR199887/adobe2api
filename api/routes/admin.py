@@ -24,6 +24,7 @@ from api.schemas import (
     TokenAutoRefreshBatchRequest,
     TokenBatchAddRequest,
     TokenCreditsBatchRefreshRequest,
+    TokenRefreshBatchRequest,
 )
 from core.proxy_utils import (
     resolve_basic_proxy,
@@ -937,6 +938,66 @@ def build_admin_router(
             raise HTTPException(status_code=400, detail=str(exc))
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
+
+    @router.post("/api/v1/tokens/refresh-batch")
+    def refresh_tokens_batch(req: TokenRefreshBatchRequest, request: Request):
+        require_admin_auth(request)
+        ids = req.ids if isinstance(req.ids, list) else None
+        token_ids = [str(x or "").strip() for x in (ids or []) if str(x or "").strip()]
+        if not token_ids:
+            raise HTTPException(status_code=400, detail="ids is required")
+
+        max_workers = min(get_batch_concurrency(), len(token_ids))
+
+        def refresh_one(index: int, tid: str):
+            token_info = token_manager.get_by_id(tid)
+            if not token_info:
+                return index, "failed", {"token_id": tid, "detail": "token not found"}
+
+            profile_id = str(token_info.get("refresh_profile_id") or "").strip()
+            if not profile_id:
+                return index, "skipped", {
+                    "token_id": tid,
+                    "detail": "this token is not bound to an auto refresh profile",
+                }
+
+            try:
+                return index, "ok", {
+                    "token_id": tid,
+                    "result": refresh_manager.refresh_once(profile_id),
+                }
+            except Exception as exc:
+                return index, "failed", {"token_id": tid, "detail": str(exc)}
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(refresh_one, index, tid)
+                for index, tid in enumerate(token_ids)
+            ]
+            done_items = [future.result() for future in as_completed(futures)]
+
+        done_items.sort(key=lambda item: item[0])
+        refreshed = []
+        skipped = []
+        failed = []
+        for _, status, payload in done_items:
+            if status == "ok":
+                refreshed.append(payload)
+            elif status == "skipped":
+                skipped.append(payload)
+            else:
+                failed.append(payload)
+
+        return {
+            "status": "ok" if not failed else "partial",
+            "total": len(token_ids),
+            "refreshed_count": len(refreshed),
+            "skipped_count": len(skipped),
+            "failed_count": len(failed),
+            "refreshed": refreshed,
+            "skipped": skipped,
+            "failed": failed,
+        }
 
     @router.put("/api/v1/tokens/{tid}/auto-refresh")
     def set_token_auto_refresh_enabled(tid: str, enabled: bool, request: Request):

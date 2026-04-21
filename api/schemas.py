@@ -31,6 +31,10 @@ class TokenAutoRefreshBatchRequest(BaseModel):
     enabled: bool
 
 
+class TokenRefreshBatchRequest(BaseModel):
+    ids: Optional[List[str]] = None
+
+
 class ConfigUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     admin_username: Optional[str] = None

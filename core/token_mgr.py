@@ -738,7 +738,7 @@ class TokenManager:
         credits: str = "",
     ) -> Dict:
         page = max(1, int(page or 1))
-        page_size = max(1, min(200, int(page_size or 50)))
+        page_size = max(1, min(2000, int(page_size or 50)))
         with self._lock:
             total_count = len(self.tokens)
             active_count = sum(

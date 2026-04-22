@@ -946,7 +946,7 @@
       }
       const data = await res.json();
       const items = Array.isArray(data?.items) ? data.items : [];
-      logsFailedAccount.innerHTML = '<option value="">鍏ㄩ儴璐﹀彿</option>';
+      logsFailedAccount.innerHTML = '<option value="">全部账号</option>';
       items.forEach((item) => {
         const accountKey = String(item?.account_key || "").trim();
         if (!accountKey) return;
@@ -962,7 +962,7 @@
         logsFailedAccount.value = hasOption ? previousValue : "";
       }
     } catch (_) {
-      logsFailedAccount.innerHTML = '<option value="">鍏ㄩ儴璐﹀彿</option>';
+      logsFailedAccount.innerHTML = '<option value="">全部账号</option>';
     }
   }
 

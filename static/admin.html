@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/admin.css?v=20260422-2" />
+  <link rel="stylesheet" href="/static/admin.css?v=20260422-3" />
 </head>
 <body>
   <div class="bg-orb bg-orb-a"></div>
@@ -347,13 +347,13 @@
         <div class="logs-filter-bar">
           <label class="checkbox-label logs-filter-checkbox">
             <input id="logsFailedOnly" type="checkbox" />
-            <span>鍙湅澶辫触</span>
+            <span>只看失败</span>
           </label>
-          <label for="logsFailedAccount" class="help">澶辫触璐﹀彿</label>
-          <select id="logsFailedAccount" class="input-select" aria-label="澶辫触璐﹀彿绛涢€?">
-            <option value="">鍏ㄩ儴璐﹀彿</option>
+          <label for="logsFailedAccount" class="help">失败账号</label>
+          <select id="logsFailedAccount" class="input-select" aria-label="失败账号筛选">
+            <option value="">全部账号</option>
           </select>
-          <button id="clearLogFiltersBtn" class="secondary small" type="button">娓呯┖绛涢€?/button>
+          <button id="clearLogFiltersBtn" class="secondary small" type="button">清空筛选</button>
         </div>
         <div class="stats-grid" id="logsStatsGrid">
           <div class="stat-card">
@@ -485,6 +485,6 @@
 
   <div id="appToast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="/static/admin.js?v=20260422-2"></script>
+  <script src="/static/admin.js?v=20260422-3"></script>
 </body>
 </html>

@@ -63,6 +63,7 @@ def build_image_payload_candidates(
             "n": 1,
             "prompt": prompt,
             "seeds": [int(time.time()) % 999999],
+            "size": size_from_ratio(aspect_ratio, output_resolution),
             "referenceBlobs": [],
             "output": {"storeInputs": True},
             "modelSpecificPayload": dict(model_specific_payload or {}),
@@ -72,9 +73,6 @@ def build_image_payload_candidates(
             payload["referenceBlobs"] = [
                 {"id": img_id, "usage": "subject"} for img_id in source_image_ids
             ]
-            payload["modelSpecificPayload"].setdefault("size", "auto")
-        else:
-            payload["size"] = size_from_ratio(aspect_ratio, output_resolution)
         if generation_settings:
             payload["generationSettings"] = dict(generation_settings)
         return [payload]

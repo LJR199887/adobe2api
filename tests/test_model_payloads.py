@@ -30,7 +30,7 @@ def test_gpt_image2_catalog_entry_matches_upstream_request_shape():
     assert "skipCai" not in payload
 
 
-def test_gpt_image2_image_to_image_matches_upstream_request_shape():
+def test_gpt_image2_image_to_image_uses_top_level_size_from_ratio():
     conf = MODEL_CATALOG["gpt-image2"]
     source_ids = [
         "d69800be-273b-4808-99ce-6f3a7de5b070",
@@ -40,7 +40,7 @@ def test_gpt_image2_image_to_image_matches_upstream_request_shape():
 
     payload = build_image_payload_candidates(
         prompt="6张图片合在一起",
-        aspect_ratio="1:1",
+        aspect_ratio="2:3",
         output_resolution="1K",
         upstream_model_id=conf["upstream_model_id"],
         upstream_model_version=conf["upstream_model_version"],
@@ -53,13 +53,13 @@ def test_gpt_image2_image_to_image_matches_upstream_request_shape():
 
     assert payload["modelId"] == "gpt-image"
     assert payload["modelVersion"] == "2"
-    assert "size" not in payload
+    assert payload["size"] == {"width": 1024, "height": 1536}
     assert payload["referenceBlobs"] == [
         {"id": source_ids[0], "usage": "subject"},
         {"id": source_ids[1], "usage": "subject"},
         {"id": source_ids[2], "usage": "subject"},
     ]
-    assert payload["modelSpecificPayload"] == {"size": "auto"}
+    assert payload["modelSpecificPayload"] == {}
     assert payload["generationMetadata"] == {
         "module": "text2image",
         "submodule": "ff-image-generate",

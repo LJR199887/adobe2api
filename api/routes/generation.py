@@ -429,6 +429,10 @@ def build_generation_router(
                     upstream_model_version=str(
                         model_conf.get("upstream_model_version") or "nano-banana-2"
                     ),
+                    payload_style=str(model_conf.get("payload_style") or "banana"),
+                    generation_metadata=model_conf.get("generation_metadata"),
+                    generation_settings=model_conf.get("generation_settings"),
+                    model_specific_payload=model_conf.get("model_specific_payload"),
                     source_image_ids=source_image_ids,
                     timeout=client.generate_timeout,
                     out_path=None if direct_result_url else out_path,
@@ -651,22 +655,50 @@ def build_generation_router(
         if data.model:
             output_resolution = model_conf["output_resolution"]
 
-        job = store.create(prompt=prompt, aspect_ratio=ratio)
+        normalized_data = _normalize_image_request_data(
+            data.model_dump(),
+            prompt,
+        )
+        input_images = load_input_images(normalized_data.get("messages") or [])
 
-        def runner(job_id: str):
+        job = store.create(prompt=prompt, aspect_ratio=ratio)
+        request_started = time.time()
+        _init_async_image_request_log(request)
+        initial_token = token_manager.get_available(
+            strategy=client.token_rotation_strategy
+        )
+        if initial_token:
+            _set_async_video_token_context(request, initial_token, 1)
+
+        def runner(job_id: str, first_token: str | None = None):
             store.update(job_id, status="running", progress=5.0)
+            set_request_task_progress(
+                request, task_status="IN_PROGRESS", task_progress=5.0
+            )
             max_attempts = client.retry_max_attempts if client.retry_enabled else 1
             max_attempts = max(1, int(max_attempts))
             last_error = "No active tokens available in the pool"
+            final_status_code = 503
 
             for attempt in range(1, max_attempts + 1):
-                token = token_manager.get_available(
-                    strategy=client.token_rotation_strategy
-                )
+                if attempt == 1 and first_token:
+                    token = first_token
+                else:
+                    token = token_manager.get_available(
+                        strategy=client.token_rotation_strategy
+                    )
                 if not token:
                     break
 
                 try:
+                    _set_async_video_token_context(request, token, attempt)
+                    source_image_ids: list[str] = []
+                    for image_bytes, image_mime in input_images:
+                        source_image_ids.append(
+                            client.upload_image(
+                                token, image_bytes, image_mime or "image/jpeg"
+                            )
+                        )
                     imgbed_upload_enabled = bool(use_imgbed_upload())
                     direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                     out_path = generated_dir / f"{job_id}.png"
@@ -689,6 +721,11 @@ def build_generation_router(
                         upstream_model_version=str(
                             model_conf.get("upstream_model_version") or "nano-banana-2"
                         ),
+                        payload_style=str(model_conf.get("payload_style") or "banana"),
+                        generation_metadata=model_conf.get("generation_metadata"),
+                        generation_settings=model_conf.get("generation_settings"),
+                        model_specific_payload=model_conf.get("model_specific_payload"),
+                        source_image_ids=source_image_ids,
                         out_path=None if direct_result_url else out_path,
                         return_upstream_url=direct_result_url,
                     )
@@ -713,12 +750,17 @@ def build_generation_router(
                         )
                         on_generated_file_written(out_path, old_size, new_size)
                         image_url = public_image_url(request, job_id)
+                    set_request_preview(request, image_url, kind="image")
+                    set_request_task_progress(
+                        request, task_status="COMPLETED", task_progress=100.0
+                    )
                     progress = float(meta.get("progress") or 100.0)
                     store.update(
                         job_id,
                         status="succeeded",
                         progress=max(progress, 100.0),
                         image_url=image_url,
+                        error=None,
                     )
                     token_info = token_manager.report_success_with_auto_disable(
                         token,
@@ -729,37 +771,97 @@ def build_generation_router(
                         token_info.get("_disabled_by_success_limit")
                     ):
                         disable_auto_refresh_for_token(token_info)
+                    _finalize_async_image_request_log(
+                        request,
+                        started=request_started,
+                        status_code=200,
+                    )
                     return
                 except quota_error_cls:
                     report_token_exhausted(token)
                     last_error = "Token quota exhausted."
+                    final_status_code = 429
                     retryable = attempt < max_attempts
                 except auth_error_cls:
                     token_manager.report_invalid(token)
                     last_error = "Token invalid or expired."
+                    final_status_code = 401
                     retryable = attempt < max_attempts
                 except upstream_temp_error_cls as exc:
                     last_error = str(exc)
+                    final_status_code = int(getattr(exc, "status_code", 503) or 503)
                     retryable = (
                         attempt < max_attempts
                         and client.should_retry_temporary_error(exc)
                     )
                 except Exception as exc:
+                    final_status_code = 500
+                    set_request_task_progress(
+                        request, task_status="FAILED", task_progress=0.0, error=str(exc)
+                    )
                     store.update(job_id, status="failed", error=str(exc))
+                    error_code = set_request_error_detail(
+                        request,
+                        error=exc,
+                        status_code=500,
+                        error_type="server_error",
+                        include_traceback=True,
+                    )
+                    _finalize_async_image_request_log(
+                        request,
+                        started=request_started,
+                        status_code=500,
+                        error=str(exc),
+                        error_code=error_code,
+                    )
                     return
 
                 if retryable:
                     delay = client._retry_delay_for_attempt(attempt)
+                    set_request_task_progress(
+                        request,
+                        task_status="IN_PROGRESS",
+                        error=f"retry {attempt}/{max_attempts}: {last_error}",
+                        retry_after=int(delay) if delay > 0 else None,
+                    )
                     if delay > 0:
                         time.sleep(delay)
                     continue
                 break
 
+            set_request_task_progress(
+                request, task_status="FAILED", task_progress=0.0, error=last_error
+            )
             store.update(job_id, status="failed", error=last_error)
+            error_type = (
+                "rate_limit_error"
+                if final_status_code == 429
+                else "authentication_error"
+                if final_status_code == 401
+                else "server_error"
+            )
+            error_code = set_request_error_detail(
+                request,
+                error=last_error,
+                status_code=final_status_code,
+                error_type=error_type,
+                include_traceback=False,
+            )
+            _finalize_async_image_request_log(
+                request,
+                started=request_started,
+                status_code=final_status_code,
+                error=last_error,
+                error_code=error_code,
+            )
 
-        threading.Thread(target=runner, args=(job.id,), daemon=True).start()
+        threading.Thread(target=runner, args=(job.id, initial_token), daemon=True).start()
 
-        return {"task_id": job.id, "status": job.status}
+        return _json_response(
+            status_code=202,
+            content={"task_id": job.id, "status": job.status},
+            request=request,
+        )
 
     @router.get("/api/v1/generate/{task_id}")
     def get_job(task_id: str, request: Request):
@@ -930,6 +1032,91 @@ def build_generation_router(
                 "status_code": int(status_code),
                 "duration_sec": int(max(0.0, time.time() - float(started))),
                 "operation": "video.generations",
+                "request_id": log_id,
+                "preview_url": getattr(request.state, "log_preview_url", None),
+                "preview_kind": getattr(request.state, "log_preview_kind", None),
+                "model": getattr(request.state, "log_model", None),
+                "model_params": getattr(request.state, "log_model_params", None),
+                "prompt_preview": getattr(request.state, "log_prompt_preview", None),
+                "error": (
+                    str(error)[:240]
+                    if error
+                    else getattr(request.state, "log_error", None)
+                ),
+                "error_code": (
+                    str(error_code or "")
+                    or getattr(request.state, "log_error_code", None)
+                    or None
+                ),
+                "task_status": getattr(request.state, "log_task_status", None),
+                "task_progress": getattr(request.state, "log_task_progress", None),
+                "upstream_job_id": getattr(request.state, "log_upstream_job_id", None),
+                "retry_after": getattr(request.state, "log_retry_after", None),
+                "token_id": getattr(request.state, "log_token_id", None),
+                "token_account_name": getattr(
+                    request.state, "log_token_account_name", None
+                ),
+                "token_account_email": getattr(
+                    request.state, "log_token_account_email", None
+                ),
+                "token_source": getattr(request.state, "log_token_source", None),
+                "token_attempt": getattr(request.state, "log_token_attempt", None),
+            },
+        )
+        live_request_store.remove(log_id)
+
+    def _init_async_image_request_log(request: Request) -> str:
+        log_id = str(getattr(request.state, "log_id", "") or uuid.uuid4().hex[:12])
+        request.state.log_id = log_id
+        request.state.log_has_attempt_logs = True
+        request.state.log_task_status = "IN_PROGRESS"
+        request.state.log_task_progress = 0.0
+        request.state.log_preview_url = None
+        request.state.log_preview_kind = None
+        request.state.log_error = None
+        request.state.log_error_code = None
+        request.state.log_upstream_job_id = None
+        request.state.log_retry_after = None
+        live_request_store.upsert(
+            log_id,
+            {
+                "id": log_id,
+                "ts": time.time(),
+                "method": str(getattr(request, "method", "POST") or "POST").upper(),
+                "path": "/api/v1/generate",
+                "status_code": 102,
+                "duration_sec": 0,
+                "operation": "api.generate",
+                "model": getattr(request.state, "log_model", None),
+                "model_params": getattr(request.state, "log_model_params", None),
+                "prompt_preview": getattr(request.state, "log_prompt_preview", None),
+                "task_status": "IN_PROGRESS",
+                "task_progress": 0.0,
+            },
+        )
+        return log_id
+
+    def _finalize_async_image_request_log(
+        request: Request,
+        *,
+        started: float,
+        status_code: int,
+        error: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        log_id = str(getattr(request.state, "log_id", "") or "").strip()
+        if not log_id:
+            return
+        request_log_store.upsert(
+            log_id,
+            {
+                "id": log_id,
+                "ts": time.time(),
+                "method": str(getattr(request, "method", "POST") or "POST").upper(),
+                "path": "/api/v1/generate",
+                "status_code": int(status_code),
+                "duration_sec": int(max(0.0, time.time() - float(started))),
+                "operation": "api.generate",
                 "request_id": log_id,
                 "preview_url": getattr(request.state, "log_preview_url", None),
                 "preview_kind": getattr(request.state, "log_preview_kind", None),
@@ -1863,6 +2050,14 @@ def build_generation_router(
                         or "nano-banana-2"
                     ),
                     source_image_ids=source_image_ids,
+                    payload_style=str(
+                        image_model_conf.get("payload_style") or "banana"
+                    ),
+                    generation_metadata=image_model_conf.get("generation_metadata"),
+                    generation_settings=image_model_conf.get("generation_settings"),
+                    model_specific_payload=image_model_conf.get(
+                        "model_specific_payload"
+                    ),
                     timeout=client.generate_timeout,
                     out_path=None if direct_result_url else out_path,
                     progress_cb=_image_progress_cb,

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/admin.css?v=20260302-4" />
+  <link rel="stylesheet" href="/static/admin.css?v=20260422-3" />
 </head>
 <body>
   <div class="bg-orb bg-orb-a"></div>
@@ -42,8 +42,6 @@
             <button id="exportTokensBtn" class="secondary">导出 Token</button>
             <button id="exportCookiesBtn" class="secondary">导出 Cookie</button>
             <button id="deleteTokensBatchBtn" class="danger">批量删除</button>
-            <button id="enableAutoRefreshBatchBtn" class="secondary">开启自动刷新</button>
-            <button id="disableAutoRefreshBatchBtn" class="secondary">关闭自动刷新</button>
             <button id="refreshTokensBatchBtn" class="secondary">刷新 Token</button>
             <button id="refreshCreditsBatchBtn" class="secondary">批量刷新积分</button>
             <button id="refreshBtn" class="secondary">刷新列表</button>
@@ -63,6 +61,8 @@
               <option value="active">生效中</option>
               <option value="disabled">已禁用</option>
               <option value="exhausted">额度耗尽</option>
+              <option value="invalid">已失效</option>
+              <option value="error">请求异常</option>
             </select>
           </label>
           <label>
@@ -75,6 +75,29 @@
           <button id="clearTokenFiltersBtn" class="secondary" type="button">清空筛选</button>
           <button id="selectAllFilteredTokensBtn" class="secondary" type="button">全选当前列表</button>
           <button id="clearTokenSelectionBtn" class="secondary" type="button">取消选择</button>
+        </div>
+        <div id="tokenPagination" class="logs-pagination token-pagination" style="display:none;">
+          <label class="token-page-size">
+            <span>每页</span>
+            <select id="tokenPageSizeSelect" class="input-select" aria-label="每页显示数量">
+              <option value="20">20 / 页</option>
+              <option value="50" selected>50 / 页</option>
+              <option value="100">100 / 页</option>
+              <option value="200">200 / 页</option>
+              <option value="500">500 / 页</option>
+              <option value="1000">1000 / 页</option>
+              <option value="2000">2000 / 页</option>
+            </select>
+          </label>
+          <button id="tokenPrevBtn" class="secondary small" type="button">上一页</button>
+          <span id="tokenPageInfo" class="help">第 1 / 1 页</span>
+          <label class="token-page-jump">
+            <span>跳到</span>
+            <input id="tokenJumpInput" class="input-select" type="number" min="1" value="1" />
+            <span>页</span>
+          </label>
+          <button id="tokenJumpBtn" class="secondary small" type="button">跳转</button>
+          <button id="tokenNextBtn" class="secondary small" type="button">下一页</button>
         </div>
         <div class="table-wrapper">
           <table id="tokenTable">
@@ -97,17 +120,6 @@
               </tr>
             </tbody>
           </table>
-        </div>
-        <div id="tokenPagination" class="logs-pagination" style="display:none;">
-          <button id="tokenPrevBtn" class="secondary small" type="button">上一页</button>
-          <span id="tokenPageInfo" class="help">第 1 / 1 页</span>
-          <label class="token-page-jump">
-            <span>跳到</span>
-            <input id="tokenJumpInput" class="input-select" type="number" min="1" value="1" />
-            <span>页</span>
-          </label>
-          <button id="tokenJumpBtn" class="secondary small" type="button">跳转</button>
-          <button id="tokenNextBtn" class="secondary small" type="button">下一页</button>
         </div>
       </section>
     </div>
@@ -337,11 +349,9 @@
             <input id="logsFailedOnly" type="checkbox" />
             <span>只看失败</span>
           </label>
-          <label for="logsMediaKind" class="help">筛选类型</label>
-          <select id="logsMediaKind" class="input-select" aria-label="日志类型筛选">
-            <option value="">全部类型</option>
-            <option value="image">图片</option>
-            <option value="video">视频</option>
+          <label for="logsFailedAccount" class="help">失败账号</label>
+          <select id="logsFailedAccount" class="input-select" aria-label="失败账号筛选">
+            <option value="">全部账号</option>
           </select>
           <button id="clearLogFiltersBtn" class="secondary small" type="button">清空筛选</button>
         </div>
@@ -438,7 +448,7 @@
         <div class="actions">
           <button id="importCookieBtn" class="secondary">导入 Cookie</button>
         </div>
-        <div id="refreshMsg" class="msg"></div>
+        <span id="refreshMsg" class="msg"></span>
       </div>
     </div>
   </div>
@@ -475,6 +485,6 @@
 
   <div id="appToast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="/static/admin.js?v=20260302-7"></script>
+  <script src="/static/admin.js?v=20260422-3"></script>
 </body>
 </html>

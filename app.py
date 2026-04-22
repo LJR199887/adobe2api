@@ -525,6 +525,7 @@ async def request_logger(request: Request, call_next):
         "/v1/chat/completions": "chat.completions",
         "/v1/images/generations": "images.generations",
         "/v1/video/generations": "video.generations",
+        "/api/v1/generate": "api.generate",
     }
     operation = op_map.get(path, "")
     should_log = bool(operation)

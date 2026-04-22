@@ -6,6 +6,7 @@ English README: `README_EN.md`
 当前设计：
 - 对外统一入口：`/v1/chat/completions`（图像 + 视频）
 - 图像专用入口：`/v1/images/generations`
+- 图像异步入口：`/api/v1/generate`
 - 支持多账号 Token 池、自动刷新、管理后台、请求日志与任务进度查询
 
 ## 1. 部署方式
@@ -46,6 +47,7 @@ docker compose up -d --build
 - `nano-banana`（图像，对应上游 `nano-banana-2`）
 - `nano-banana2`（图像，对应上游 `nano-banana-3`）
 - `nano-banana-pro`（图像）
+- `gpt-image2`（图像，对应上游 `gpt-image` / `modelVersion=2`）
 - `sora2`（视频）
 - `sora2-pro`（视频）
 - `veo31`（视频）
@@ -54,6 +56,7 @@ docker compose up -d --build
 
 说明：
 - `nano-banana`、`nano-banana2`、`nano-banana-pro` 现在都统一通过 `output_resolution` 选择 `1K` / `2K` / `4K`
+- `gpt-image2` 固定使用 `1K` 输出，可通过 `aspect_ratio` 选择比例
 - 旧的 `nano-banana-4k`、`nano-banana2-4k`、`nano-banana-pro-4k` 仍保留兼容，但不会继续在 `/v1/models` 中单独展示
 - 视频模型继续通过请求参数单独传 `duration`、`aspect_ratio`、`resolution`、`reference_mode`
 
@@ -86,10 +89,24 @@ Nano Banana Pro：
   - `model=nano-banana-pro, output_resolution=1K, aspect_ratio=1:1`
   - `model=nano-banana-pro, output_resolution=4K, aspect_ratio=16:9`
 
-### 3.2 Banana 图像尺寸映射规则
+GPT Image2：
+- 命名：`model=gpt-image2`
+- 分辨率：固定 `output_resolution=1K`
+- 比例：`aspect_ratio=1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3`
+- 常用竖版攻略图：`model=gpt-image2, output_resolution=1K, aspect_ratio=2:3`
+- 文生图、图生图、多图参考图都走同一套 `aspect_ratio -> size` 映射
+- 图生图 / 多图参考图上游请求形态为：顶层 `size` + `referenceBlobs[*].usage=subject` + 空 `modelSpecificPayload`
+- 多图参考图最多支持 6 张输入图
+- 支持同步接口 `/v1/images/generations`、`/v1/chat/completions`，也支持异步接口 `/api/v1/generate`
 
-这类模型最终不会直接使用你传入的像素宽高，而是根据 `output_resolution + aspect_ratio` 自动换算成固定尺寸。  
+### 3.2 图像尺寸映射规则
+
+图像模型最终不会直接使用你传入的像素宽高，而是根据 `output_resolution + aspect_ratio` 自动换算成固定尺寸。
 如果没有传 `aspect_ratio`，但传了 `size`，服务会先根据 `size` 自动反推比例，再套用下表。
+
+对 `gpt-image2` 来说：
+- 文生图、图生图、多图参考图都会使用下表换算出的顶层 `size`
+- 图生图不会再使用 `modelSpecificPayload.size=auto`
 
 `1K`
 - `1:1` -> `1024 x 1024`
@@ -97,6 +114,8 @@ Nano Banana Pro：
 - `9:16` -> `768 x 1360`
 - `4:3` -> `1152 x 864`
 - `3:4` -> `864 x 1152`
+- `3:2` -> `1536 x 1024`
+- `2:3` -> `1024 x 1536`
 
 `2K`
 - `1:1` -> `2048 x 2048`
@@ -174,7 +193,66 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   }'
 ```
 
-图生图：
+GPT Image2 文生图：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "messages": [{"role":"user","content":"生成一张广州旅游攻略图"}]
+  }'
+```
+
+GPT Image2 图生图（单图参考）：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "16:9",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"科幻风"},
+        {"type":"image_url","image_url":{"url":"https://example.com/input.png"}}
+      ]
+    }]
+  }'
+```
+
+GPT Image2 多图参考图：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"6张图片合在一起"},
+        {"type":"image_url","image_url":{"url":"https://example.com/1.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/2.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/3.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/4.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/5.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/6.png"}}
+      ]
+    }]
+  }'
+```
+
+其他图生图：
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
@@ -232,17 +310,118 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
 
 ### 3.6 图像接口：`/v1/images/generations`
 
+GPT Image2 文生图：
+
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "nano-banana-pro",
-    "output_resolution": "4K",
-    "aspect_ratio": "16:9",
-    "prompt": "futuristic city skyline at dusk"
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "生成一张广州旅游攻略图"
   }'
 ```
+
+### 3.7 异步图像接口：`/api/v1/generate`
+
+GPT Image2 文生图提交任务：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "生成一张广州旅游攻略图"
+  }'
+```
+
+GPT Image2 图生图提交任务：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "16:9",
+    "prompt": "科幻风",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"科幻风"},
+        {"type":"image_url","image_url":{"url":"https://example.com/input.png"}}
+      ]
+    }]
+  }'
+```
+
+GPT Image2 多图参考图提交任务：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "6张图片合在一起",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"6张图片合在一起"},
+        {"type":"image_url","image_url":{"url":"https://example.com/1.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/2.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/3.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/4.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/5.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/6.png"}}
+      ]
+    }]
+  }'
+```
+
+返回示例：
+
+```json
+{
+  "task_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "status": "pending"
+}
+```
+
+查询任务：
+
+```bash
+curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
+  -H "Authorization: Bearer <service_api_key>"
+```
+
+任务完成后返回内容中会包含 `status=succeeded`、`progress=100` 和 `image_url`。
+
+### 3.8 上游请求对齐更新（2026-04-22）
+
+为对齐 Adobe Firefly 当前可用的上游请求形状，并减少
+`422 Invalid Usage for Image Generation`，图像提交逻辑已更新：
+
+- `nano-banana` / `nano-banana2` / `nano-banana-pro` 不再发送 `skipCai`。
+- Banana 系列默认 `generationMetadata` 现在包含：
+  - `module: text2image`
+  - `submodule: ff-image-generate`
+- Banana 系列默认 `modelSpecificPayload` 调整为：
+  - `parameters.addWatermark: false`
+  - 不再强制发送默认 `aspectRatio`
+- 当模型配置传入 `model_specific_payload.parameters` 时，会与默认参数合并。
+- `gpt-image2` 图生图（有参考图）时不再发送 `size`，改为 `modelSpecificPayload.size=auto`。
+- 上游提交请求头 `sec-fetch-site` 改为 `cross-site`（与浏览器请求对齐）。
+
+以上为内部上游对齐改动；对外 API 入参不变（`model`、`prompt`、`output_resolution`、`aspect_ratio` 等保持不变）。
 
 ## 4. Cookie 导入
 

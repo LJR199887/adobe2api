@@ -64,11 +64,12 @@ def build_payload_candidates(prompt: str):
         "seeds": [134648],
         "referenceBlobs": [],
         "groundSearch": False,
-        "skipCai": False,
         "output": {"storeInputs": True},
-        "generationMetadata": {"module": "text2image"},
+        "generationMetadata": {
+            "module": "text2image",
+            "submodule": "ff-image-generate",
+        },
         "modelSpecificPayload": {
-            "aspectRatio": "16:9",
             "parameters": {"addWatermark": False},
         },
     }

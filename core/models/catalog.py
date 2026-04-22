@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-SUPPORTED_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4"}
+SUPPORTED_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"}
 RATIO_SUFFIX_MAP = {
     "1:1": "1x1",
     "16:9": "16x9",
     "9:16": "9x16",
     "4:3": "4x3",
     "3:4": "3x4",
+    "3:2": "3x2",
+    "2:3": "2x3",
 }
 
 MODEL_CATALOG: dict[str, dict] = {}
@@ -19,30 +21,45 @@ def _register_image_model(
     upstream_model_version: str,
     family_label: str,
     fixed_output_resolution: str | None = None,
+    aspect_ratio: str = "16:9",
+    aspect_ratio_options: list[str] | None = None,
+    payload_style: str = "banana",
+    generation_metadata: dict | None = None,
+    generation_settings: dict | None = None,
+    model_specific_payload: dict | None = None,
 ) -> None:
     resolution_options = (
         [fixed_output_resolution]
         if fixed_output_resolution
         else ["1K", "2K", "4K"]
     )
+    ratio_options = aspect_ratio_options or ["1:1", "16:9", "9:16", "4:3", "3:4"]
     MODEL_CATALOG[model_id] = {
         "upstream_model": "google:firefly:colligo:nano-banana-pro",
         "upstream_model_id": upstream_model_id,
         "upstream_model_version": upstream_model_version,
         "output_resolution": fixed_output_resolution or "2K",
         "output_resolution_options": resolution_options,
-        "aspect_ratio": "16:9",
-        "aspect_ratio_options": ["1:1", "16:9", "9:16", "4:3", "3:4"],
+        "aspect_ratio": aspect_ratio,
+        "aspect_ratio_options": ratio_options,
         "description": (
             f"{family_label} 4K image model (set aspect_ratio in request)"
             if fixed_output_resolution == "4K"
             else f"{family_label} image model (set output_resolution/aspect_ratio in request)"
         ),
         "allow_request_overrides": True,
+        "payload_style": payload_style,
     }
+    if generation_metadata is not None:
+        MODEL_CATALOG[model_id]["generation_metadata"] = generation_metadata
+    if generation_settings is not None:
+        MODEL_CATALOG[model_id]["generation_settings"] = generation_settings
+    if model_specific_payload is not None:
+        MODEL_CATALOG[model_id]["model_specific_payload"] = model_specific_payload
 
-    for res in ("1k", "2k", "4k"):
-        for ratio, suffix in RATIO_SUFFIX_MAP.items():
+    for res in [item.lower() for item in resolution_options]:
+        for ratio in ratio_options:
+            suffix = RATIO_SUFFIX_MAP[ratio]
             for alias_id in (f"{model_id}-{res}-{suffix}", f"firefly-{model_id}-{res}-{suffix}"):
                 MODEL_CATALOG[alias_id] = {
                     "upstream_model": "google:firefly:colligo:nano-banana-pro",
@@ -54,7 +71,14 @@ def _register_image_model(
                     "canonical_model": model_id,
                     "hidden": True,
                     "allow_request_overrides": False,
+                    "payload_style": payload_style,
                 }
+                if generation_metadata is not None:
+                    MODEL_CATALOG[alias_id]["generation_metadata"] = generation_metadata
+                if generation_settings is not None:
+                    MODEL_CATALOG[alias_id]["generation_settings"] = generation_settings
+                if model_specific_payload is not None:
+                    MODEL_CATALOG[alias_id]["model_specific_payload"] = model_specific_payload
 
 
 def _register_image_family_alias(alias_id: str, canonical_model: str) -> None:
@@ -102,6 +126,19 @@ _register_image_model(
     upstream_model_id="gemini-flash",
     upstream_model_version="nano-banana-3",
     family_label="Nano Banana 2",
+)
+_register_image_model(
+    "gpt-image2",
+    upstream_model_id="gpt-image",
+    upstream_model_version="2",
+    family_label="GPT Image2",
+    fixed_output_resolution="1K",
+    aspect_ratio="2:3",
+    aspect_ratio_options=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
+    payload_style="gpt_image2",
+    generation_metadata={"module": "text2image", "submodule": "ff-image-generate"},
+    generation_settings={"detailLevel": 1},
+    model_specific_payload={},
 )
 
 for canonical_id in (

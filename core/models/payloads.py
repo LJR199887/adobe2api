@@ -52,31 +52,47 @@ def build_image_payload_candidates(
     generation_settings: Optional[dict] = None,
     model_specific_payload: Optional[dict] = None,
 ) -> list[dict]:
+    def _merge_model_specific_payload(default_payload: dict) -> dict:
+        merged = dict(default_payload)
+        extra = dict(model_specific_payload or {})
+        extra_parameters = extra.pop("parameters", None)
+        merged.update(extra)
+        if isinstance(extra_parameters, dict):
+            parameters = dict(merged.get("parameters") or {})
+            parameters.update(extra_parameters)
+            merged["parameters"] = parameters
+        return merged
+
     if payload_style == "gpt_image2":
         metadata = dict(
             generation_metadata
             or {"module": "text2image", "submodule": "ff-image-generate"}
         )
-        if source_image_ids:
-            metadata["module"] = "image2image"
         payload = {
             "modelId": upstream_model_id,
             "modelVersion": upstream_model_version,
             "n": 1,
             "prompt": prompt,
-            "size": size_from_ratio(aspect_ratio, output_resolution),
             "seeds": [int(time.time()) % 999999],
-            "referenceBlobs": [
-                {"id": img_id, "usage": "general"} for img_id in (source_image_ids or [])
-            ],
+            "referenceBlobs": [],
             "output": {"storeInputs": True},
             "modelSpecificPayload": dict(model_specific_payload or {}),
             "generationMetadata": metadata,
         }
+        if source_image_ids:
+            payload["referenceBlobs"] = [
+                {"id": img_id, "usage": "subject"} for img_id in source_image_ids
+            ]
+            payload["modelSpecificPayload"].setdefault("size", "auto")
+        else:
+            payload["size"] = size_from_ratio(aspect_ratio, output_resolution)
         if generation_settings:
             payload["generationSettings"] = dict(generation_settings)
         return [payload]
 
+    metadata = dict(
+        generation_metadata or {"module": "text2image", "submodule": "ff-image-generate"}
+    )
     base_payload = {
         "modelId": upstream_model_id,
         "modelVersion": upstream_model_version,
@@ -85,14 +101,14 @@ def build_image_payload_candidates(
         "size": size_from_ratio(aspect_ratio, output_resolution),
         "seeds": [int(time.time()) % 999999],
         "groundSearch": False,
-        "skipCai": False,
         "output": {"storeInputs": True},
-        "generationMetadata": {"module": "text2image"},
-        "modelSpecificPayload": {
-            "aspectRatio": aspect_ratio,
-            "parameters": {"addWatermark": False},
-        },
+        "generationMetadata": metadata,
+        "modelSpecificPayload": _merge_model_specific_payload(
+            {"parameters": {"addWatermark": False}}
+        ),
     }
+    if generation_settings:
+        base_payload["generationSettings"] = dict(generation_settings)
 
     if not source_image_ids:
         base_payload["referenceBlobs"] = []
@@ -100,7 +116,9 @@ def build_image_payload_candidates(
 
     candidates: list[dict] = []
     edited = dict(base_payload)
-    edited["generationMetadata"] = {"module": "image2image"}
+    edited_metadata = dict(metadata)
+    edited_metadata["module"] = "image2image"
+    edited["generationMetadata"] = edited_metadata
 
     c1 = dict(edited)
     c1["referenceBlobs"] = [

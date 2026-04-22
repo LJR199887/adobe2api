@@ -513,6 +513,10 @@ class AdobeClient:
         upstream_model_id: str,
         upstream_model_version: str,
         source_image_ids: Optional[list[str]] = None,
+        payload_style: str = "banana",
+        generation_metadata: Optional[dict] = None,
+        generation_settings: Optional[dict] = None,
+        model_specific_payload: Optional[dict] = None,
     ) -> list[dict]:
         return build_image_payload_candidates(
             prompt=prompt,
@@ -521,6 +525,10 @@ class AdobeClient:
             upstream_model_id=upstream_model_id,
             upstream_model_version=upstream_model_version,
             source_image_ids=source_image_ids,
+            payload_style=payload_style,
+            generation_metadata=generation_metadata,
+            generation_settings=generation_settings,
+            model_specific_payload=model_specific_payload,
         )
 
     @staticmethod
@@ -1127,6 +1135,10 @@ class AdobeClient:
         upstream_model_id: str = "gemini-flash",
         upstream_model_version: str = "nano-banana-2",
         source_image_ids: Optional[list[str]] = None,
+        payload_style: str = "banana",
+        generation_metadata: Optional[dict] = None,
+        generation_settings: Optional[dict] = None,
+        model_specific_payload: Optional[dict] = None,
         timeout: int = 180,
         out_path: Optional[Path] = None,
         progress_cb: Optional[Callable[[dict], None]] = None,
@@ -1141,6 +1153,10 @@ class AdobeClient:
             upstream_model_id=upstream_model_id,
             upstream_model_version=upstream_model_version,
             source_image_ids=source_image_ids,
+            payload_style=payload_style,
+            generation_metadata=generation_metadata,
+            generation_settings=generation_settings,
+            model_specific_payload=model_specific_payload,
         ):
             submit_resp = self._post_json(
                 self.submit_url, headers=self._submit_headers(token), payload=payload

@@ -6,6 +6,7 @@ English README: `README_EN.md`
 当前设计：
 - 对外统一入口：`/v1/chat/completions`（图像 + 视频）
 - 图像专用入口：`/v1/images/generations`
+- 图像异步入口：`/api/v1/generate`
 - 支持多账号 Token 池、自动刷新、管理后台、请求日志与任务进度查询
 
 ## 1. 部署方式
@@ -46,6 +47,7 @@ docker compose up -d --build
 - `nano-banana`（图像，对应上游 `nano-banana-2`）
 - `nano-banana2`（图像，对应上游 `nano-banana-3`）
 - `nano-banana-pro`（图像）
+- `gpt-image2`（图像，对应上游 `gpt-image` / `modelVersion=2`）
 - `sora2`（视频）
 - `sora2-pro`（视频）
 - `veo31`（视频）
@@ -54,6 +56,7 @@ docker compose up -d --build
 
 说明：
 - `nano-banana`、`nano-banana2`、`nano-banana-pro` 现在都统一通过 `output_resolution` 选择 `1K` / `2K` / `4K`
+- `gpt-image2` 固定使用 `1K` 输出，可通过 `aspect_ratio` 选择比例
 - 旧的 `nano-banana-4k`、`nano-banana2-4k`、`nano-banana-pro-4k` 仍保留兼容，但不会继续在 `/v1/models` 中单独展示
 - 视频模型继续通过请求参数单独传 `duration`、`aspect_ratio`、`resolution`、`reference_mode`
 
@@ -85,6 +88,13 @@ Nano Banana Pro：
   - `model=nano-banana-pro, output_resolution=2K, aspect_ratio=16:9`
   - `model=nano-banana-pro, output_resolution=1K, aspect_ratio=1:1`
   - `model=nano-banana-pro, output_resolution=4K, aspect_ratio=16:9`
+
+GPT Image2：
+- 命名：`model=gpt-image2`
+- 分辨率：固定 `output_resolution=1K`
+- 比例：`aspect_ratio=1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3`
+- 常用竖版攻略图：`model=gpt-image2, output_resolution=1K, aspect_ratio=2:3`
+- 支持同步接口 `/v1/images/generations`、`/v1/chat/completions`，也支持异步接口 `/api/v1/generate`
 
 ### 3.2 Banana 图像尺寸映射规则
 
@@ -174,6 +184,20 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   }'
 ```
 
+GPT Image2 文生图：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "messages": [{"role":"user","content":"生成一张广州旅游攻略图"}]
+  }'
+```
+
 图生图：
 
 ```bash
@@ -237,12 +261,46 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "nano-banana-pro",
-    "output_resolution": "4K",
-    "aspect_ratio": "16:9",
-    "prompt": "futuristic city skyline at dusk"
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "生成一张广州旅游攻略图"
   }'
 ```
+
+### 3.7 异步图像接口：`/api/v1/generate`
+
+提交任务：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "生成一张广州旅游攻略图"
+  }'
+```
+
+返回示例：
+
+```json
+{
+  "task_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "status": "pending"
+}
+```
+
+查询任务：
+
+```bash
+curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
+  -H "Authorization: Bearer <service_api_key>"
+```
+
+任务完成后返回内容中会包含 `status=succeeded`、`progress=100` 和 `image_url`。
 
 ## 4. Cookie 导入
 

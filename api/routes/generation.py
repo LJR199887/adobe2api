@@ -429,6 +429,10 @@ def build_generation_router(
                     upstream_model_version=str(
                         model_conf.get("upstream_model_version") or "nano-banana-2"
                     ),
+                    payload_style=str(model_conf.get("payload_style") or "banana"),
+                    generation_metadata=model_conf.get("generation_metadata"),
+                    generation_settings=model_conf.get("generation_settings"),
+                    model_specific_payload=model_conf.get("model_specific_payload"),
                     source_image_ids=source_image_ids,
                     timeout=client.generate_timeout,
                     out_path=None if direct_result_url else out_path,
@@ -689,6 +693,10 @@ def build_generation_router(
                         upstream_model_version=str(
                             model_conf.get("upstream_model_version") or "nano-banana-2"
                         ),
+                        payload_style=str(model_conf.get("payload_style") or "banana"),
+                        generation_metadata=model_conf.get("generation_metadata"),
+                        generation_settings=model_conf.get("generation_settings"),
+                        model_specific_payload=model_conf.get("model_specific_payload"),
                         out_path=None if direct_result_url else out_path,
                         return_upstream_url=direct_result_url,
                     )
@@ -1863,6 +1871,14 @@ def build_generation_router(
                         or "nano-banana-2"
                     ),
                     source_image_ids=source_image_ids,
+                    payload_style=str(
+                        image_model_conf.get("payload_style") or "banana"
+                    ),
+                    generation_metadata=image_model_conf.get("generation_metadata"),
+                    generation_settings=image_model_conf.get("generation_settings"),
+                    model_specific_payload=image_model_conf.get(
+                        "model_specific_payload"
+                    ),
                     timeout=client.generate_timeout,
                     out_path=None if direct_result_url else out_path,
                     progress_cb=_image_progress_cb,

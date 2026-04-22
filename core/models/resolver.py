@@ -26,6 +26,8 @@ def ratio_from_size(size: str) -> str:
         "2752x1536": "16:9",
         "2048x1536": "4:3",
         "1536x2048": "3:4",
+        "1536x1024": "3:2",
+        "1024x1536": "2:3",
     }
     return mapping.get(str(size or "").strip(), "1:1")
 
@@ -62,7 +64,12 @@ def resolve_ratio_and_resolution(
     ratio = str(data.get("aspect_ratio") or "").strip() or ratio_from_size(
         data.get("size", "1024x1024")
     )
-    if ratio not in SUPPORTED_RATIOS:
+    allowed_ratios = [
+        str(item).strip()
+        for item in (model_conf.get("aspect_ratio_options") or [])
+        if str(item).strip()
+    ]
+    if ratio not in SUPPORTED_RATIOS or (allowed_ratios and ratio not in allowed_ratios):
         ratio = str(model_conf.get("aspect_ratio") or "1:1").strip()
 
     output_resolution = _normalize_output_resolution(

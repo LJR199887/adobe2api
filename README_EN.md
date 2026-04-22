@@ -19,6 +19,7 @@ Current design:
 
 - External unified entry: `/v1/chat/completions` (image + video)
 - Optional image-only endpoint: `/v1/images/generations`
+- Async image endpoint: `/api/v1/generate`
 - Token pool management (manual token + auto-refresh token)
 - Admin web UI: token/config/logs/refresh profile import
 
@@ -71,6 +72,7 @@ Current supported model families are:
 - `firefly-nano-banana` (image, maps to upstream `nano-banana-2`)
 - `firefly-nano-banana2` (image, maps to upstream `nano-banana-3`)
 - `firefly-nano-banana-pro` (image)
+- `gpt-image2` (image, maps to upstream `gpt-image` / `modelVersion=2`)
 - `firefly-sora2` (video)
 - `firefly-sora2-pro` (video)
 - `firefly-veo31` (video)
@@ -103,6 +105,14 @@ Nano Banana Pro image models (legacy-compatible):
 - Examples:
   - `model=firefly-nano-banana-pro, output_resolution=2K, aspect_ratio=16:9`
   - `model=firefly-nano-banana-pro, output_resolution=4K, aspect_ratio=1:1`
+
+GPT Image2 image model:
+
+- Pattern: `model=gpt-image2` with separate request fields
+- Resolution: fixed `output_resolution=1K`
+- Ratio: pass `aspect_ratio` as `1:1` / `16:9` / `9:16` / `4:3` / `3:4` / `3:2` / `2:3`
+- Common portrait poster: `model=gpt-image2, output_resolution=1K, aspect_ratio=2:3`
+- Supports synchronous `/v1/images/generations` and `/v1/chat/completions`, plus async `/api/v1/generate`
 
 Sora2 video models:
 
@@ -184,6 +194,20 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
     "output_resolution": "2K",
     "aspect_ratio": "16:9",
     "messages": [{"role":"user","content":"a cinematic mountain sunrise"}]
+  }'
+```
+
+GPT Image2 text-to-image:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "messages": [{"role":"user","content":"Create a Guangzhou travel guide poster"}]
   }'
 ```
 
@@ -285,12 +309,46 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-nano-banana-pro",
-    "output_resolution": "4K",
-    "aspect_ratio": "16:9",
-    "prompt": "futuristic city skyline at dusk"
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "Create a Guangzhou travel guide poster"
   }'
 ```
+
+### 3.4 Async image endpoint: `/api/v1/generate`
+
+Submit a task:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "Create a Guangzhou travel guide poster"
+  }'
+```
+
+Example response:
+
+```json
+{
+  "task_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "status": "pending"
+}
+```
+
+Poll the task:
+
+```bash
+curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
+  -H "Authorization: Bearer <service_api_key>"
+```
+
+When the task completes, the response includes `status=succeeded`, `progress=100`, and `image_url`.
 
 ## 4) Cookie Import
 

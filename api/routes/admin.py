@@ -765,6 +765,11 @@ def build_admin_router(
                 item["auto_refresh_enabled"] = None
                 continue
             pid = str(item.get("refresh_profile_id") or "").strip()
+            if str(item.get("status") or "").strip().lower() == "exhausted" and pid:
+                try:
+                    refresh_manager.set_enabled(pid, False)
+                except Exception:
+                    pass
             item["auto_refresh_enabled"] = refresh_manager.is_profile_enabled(pid)
         return {
             "tokens": tokens,

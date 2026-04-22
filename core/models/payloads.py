@@ -57,22 +57,24 @@ def build_image_payload_candidates(
             generation_metadata
             or {"module": "text2image", "submodule": "ff-image-generate"}
         )
-        if source_image_ids:
-            metadata["module"] = "image2image"
         payload = {
             "modelId": upstream_model_id,
             "modelVersion": upstream_model_version,
             "n": 1,
             "prompt": prompt,
-            "size": size_from_ratio(aspect_ratio, output_resolution),
             "seeds": [int(time.time()) % 999999],
-            "referenceBlobs": [
-                {"id": img_id, "usage": "general"} for img_id in (source_image_ids or [])
-            ],
+            "referenceBlobs": [],
             "output": {"storeInputs": True},
             "modelSpecificPayload": dict(model_specific_payload or {}),
             "generationMetadata": metadata,
         }
+        if source_image_ids:
+            payload["referenceBlobs"] = [
+                {"id": img_id, "usage": "subject"} for img_id in source_image_ids
+            ]
+            payload["modelSpecificPayload"].setdefault("size", "auto")
+        else:
+            payload["size"] = size_from_ratio(aspect_ratio, output_resolution)
         if generation_settings:
             payload["generationSettings"] = dict(generation_settings)
         return [payload]

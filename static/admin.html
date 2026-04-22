@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/admin.css?v=20260413-1" />
+  <link rel="stylesheet" href="/static/admin.css?v=20260422-1" />
 </head>
 <body>
   <div class="bg-orb bg-orb-a"></div>
@@ -50,6 +50,31 @@
         <div id="tokenSummary" class="token-summary">
           <span>Token 总数：<strong id="tokenTotalCount">0</strong></span>
           <span>当前生效：<strong id="tokenActiveCount">0</strong></span>
+          <span>筛选结果：<strong id="tokenFilteredCount">0</strong></span>
+          <span>已选择：<strong id="tokenSelectedCount">0</strong></span>
+        </div>
+        <div class="token-filters">
+          <label>
+            <span>状态</span>
+            <select id="tokenStatusFilter" class="input-select">
+              <option value="">全部状态</option>
+              <option value="active">生效中</option>
+              <option value="disabled">已禁用</option>
+              <option value="exhausted">额度耗尽</option>
+              <option value="invalid">已失效</option>
+              <option value="error">请求异常</option>
+            </select>
+          </label>
+          <label>
+            <span>积分</span>
+            <select id="tokenCreditsFilter" class="input-select">
+              <option value="">全部积分</option>
+              <option value="error">积分刷新异常</option>
+            </select>
+          </label>
+          <button id="clearTokenFiltersBtn" class="secondary" type="button">清空筛选</button>
+          <button id="selectAllFilteredTokensBtn" class="secondary" type="button">全选当前列表</button>
+          <button id="clearTokenSelectionBtn" class="secondary" type="button">取消选择</button>
         </div>
         <div id="tokenPagination" class="logs-pagination token-pagination" style="display:none;">
           <label class="token-page-size">
@@ -460,6 +485,6 @@
 
   <div id="appToast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="/static/admin.js?v=20260413-1"></script>
+  <script src="/static/admin.js?v=20260422-1"></script>
 </body>
 </html>

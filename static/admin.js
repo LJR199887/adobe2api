@@ -73,6 +73,13 @@
   const tbody = document.querySelector("#tokenTable tbody");
   const tokenTotalCount = document.getElementById("tokenTotalCount");
   const tokenActiveCount = document.getElementById("tokenActiveCount");
+  const tokenFilteredCount = document.getElementById("tokenFilteredCount");
+  const tokenSelectedCount = document.getElementById("tokenSelectedCount");
+  const tokenStatusFilter = document.getElementById("tokenStatusFilter");
+  const tokenCreditsFilter = document.getElementById("tokenCreditsFilter");
+  const clearTokenFiltersBtn = document.getElementById("clearTokenFiltersBtn");
+  const selectAllFilteredTokensBtn = document.getElementById("selectAllFilteredTokensBtn");
+  const clearTokenSelectionBtn = document.getElementById("clearTokenSelectionBtn");
   const tokenPagination = document.getElementById("tokenPagination");
   const tokenPrevBtn = document.getElementById("tokenPrevBtn");
   const tokenNextBtn = document.getElementById("tokenNextBtn");
@@ -83,6 +90,8 @@
   const tokenSelectedIds = new Set();
   let logsAutoTimer = null;
   let latestTokens = [];
+  let latestFilteredTokens = [];
+  let latestTokenSummary = null;
   const TOKEN_PAGE_SIZE_OPTIONS = [20, 50, 100, 200, 500, 1000, 2000];
   const TOKEN_PAGE_SIZE_STORAGE_KEY = "adobe2api.tokenPageSize";
   function readTokenPageSize() {
@@ -105,6 +114,39 @@
     "disabled": "已禁用"
   };
 
+  function getTokenFilters() {
+    return {
+      status: String(tokenStatusFilter?.value || "").trim().toLowerCase(),
+      credits: String(tokenCreditsFilter?.value || "").trim().toLowerCase(),
+    };
+  }
+
+  function tokenMatchesFilters(token, filters = getTokenFilters()) {
+    const status = String(token?.status || "").trim().toLowerCase();
+    if (filters.status && status !== filters.status) return false;
+
+    if (filters.credits === "error") {
+      const creditsError = String(token?.credits_error || "").trim();
+      return Boolean(creditsError);
+    }
+
+    return true;
+  }
+
+  function getFilteredTokens(tokens = latestTokens) {
+    const list = Array.isArray(tokens) ? tokens : [];
+    const filters = getTokenFilters();
+    return list.filter((token) => tokenMatchesFilters(token, filters));
+  }
+
+  function resetTokenFilters() {
+    if (tokenStatusFilter) tokenStatusFilter.value = "";
+    if (tokenCreditsFilter) tokenCreditsFilter.value = "";
+    tokenCurrentPage = 1;
+    tokenSelectedIds.clear();
+    renderTable(latestTokens, latestTokenSummary);
+  }
+
   async function loadTokens() {
     try {
       const res = await fetch("/api/v1/tokens");
@@ -114,16 +156,21 @@
         : Array.isArray(data?.items)
           ? data.items
           : [];
-      renderTable(tokens, data?.summary || null);
+      latestTokenSummary = data?.summary || null;
+      renderTable(tokens, latestTokenSummary);
     } catch (err) {
       console.error(err);
+      latestTokens = [];
+      latestFilteredTokens = [];
+      latestTokenSummary = null;
+      tokenSelectedIds.clear();
       renderTokenSummary([]);
       renderTokenPagination(0);
       tbody.innerHTML = `<tr><td colspan="9" class="empty-state" style="color: #ffb4bc;">加载失败</td></tr>`;
     }
   }
 
-  function getCurrentPageTokens(tokens = latestTokens) {
+  function getCurrentPageTokens(tokens = latestFilteredTokens) {
     const list = Array.isArray(tokens) ? tokens : [];
     const start = (tokenCurrentPage - 1) * tokenPageSize;
     return list.slice(start, start + tokenPageSize);
@@ -137,6 +184,19 @@
     const active = Number.isFinite(Number(summary?.active)) ? Number(summary.active) : fallbackActive;
     if (tokenTotalCount) tokenTotalCount.textContent = String(total);
     if (tokenActiveCount) tokenActiveCount.textContent = String(active);
+    if (tokenFilteredCount) tokenFilteredCount.textContent = String(latestFilteredTokens.length);
+    updateTokenSelectionSummary();
+  }
+
+  function updateTokenSelectionSummary() {
+    const selectedCount = tokenSelectedIds.size;
+    if (tokenSelectedCount) tokenSelectedCount.textContent = String(selectedCount);
+    if (clearTokenSelectionBtn) clearTokenSelectionBtn.disabled = selectedCount <= 0;
+    if (refreshTokensBatchBtn) refreshTokensBatchBtn.disabled = selectedCount <= 0;
+    if (selectAllFilteredTokensBtn) {
+      const filteredCount = Array.isArray(latestFilteredTokens) ? latestFilteredTokens.length : 0;
+      selectAllFilteredTokensBtn.disabled = filteredCount <= 0 || selectedCount >= filteredCount;
+    }
   }
 
   function renderTokenPagination(totalCount) {
@@ -166,10 +226,12 @@
     if (total === 0) {
       tokenSelectAll.indeterminate = false;
       tokenSelectAll.checked = false;
+      updateTokenSelectionSummary();
       return;
     }
     tokenSelectAll.indeterminate = selectedCount > 0 && selectedCount < total;
     tokenSelectAll.checked = total > 0 && selectedCount === total;
+    updateTokenSelectionSummary();
   }
 
   function openDialog(modalEl) {
@@ -222,17 +284,22 @@
 
   function renderTable(tokens, summary = null) {
     latestTokens = Array.isArray(tokens) ? tokens : [];
+    latestTokenSummary = summary;
+    latestFilteredTokens = getFilteredTokens(latestTokens);
     renderTokenSummary(latestTokens, summary);
-    const availableIds = new Set(latestTokens.map((t) => String(t.id || "")).filter(Boolean));
+    const availableIds = new Set(latestFilteredTokens.map((t) => String(t.id || "")).filter(Boolean));
     Array.from(tokenSelectedIds).forEach((id) => {
       if (!availableIds.has(id)) tokenSelectedIds.delete(id);
     });
 
-    renderTokenPagination(latestTokens.length);
+    renderTokenPagination(latestFilteredTokens.length);
     const pageTokens = getCurrentPageTokens();
 
-    if (!latestTokens.length) {
-      tbody.innerHTML = `<tr><td colspan="9" class="empty-state">当前没有可用的 Token，请在上方添加。</td></tr>`;
+    if (!latestFilteredTokens.length) {
+      const emptyText = latestTokens.length
+        ? "当前筛选条件下没有 Token。"
+        : "当前没有可用的 Token，请在上方添加。";
+      tbody.innerHTML = `<tr><td colspan="9" class="empty-state">${emptyText}</td></tr>`;
       syncTokenSelectAllState();
       return;
     }
@@ -359,6 +426,36 @@
       showToast("Token 列表刷新失败", true);
     }
   });
+
+  [tokenStatusFilter, tokenCreditsFilter].forEach((filterEl) => {
+    if (!filterEl) return;
+    filterEl.addEventListener("change", () => {
+      tokenCurrentPage = 1;
+      tokenSelectedIds.clear();
+      renderTable(latestTokens, latestTokenSummary);
+    });
+  });
+
+  if (clearTokenFiltersBtn) {
+    clearTokenFiltersBtn.addEventListener("click", resetTokenFilters);
+  }
+
+  if (selectAllFilteredTokensBtn) {
+    selectAllFilteredTokensBtn.addEventListener("click", () => {
+      latestFilteredTokens.forEach((token) => {
+        const tid = String(token?.id || "").trim();
+        if (tid) tokenSelectedIds.add(tid);
+      });
+      renderTable(latestTokens, latestTokenSummary);
+    });
+  }
+
+  if (clearTokenSelectionBtn) {
+    clearTokenSelectionBtn.addEventListener("click", () => {
+      tokenSelectedIds.clear();
+      renderTable(latestTokens, latestTokenSummary);
+    });
+  }
 
   if (tokenSelectAll) {
     tokenSelectAll.addEventListener("change", () => {
@@ -2011,7 +2108,7 @@
     tokenPrevBtn.addEventListener("click", () => {
       if (tokenCurrentPage <= 1) return;
       tokenCurrentPage -= 1;
-      renderTable(latestTokens, null);
+      renderTable(latestTokens, latestTokenSummary);
     });
   }
 
@@ -2019,7 +2116,7 @@
     tokenNextBtn.addEventListener("click", () => {
       if (tokenCurrentPage >= tokenTotalPages) return;
       tokenCurrentPage += 1;
-      renderTable(latestTokens, null);
+      renderTable(latestTokens, latestTokenSummary);
     });
   }
 
@@ -2033,7 +2130,7 @@
         // Ignore private-mode storage failures; the current selection still applies.
       }
       tokenCurrentPage = 1;
-      renderTable(latestTokens, null);
+      renderTable(latestTokens, latestTokenSummary);
     });
   }
 
@@ -2042,7 +2139,7 @@
       const requestedPage = Number(tokenJumpInput.value || 1);
       const safePage = Number.isFinite(requestedPage) ? requestedPage : 1;
       tokenCurrentPage = Math.min(Math.max(1, safePage), tokenTotalPages);
-      renderTable(latestTokens, null);
+      renderTable(latestTokens, latestTokenSummary);
     });
 
     tokenJumpInput.addEventListener("keydown", (event) => {

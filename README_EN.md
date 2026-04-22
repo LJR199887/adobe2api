@@ -112,7 +112,27 @@ GPT Image2 image model:
 - Resolution: fixed `output_resolution=1K`
 - Ratio: pass `aspect_ratio` as `1:1` / `16:9` / `9:16` / `4:3` / `3:4` / `3:2` / `2:3`
 - Common portrait poster: `model=gpt-image2, output_resolution=1K, aspect_ratio=2:3`
+- Text-to-image, image-to-image, and multi-image reference all use the same `aspect_ratio -> size` mapping
+- For image editing, upstream payload shape is top-level `size` + `referenceBlobs[*].usage=subject` + empty `modelSpecificPayload`
+- Multi-image reference supports up to 6 input images
 - Supports synchronous `/v1/images/generations` and `/v1/chat/completions`, plus async `/api/v1/generate`
+
+### 3.0.1 Image size mapping
+
+Image models do not use arbitrary pixel sizes directly. The service maps `output_resolution + aspect_ratio` to a fixed `size`.
+
+For `gpt-image2`:
+- text-to-image, image-to-image, and multi-image reference all use the mapped top-level `size`
+- image editing no longer uses `modelSpecificPayload.size=auto`
+
+`1K`
+- `1:1` -> `1024 x 1024`
+- `16:9` -> `1360 x 768`
+- `9:16` -> `768 x 1360`
+- `4:3` -> `1152 x 864`
+- `3:4` -> `864 x 1152`
+- `3:2` -> `1536 x 1024`
+- `2:3` -> `1024 x 1536`
 
 Sora2 video models:
 
@@ -211,7 +231,52 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   }'
 ```
 
-Image-to-image (pass image in latest user message):
+GPT Image2 image-to-image:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "16:9",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"sci-fi style"},
+        {"type":"image_url","image_url":{"url":"https://example.com/input.png"}}
+      ]
+    }]
+  }'
+```
+
+GPT Image2 multi-image reference:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"combine these 6 images into one"},
+        {"type":"image_url","image_url":{"url":"https://example.com/1.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/2.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/3.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/4.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/5.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/6.png"}}
+      ]
+    }]
+  }'
+```
+
+Other image-to-image examples:
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
@@ -318,7 +383,7 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
 
 ### 3.4 Async image endpoint: `/api/v1/generate`
 
-Submit a task:
+Submit GPT Image2 text-to-image task:
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
@@ -329,6 +394,53 @@ curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
     "output_resolution": "1K",
     "aspect_ratio": "2:3",
     "prompt": "Create a Guangzhou travel guide poster"
+  }'
+```
+
+Submit GPT Image2 image-to-image task:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "16:9",
+    "prompt": "sci-fi style",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"sci-fi style"},
+        {"type":"image_url","image_url":{"url":"https://example.com/input.png"}}
+      ]
+    }]
+  }'
+```
+
+Submit GPT Image2 multi-image reference task:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "combine these 6 images into one",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"combine these 6 images into one"},
+        {"type":"image_url","image_url":{"url":"https://example.com/1.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/2.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/3.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/4.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/5.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/6.png"}}
+      ]
+    }]
   }'
 ```
 

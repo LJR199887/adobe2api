@@ -94,12 +94,19 @@ GPT Image2：
 - 分辨率：固定 `output_resolution=1K`
 - 比例：`aspect_ratio=1:1 / 16:9 / 9:16 / 4:3 / 3:4 / 3:2 / 2:3`
 - 常用竖版攻略图：`model=gpt-image2, output_resolution=1K, aspect_ratio=2:3`
+- 文生图、图生图、多图参考图都走同一套 `aspect_ratio -> size` 映射
+- 图生图 / 多图参考图上游请求形态为：顶层 `size` + `referenceBlobs[*].usage=subject` + 空 `modelSpecificPayload`
+- 多图参考图最多支持 6 张输入图
 - 支持同步接口 `/v1/images/generations`、`/v1/chat/completions`，也支持异步接口 `/api/v1/generate`
 
-### 3.2 Banana 图像尺寸映射规则
+### 3.2 图像尺寸映射规则
 
-这类模型最终不会直接使用你传入的像素宽高，而是根据 `output_resolution + aspect_ratio` 自动换算成固定尺寸。  
+图像模型最终不会直接使用你传入的像素宽高，而是根据 `output_resolution + aspect_ratio` 自动换算成固定尺寸。
 如果没有传 `aspect_ratio`，但传了 `size`，服务会先根据 `size` 自动反推比例，再套用下表。
+
+对 `gpt-image2` 来说：
+- 文生图、图生图、多图参考图都会使用下表换算出的顶层 `size`
+- 图生图不会再使用 `modelSpecificPayload.size=auto`
 
 `1K`
 - `1:1` -> `1024 x 1024`
@@ -107,6 +114,8 @@ GPT Image2：
 - `9:16` -> `768 x 1360`
 - `4:3` -> `1152 x 864`
 - `3:4` -> `864 x 1152`
+- `3:2` -> `1536 x 1024`
+- `2:3` -> `1024 x 1536`
 
 `2K`
 - `1:1` -> `2048 x 2048`
@@ -198,7 +207,52 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   }'
 ```
 
-图生图：
+GPT Image2 图生图（单图参考）：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "16:9",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"科幻风"},
+        {"type":"image_url","image_url":{"url":"https://example.com/input.png"}}
+      ]
+    }]
+  }'
+```
+
+GPT Image2 多图参考图：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"6张图片合在一起"},
+        {"type":"image_url","image_url":{"url":"https://example.com/1.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/2.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/3.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/4.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/5.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/6.png"}}
+      ]
+    }]
+  }'
+```
+
+其他图生图：
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
@@ -256,6 +310,8 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
 
 ### 3.6 图像接口：`/v1/images/generations`
 
+GPT Image2 文生图：
+
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
   -H "Authorization: Bearer <service_api_key>" \
@@ -270,7 +326,7 @@ curl -X POST "http://127.0.0.1:6001/v1/images/generations" \
 
 ### 3.7 异步图像接口：`/api/v1/generate`
 
-提交任务：
+GPT Image2 文生图提交任务：
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
@@ -281,6 +337,53 @@ curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
     "output_resolution": "1K",
     "aspect_ratio": "2:3",
     "prompt": "生成一张广州旅游攻略图"
+  }'
+```
+
+GPT Image2 图生图提交任务：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "16:9",
+    "prompt": "科幻风",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"科幻风"},
+        {"type":"image_url","image_url":{"url":"https://example.com/input.png"}}
+      ]
+    }]
+  }'
+```
+
+GPT Image2 多图参考图提交任务：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/generate" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json; charset=utf-8" \
+  -d '{
+    "model": "gpt-image2",
+    "output_resolution": "1K",
+    "aspect_ratio": "2:3",
+    "prompt": "6张图片合在一起",
+    "messages": [{
+      "role":"user",
+      "content":[
+        {"type":"text","text":"6张图片合在一起"},
+        {"type":"image_url","image_url":{"url":"https://example.com/1.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/2.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/3.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/4.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/5.png"}},
+        {"type":"image_url","image_url":{"url":"https://example.com/6.png"}}
+      ]
+    }]
   }'
 ```
 

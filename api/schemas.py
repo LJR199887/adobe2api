@@ -8,6 +8,13 @@ class GenerateRequest(BaseModel):
     aspect_ratio: str = Field(default="16:9")
     output_resolution: str = Field(default="2K")
     model: Optional[str] = None
+    messages: Optional[Any] = None
+    image_url: Optional[Any] = None
+    image_urls: Optional[Any] = None
+    input_image: Optional[Any] = None
+    input_images: Optional[Any] = None
+    reference_image: Optional[Any] = None
+    reference_images: Optional[Any] = None
 
 
 class TokenAddRequest(BaseModel):

@@ -655,6 +655,12 @@ def build_generation_router(
         if data.model:
             output_resolution = model_conf["output_resolution"]
 
+        normalized_data = _normalize_image_request_data(
+            data.model_dump(),
+            prompt,
+        )
+        input_images = load_input_images(normalized_data.get("messages") or [])
+
         job = store.create(prompt=prompt, aspect_ratio=ratio)
 
         def runner(job_id: str):
@@ -671,6 +677,13 @@ def build_generation_router(
                     break
 
                 try:
+                    source_image_ids: list[str] = []
+                    for image_bytes, image_mime in input_images:
+                        source_image_ids.append(
+                            client.upload_image(
+                                token, image_bytes, image_mime or "image/jpeg"
+                            )
+                        )
                     imgbed_upload_enabled = bool(use_imgbed_upload())
                     direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
                     out_path = generated_dir / f"{job_id}.png"
@@ -697,6 +710,7 @@ def build_generation_router(
                         generation_metadata=model_conf.get("generation_metadata"),
                         generation_settings=model_conf.get("generation_settings"),
                         model_specific_payload=model_conf.get("model_specific_payload"),
+                        source_image_ids=source_image_ids,
                         out_path=None if direct_result_url else out_path,
                         return_upstream_url=direct_result_url,
                     )

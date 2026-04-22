@@ -405,6 +405,24 @@ curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
 
 任务完成后返回内容中会包含 `status=succeeded`、`progress=100` 和 `image_url`。
 
+### 3.8 上游请求对齐更新（2026-04-22）
+
+为对齐 Adobe Firefly 当前可用的上游请求形状，并减少
+`422 Invalid Usage for Image Generation`，图像提交逻辑已更新：
+
+- `nano-banana` / `nano-banana2` / `nano-banana-pro` 不再发送 `skipCai`。
+- Banana 系列默认 `generationMetadata` 现在包含：
+  - `module: text2image`
+  - `submodule: ff-image-generate`
+- Banana 系列默认 `modelSpecificPayload` 调整为：
+  - `parameters.addWatermark: false`
+  - 不再强制发送默认 `aspectRatio`
+- 当模型配置传入 `model_specific_payload.parameters` 时，会与默认参数合并。
+- `gpt-image2` 图生图（有参考图）时不再发送 `size`，改为 `modelSpecificPayload.size=auto`。
+- 上游提交请求头 `sec-fetch-site` 改为 `cross-site`（与浏览器请求对齐）。
+
+以上为内部上游对齐改动；对外 API 入参不变（`model`、`prompt`、`output_resolution`、`aspect_ratio` 等保持不变）。
+
 ## 4. Cookie 导入
 
 项目自带浏览器插件目录：`browser-cookie-exporter/`

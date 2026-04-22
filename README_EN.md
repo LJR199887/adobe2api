@@ -462,6 +462,24 @@ curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
 
 When the task completes, the response includes `status=succeeded`, `progress=100`, and `image_url`.
 
+### 3.5 Upstream request alignment update (2026-04-22)
+
+To match Adobe Firefly's currently accepted upstream request shape and reduce
+`422 Invalid Usage for Image Generation` errors, image submit behavior was updated:
+
+- `nano-banana` / `nano-banana2` / `nano-banana-pro` payload no longer sends `skipCai`.
+- Default `generationMetadata` for banana-family models now includes:
+  - `module: text2image`
+  - `submodule: ff-image-generate`
+- Default `modelSpecificPayload` for banana-family models is now:
+  - `parameters.addWatermark: false`
+  - no forced default `aspectRatio` field in upstream payload
+- When model-level overrides provide `model_specific_payload.parameters`, parameters are merged with defaults.
+- For `gpt-image2` image-to-image requests (with references), `size` is omitted and `modelSpecificPayload.size=auto` is used.
+- Submit headers now send `sec-fetch-site: cross-site` (browser-aligned).
+
+This is an internal upstream-shape alignment only. External API fields remain unchanged (`model`, `prompt`, `output_resolution`, `aspect_ratio`, etc.).
+
 ## 4) Cookie Import
 
 ### Step 1: Export using the Browser Extension (Recommended)

@@ -43,6 +43,10 @@ _IMPORT_REFRESH_JOB_TTL_SECONDS = 1800
 _IMPORT_REFRESH_JOB_LOCK = threading.Lock()
 _IMPORT_REFRESH_JOBS: Dict[str, Dict[str, Any]] = {}
 _IMPORT_REFRESH_JOB_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+_TOKEN_REFRESH_JOB_TTL_SECONDS = 1800
+_TOKEN_REFRESH_JOB_LOCK = threading.Lock()
+_TOKEN_REFRESH_JOBS: Dict[str, Dict[str, Any]] = {}
+_TOKEN_REFRESH_JOB_EXECUTOR = ThreadPoolExecutor(max_workers=4)
 
 
 def _elapsed_ms(started: float) -> float:
@@ -77,6 +81,17 @@ def _cleanup_import_refresh_jobs(now_ts: Optional[float] = None) -> None:
             expired_ids.append(job_id)
     for job_id in expired_ids:
         _IMPORT_REFRESH_JOBS.pop(job_id, None)
+
+
+def _cleanup_token_refresh_jobs(now_ts: Optional[float] = None) -> None:
+    current = float(now_ts or time.time())
+    expired_ids = []
+    for job_id, job in _TOKEN_REFRESH_JOBS.items():
+        completed_at = float(job.get("completed_at") or 0)
+        if completed_at and (current - completed_at) > _TOKEN_REFRESH_JOB_TTL_SECONDS:
+            expired_ids.append(job_id)
+    for job_id in expired_ids:
+        _TOKEN_REFRESH_JOBS.pop(job_id, None)
 
 
 def _create_import_refresh_job(
@@ -216,6 +231,7 @@ def _build_import_refresh_payload(job_id: str) -> Optional[Dict[str, Any]]:
     list_duplicate_count = 0
     queued_count = 0
     running_count = 0
+    item_rows = []
 
     for item in items:
         profile_import_ms_sum += _timing_value(item, "profile_import_ms")
@@ -226,8 +242,19 @@ def _build_import_refresh_payload(job_id: str) -> Optional[Dict[str, Any]]:
         elif item_status == "running":
             running_count += 1
 
+        row = {
+            "index": int(item.get("index") or 0),
+            "profile_id": str(item.get("profile_id") or "").strip(),
+            "profile_name": str(item.get("profile_name") or "").strip(),
+            "status": item_status or "queued",
+            "detail": str(item.get("refresh_error") or "").strip(),
+            "profile_import_ms": _timing_value(item, "profile_import_ms"),
+            "refresh_call_ms": _timing_value(item, "refresh_call_ms"),
+        }
+
         refresh_result = item.get("refresh_result") or {}
         if isinstance(refresh_result, dict) and refresh_result:
+            row["result"] = refresh_result
             refreshed_item = {
                 "index": item.get("index"),
                 "profile_id": item.get("profile_id"),
@@ -271,6 +298,8 @@ def _build_import_refresh_payload(job_id: str) -> Optional[Dict[str, Any]]:
                     "detail": str(item.get("refresh_error") or "").strip(),
                 }
             )
+
+        item_rows.append(row)
 
     completed_count = len(refreshed) + len(refresh_failed)
     pending_count = queued_count + running_count
@@ -340,6 +369,7 @@ def _build_import_refresh_payload(job_id: str) -> Optional[Dict[str, Any]]:
         "failed": failed,
         "refreshed": refreshed,
         "refresh_failed": refresh_failed,
+        "items": item_rows,
         "timing": response_timing,
         "background_refresh": {
             "job_id": str(job.get("id") or "").strip(),
@@ -434,6 +464,289 @@ def _run_import_refresh_job(
     )
 
 
+def _create_token_refresh_job(
+    *,
+    token_entries: List[Dict[str, Any]],
+) -> str:
+    now_ts = time.time()
+    job_id = uuid.uuid4().hex[:12]
+    job = {
+        "id": job_id,
+        "status": "queued",
+        "created_at": now_ts,
+        "started_at": None,
+        "completed_at": None,
+        "created_perf": time.perf_counter(),
+        "completed_perf": None,
+        "items": [
+            {
+                "index": int(entry.get("index") or 0),
+                "token_id": str(entry.get("token_id") or "").strip(),
+                "token_account_name": str(entry.get("token_account_name") or "").strip(),
+                "token_account_email": str(
+                    entry.get("token_account_email") or ""
+                ).strip(),
+                "status": "queued",
+                "detail": "",
+                "refresh_result": None,
+                "refresh_call_ms": 0.0,
+            }
+            for entry in token_entries
+        ],
+    }
+    with _TOKEN_REFRESH_JOB_LOCK:
+        _cleanup_token_refresh_jobs(now_ts)
+        _TOKEN_REFRESH_JOBS[job_id] = job
+    return job_id
+
+
+def _mark_token_refresh_job_started(job_id: str) -> None:
+    with _TOKEN_REFRESH_JOB_LOCK:
+        job = _TOKEN_REFRESH_JOBS.get(job_id)
+        if not job:
+            return
+        if not job.get("started_at"):
+            job["started_at"] = time.time()
+        job["status"] = "running"
+
+
+def _mark_token_refresh_job_item_running(job_id: str, index: int) -> None:
+    with _TOKEN_REFRESH_JOB_LOCK:
+        job = _TOKEN_REFRESH_JOBS.get(job_id)
+        if not job:
+            return
+        items = job.get("items") or []
+        if 0 <= index < len(items):
+            items[index]["status"] = "running"
+
+
+def _mark_token_refresh_job_item_result(
+    job_id: str,
+    index: int,
+    *,
+    status: str,
+    detail: str = "",
+    refresh_result: Optional[Dict[str, Any]] = None,
+    refresh_call_ms: float = 0.0,
+) -> None:
+    with _TOKEN_REFRESH_JOB_LOCK:
+        job = _TOKEN_REFRESH_JOBS.get(job_id)
+        if not job:
+            return
+        items = job.get("items") or []
+        if not (0 <= index < len(items)):
+            return
+        item = items[index]
+        item["status"] = str(status or "").strip().lower() or "failed"
+        item["detail"] = str(detail or "").strip()
+        item["refresh_call_ms"] = float(refresh_call_ms or 0.0)
+        item["refresh_result"] = (
+            copy.deepcopy(refresh_result)
+            if isinstance(refresh_result, dict)
+            else None
+        )
+
+
+def _mark_token_refresh_job_completed(job_id: str) -> None:
+    with _TOKEN_REFRESH_JOB_LOCK:
+        job = _TOKEN_REFRESH_JOBS.get(job_id)
+        if not job:
+            return
+        job["status"] = "completed"
+        job["completed_at"] = time.time()
+        job["completed_perf"] = time.perf_counter()
+
+
+def _build_token_refresh_job_payload(job_id: str) -> Optional[Dict[str, Any]]:
+    with _TOKEN_REFRESH_JOB_LOCK:
+        _cleanup_token_refresh_jobs()
+        raw_job = _TOKEN_REFRESH_JOBS.get(job_id)
+        if raw_job is None:
+            return None
+        job = copy.deepcopy(raw_job)
+
+    items = job.get("items") or []
+    refreshed = []
+    skipped = []
+    failed = []
+    queued_count = 0
+    running_count = 0
+    refresh_call_ms_sum = 0.0
+    item_rows = []
+
+    for item in items:
+        item_status = str(item.get("status") or "").strip().lower()
+        refresh_call_ms_sum += _timing_value(item, "refresh_call_ms")
+        if item_status == "queued":
+            queued_count += 1
+        elif item_status == "running":
+            running_count += 1
+
+        row = {
+            "index": int(item.get("index") or 0),
+            "token_id": str(item.get("token_id") or "").strip(),
+            "token_account_name": str(item.get("token_account_name") or "").strip(),
+            "token_account_email": str(item.get("token_account_email") or "").strip(),
+            "status": item_status or "queued",
+            "detail": str(item.get("detail") or "").strip(),
+            "refresh_call_ms": _timing_value(item, "refresh_call_ms"),
+        }
+        refresh_result = item.get("refresh_result") or {}
+        if isinstance(refresh_result, dict) and refresh_result:
+            row["result"] = refresh_result
+        item_rows.append(row)
+
+        if item_status == "succeeded":
+            refreshed.append(row)
+        elif item_status == "skipped":
+            skipped.append(row)
+        elif item_status == "failed":
+            failed.append(row)
+
+    completed_count = len(refreshed) + len(skipped) + len(failed)
+    pending_count = queued_count + running_count
+    job_completed = pending_count == 0 and (
+        str(job.get("status") or "").strip().lower() == "completed"
+    )
+    job_status = "running"
+    if job_completed:
+        if failed:
+            job_status = "partial" if refreshed else "failed"
+        else:
+            job_status = "ok"
+    elif completed_count == 0:
+        job_status = "queued"
+
+    end_perf = job.get("completed_perf") if job_completed else time.perf_counter()
+    total_ms = round(
+        max(0.0, float(end_perf or 0) - float(job.get("created_perf") or 0)) * 1000,
+        3,
+    )
+
+    return {
+        "status": job_status,
+        "total": len(items),
+        "success_count": len(refreshed),
+        "refreshed_count": len(refreshed),
+        "skipped_count": len(skipped),
+        "failed_count": len(failed),
+        "refreshed": refreshed,
+        "skipped": skipped,
+        "failed": failed,
+        "items": item_rows,
+        "timing": {
+            "refresh_call_ms_sum": refresh_call_ms_sum,
+            "total_ms": total_ms,
+        },
+        "background_refresh": {
+            "job_id": str(job.get("id") or "").strip(),
+            "status": str(job.get("status") or "").strip().lower(),
+            "total_count": len(items),
+            "queued_count": queued_count,
+            "running_count": running_count,
+            "completed_count": completed_count,
+            "pending_count": pending_count,
+            "completed": job_completed,
+        },
+    }
+
+
+def _run_token_refresh_job(
+    job_id: str,
+    *,
+    token_manager: Any,
+    refresh_manager: Any,
+    concurrency: int,
+) -> None:
+    payload = _build_token_refresh_job_payload(job_id)
+    if not payload:
+        return
+    background = payload.get("background_refresh") or {}
+    total_count = int(background.get("total_count") or 0)
+    if total_count <= 0:
+        _mark_token_refresh_job_completed(job_id)
+        return
+
+    _mark_token_refresh_job_started(job_id)
+    max_workers = min(max(1, int(concurrency or 1)), total_count)
+    logger.info(
+        "token_refresh_batch_started job_id=%s total=%s concurrency=%s",
+        job_id,
+        total_count,
+        max_workers,
+    )
+
+    with _TOKEN_REFRESH_JOB_LOCK:
+        job = _TOKEN_REFRESH_JOBS.get(job_id) or {}
+        items = copy.deepcopy(job.get("items") or [])
+
+    def refresh_one(index: int, item: Dict[str, Any]):
+        tid = str(item.get("token_id") or "").strip()
+        token_info = token_manager.get_by_id(tid)
+        if not token_info:
+            return index, "failed", {"detail": "token not found"}
+
+        profile_id = str(token_info.get("refresh_profile_id") or "").strip()
+        if not profile_id:
+            return index, "skipped", {
+                "detail": "this token is not bound to an auto refresh profile"
+            }
+
+        refresh_started = time.perf_counter()
+        try:
+            refresh_result = refresh_manager.refresh_once(profile_id)
+        except Exception as exc:
+            return index, "failed", {
+                "detail": str(exc),
+                "refresh_call_ms": _elapsed_ms(refresh_started),
+            }
+        return index, "succeeded", {
+            "refresh_result": refresh_result,
+            "refresh_call_ms": _elapsed_ms(refresh_started),
+        }
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {}
+        for index, item in enumerate(items):
+            _mark_token_refresh_job_item_running(job_id, index)
+            future = executor.submit(refresh_one, index, item)
+            future_map[future] = index
+
+        for future in as_completed(future_map):
+            index = future_map[future]
+            try:
+                _, status, payload = future.result()
+            except Exception as exc:
+                _mark_token_refresh_job_item_result(
+                    job_id,
+                    index,
+                    status="failed",
+                    detail=str(exc),
+                )
+                continue
+            _mark_token_refresh_job_item_result(
+                job_id,
+                index,
+                status=status,
+                detail=str(payload.get("detail") or "").strip(),
+                refresh_result=payload.get("refresh_result"),
+                refresh_call_ms=_timing_value(payload, "refresh_call_ms"),
+            )
+
+    _mark_token_refresh_job_completed(job_id)
+    summary = _build_token_refresh_job_payload(job_id) or {}
+    logger.info(
+        "token_refresh_batch_completed job_id=%s status=%s success=%s skipped=%s "
+        "failed=%s total_ms=%.3f",
+        job_id,
+        summary.get("status"),
+        summary.get("success_count"),
+        summary.get("skipped_count"),
+        summary.get("failed_count"),
+        _timing_value(summary.get("timing"), "total_ms"),
+    )
+
+
 def build_admin_router(
     *,
     static_dir: Path,
@@ -482,6 +795,51 @@ def build_admin_router(
         refresh_manager.set_enabled(profile_id, False)
         return True, profile_id
 
+    def _mark_token_abnormal_for_check(
+        token_info: dict,
+        *,
+        detail: str,
+    ) -> dict:
+        token_id = str(token_info.get("id") or "").strip()
+        previous_status = str(token_info.get("status") or "").strip().lower() or "active"
+        final_status = previous_status
+        status_changed = False
+        if token_id and previous_status not in {"invalid", "exhausted", "abnormal"}:
+            updated = token_manager.report_abnormal_by_identity(token_id=token_id)
+            refreshed = (
+                updated
+                if isinstance(updated, dict) and updated
+                else token_manager.get_by_id(token_id) or {}
+            )
+            if isinstance(refreshed, dict) and refreshed:
+                token_info = refreshed
+            final_status = "abnormal"
+            status_changed = previous_status != "abnormal"
+
+        profile_disabled = False
+        disabled_profile_id = ""
+        auto_refresh_disable_error = ""
+        try:
+            profile_disabled, disabled_profile_id = disable_auto_refresh_for_token_info(
+                token_info
+            )
+        except Exception as exc:
+            auto_refresh_disable_error = str(exc)
+
+        payload = {
+            "token_id": token_id,
+            "result": "abnormal",
+            "detail": str(detail or "").strip() or "token marked as abnormal",
+            "previous_status": previous_status,
+            "status": final_status,
+            "status_changed": status_changed,
+            "auto_refresh_disabled": profile_disabled,
+            "disabled_profile_id": disabled_profile_id or None,
+        }
+        if auto_refresh_disable_error:
+            payload["auto_refresh_disable_error"] = auto_refresh_disable_error
+        return payload
+
     def _response_text_for_invalid_check(resp) -> str:
         parts = [str(getattr(resp, "text", "") or "")]
         try:
@@ -506,7 +864,11 @@ def build_admin_router(
         token_id = str(token_info.get("id") or "").strip()
         token_value = str(token_info.get("value") or "").strip()
         if not token_value:
-            return {"token_id": token_id, "detail": "empty token"}
+            return {
+                "token_id": token_id,
+                "result": "abnormal",
+                "detail": "empty token",
+            }
 
         account_id = ""
         try:
@@ -516,7 +878,11 @@ def build_admin_router(
         except Exception:
             account_id = ""
         if not account_id:
-            return {"token_id": token_id, "detail": "account_id not found in token"}
+            return {
+                "token_id": token_id,
+                "result": "abnormal",
+                "detail": "account_id not found in token",
+            }
 
         cfg = config_manager.get_all()
         proxy = resolve_basic_proxy(cfg)
@@ -547,6 +913,13 @@ def build_admin_router(
                 "status_code": status_code,
                 "result": "valid",
                 "detail": "authorized request succeeded",
+            }
+        if status_code == 403:
+            return {
+                "token_id": token_id,
+                "status_code": status_code,
+                "result": "abnormal",
+                "detail": "credits endpoint returned 403",
             }
         return {
             "token_id": token_id,
@@ -850,7 +1223,7 @@ def build_admin_router(
                 item["auto_refresh_enabled"] = None
                 continue
             pid = str(item.get("refresh_profile_id") or "").strip()
-            if str(item.get("status") or "").strip().lower() == "exhausted" and pid:
+            if str(item.get("status") or "").strip().lower() in {"exhausted", "invalid", "abnormal"} and pid:
                 try:
                     refresh_manager.set_enabled(pid, False)
                 except Exception:
@@ -987,9 +1360,11 @@ def build_admin_router(
         checked = []
         invalid = []
         valid = []
+        abnormal = []
         skipped = []
         failed = []
         disabled_profile_ids = []
+        disabled_tokens = []
         max_workers = min(get_batch_concurrency(), len(token_ids))
 
         def check_one(index: int, tid: str):
@@ -998,11 +1373,28 @@ def build_admin_router(
                 return index, "skipped", {"token_id": tid, "detail": "token not found"}
 
             current_status = str(token_info.get("status") or "").strip().lower()
+            if current_status in {"invalid", "exhausted", "abnormal"}:
+                return index, "skipped", {
+                    "token_id": tid,
+                    "status": current_status,
+                    "detail": f"token already in terminal status: {current_status}",
+                }
+            if current_status == "disabled":
+                return index, "skipped", {
+                    "token_id": tid,
+                    "status": current_status,
+                    "detail": "disabled token is not checked",
+                }
+            if current_status == "error":
+                return index, "abnormal", _mark_token_abnormal_for_check(
+                    token_info,
+                    detail="token already in request error status",
+                )
             if current_status != "active":
                 return index, "skipped", {
                     "token_id": tid,
                     "status": current_status,
-                    "detail": "only active tokens are checked",
+                    "detail": f"unsupported token status: {current_status or 'unknown'}",
                 }
 
             try:
@@ -1037,6 +1429,14 @@ def build_admin_router(
 
             if result.get("result") == "valid":
                 return index, "valid", result
+            if result.get("result") == "abnormal":
+                abnormal_payload = _mark_token_abnormal_for_check(
+                    token_info,
+                    detail=str(result.get("detail") or "").strip()
+                    or "token marked as abnormal during invalid check",
+                )
+                abnormal_payload["status_code"] = result.get("status_code")
+                return index, "abnormal", abnormal_payload
             return index, "skipped", result
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1056,6 +1456,15 @@ def build_admin_router(
                 ).strip()
                 if disabled_profile_id:
                     disabled_profile_ids.append(disabled_profile_id)
+            elif status == "abnormal":
+                abnormal.append(payload)
+                disabled_profile_id = str(
+                    payload.get("disabled_profile_id") or ""
+                ).strip()
+                if disabled_profile_id:
+                    disabled_profile_ids.append(disabled_profile_id)
+                if str(payload.get("status") or "").strip().lower() == "abnormal":
+                    disabled_tokens.append(str(payload.get("token_id") or "").strip())
             elif status == "valid":
                 valid.append(payload)
             elif status == "failed":
@@ -1078,11 +1487,14 @@ def build_admin_router(
             "invalid_count": len(invalid),
             "changed_count": changed_count,
             "valid_count": len(valid),
+            "abnormal_count": len(abnormal),
             "skipped_count": len(skipped),
             "failed_count": len(failed),
+            "abnormal_changed_count": len({tid for tid in disabled_tokens if tid}),
             "disabled_auto_refresh_count": len(set(disabled_profile_ids)),
             "invalid": invalid,
             "valid": valid,
+            "abnormal": abnormal,
             "skipped": skipped,
             "failed": failed,
         }
@@ -1102,10 +1514,10 @@ def build_admin_router(
         token_info = token_manager.get_by_id(tid)
         if not token_info:
             raise HTTPException(status_code=404, detail="token not found")
-        if status == "active" and token_info.get("status") in {"exhausted", "invalid"}:
+        if status == "active" and token_info.get("status") in {"exhausted", "invalid", "abnormal"}:
             raise HTTPException(
                 status_code=400,
-                detail="exhausted/invalid token cannot be reactivated; replace with a fresh token",
+                detail="exhausted/invalid/abnormal token cannot be reactivated; replace with a fresh token",
             )
         token_manager.set_status(tid, status)
         if status == "disabled" and token_info.get("auto_refresh"):
@@ -1149,57 +1561,39 @@ def build_admin_router(
         if not token_ids:
             raise HTTPException(status_code=400, detail="ids is required")
 
-        max_workers = min(get_batch_concurrency(), len(token_ids))
-
-        def refresh_one(index: int, tid: str):
-            token_info = token_manager.get_by_id(tid)
-            if not token_info:
-                return index, "failed", {"token_id": tid, "detail": "token not found"}
-
-            profile_id = str(token_info.get("refresh_profile_id") or "").strip()
-            if not profile_id:
-                return index, "skipped", {
+        token_entries = []
+        for index, tid in enumerate(token_ids):
+            token_info = token_manager.get_by_id(tid) or {}
+            token_entries.append(
+                {
+                    "index": index,
                     "token_id": tid,
-                    "detail": "this token is not bound to an auto refresh profile",
+                    "token_account_name": str(
+                        token_info.get("refresh_profile_name") or ""
+                    ).strip(),
+                    "token_account_email": str(
+                        token_info.get("refresh_profile_email") or ""
+                    ).strip(),
                 }
+            )
 
-            try:
-                return index, "ok", {
-                    "token_id": tid,
-                    "result": refresh_manager.refresh_once(profile_id),
-                }
-            except Exception as exc:
-                return index, "failed", {"token_id": tid, "detail": str(exc)}
+        job_id = _create_token_refresh_job(token_entries=token_entries)
+        _TOKEN_REFRESH_JOB_EXECUTOR.submit(
+            _run_token_refresh_job,
+            job_id,
+            token_manager=token_manager,
+            refresh_manager=refresh_manager,
+            concurrency=get_batch_concurrency(),
+        )
+        return _build_token_refresh_job_payload(job_id) or {}
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(refresh_one, index, tid)
-                for index, tid in enumerate(token_ids)
-            ]
-            done_items = [future.result() for future in as_completed(futures)]
-
-        done_items.sort(key=lambda item: item[0])
-        refreshed = []
-        skipped = []
-        failed = []
-        for _, status, payload in done_items:
-            if status == "ok":
-                refreshed.append(payload)
-            elif status == "skipped":
-                skipped.append(payload)
-            else:
-                failed.append(payload)
-
-        return {
-            "status": "ok" if not failed else "partial",
-            "total": len(token_ids),
-            "refreshed_count": len(refreshed),
-            "skipped_count": len(skipped),
-            "failed_count": len(failed),
-            "refreshed": refreshed,
-            "skipped": skipped,
-            "failed": failed,
-        }
+    @router.get("/api/v1/tokens/refresh-jobs/{job_id}")
+    def get_token_refresh_job(job_id: str, request: Request):
+        require_admin_auth(request)
+        payload = _build_token_refresh_job_payload(job_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="refresh job not found")
+        return payload
 
     @router.put("/api/v1/tokens/{tid}/auto-refresh")
     def set_token_auto_refresh_enabled(tid: str, enabled: bool, request: Request):

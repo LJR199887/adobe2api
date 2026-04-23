@@ -70,6 +70,15 @@
   const checkInvalidTokensBatchBtn = document.getElementById("checkInvalidTokensBatchBtn");
   const refreshModal = document.getElementById("refreshModal");
   const refreshModalCloseBtn = document.getElementById("refreshModalCloseBtn");
+  const taskReportModal = document.getElementById("taskReportModal");
+  const taskReportCloseBtn = document.getElementById("taskReportCloseBtn");
+  const taskReportTitle = document.getElementById("taskReportTitle");
+  const taskReportStatus = document.getElementById("taskReportStatus");
+  const taskReportProgressText = document.getElementById("taskReportProgressText");
+  const taskReportProgressBar = document.getElementById("taskReportProgressBar");
+  const taskReportSummary = document.getElementById("taskReportSummary");
+  const taskReportCurrent = document.getElementById("taskReportCurrent");
+  const taskReportItems = document.getElementById("taskReportItems");
   const refreshBtn = document.getElementById("refreshBtn");
   const refreshCreditsBatchBtn = document.getElementById("refreshCreditsBatchBtn");
   const tokenSelectAll = document.getElementById("tokenSelectAll");
@@ -95,6 +104,7 @@
   let latestTokens = [];
   let latestTokenSummary = null;
   let latestTokenPagination = null;
+  let activeTaskTracker = null;
   const TOKEN_PAGE_SIZE_OPTIONS = [20, 50, 100, 200, 500, 1000, 2000];
   const TOKEN_PAGE_SIZE_STORAGE_KEY = "adobe2api.tokenPageSize";
   function readTokenPageSize() {
@@ -113,9 +123,21 @@
     "active": "生效中",
     "exhausted": "额度耗尽",
     "invalid": "已失效",
+    "abnormal": "异常",
     "error": "请求异常",
     "disabled": "已禁用"
   };
+  if (tokenStatusFilter && !tokenStatusFilter.querySelector('option[value="abnormal"]')) {
+    const abnormalOption = document.createElement("option");
+    abnormalOption.value = "abnormal";
+    abnormalOption.textContent = STATUS_MAP.abnormal;
+    const errorOption = tokenStatusFilter.querySelector('option[value="error"]');
+    if (errorOption) {
+      tokenStatusFilter.insertBefore(abnormalOption, errorOption);
+    } else {
+      tokenStatusFilter.appendChild(abnormalOption);
+    }
+  }
 
   function getTokenFilters() {
     return {
@@ -322,7 +344,7 @@
 
       const statusClass = `status-${t.status.toLowerCase()}`;
       const isStatusActive = t.status === "active";
-      const isFrozen = t.status === "exhausted" || t.status === "invalid";
+      const isFrozen = t.status === "exhausted" || t.status === "invalid" || t.status === "abnormal";
       const displayStatus = STATUS_MAP[t.status.toLowerCase()] || t.status;
       const tokenProfileName = String(t.refresh_profile_name || "").trim();
       const tokenProfileEmail = String(t.refresh_profile_email || "").trim();
@@ -342,7 +364,7 @@
         ? `<button class="action-mini" onclick="refreshToken('${t.id}')">刷新Token</button>`
         : `<button class="action-mini" disabled title="仅自动刷新 token 支持刷新">刷新Token</button>`;
       const statusBtn = isFrozen
-        ? `<button class="action-mini" disabled title="额度耗尽或已失效 token 不可启用">不可启用</button>`
+        ? `<button class="action-mini" disabled title="额度耗尽、已失效或异常 token 不可启用">不可启用</button>`
         : `<button class="action-mini" onclick="toggleToken('${t.id}', '${isStatusActive ? 'disabled' : 'active'}')">${isStatusActive ? '禁用Token' : '启用Token'}</button>`;
       const actionsGrid = `
         <div class="action-btns">
@@ -528,6 +550,14 @@
       if (event.target === refreshModal) closeDialog(refreshModal);
     });
   }
+  if (taskReportCloseBtn) {
+    taskReportCloseBtn.addEventListener("click", () => closeDialog(taskReportModal));
+  }
+  if (taskReportModal) {
+    taskReportModal.addEventListener("click", (event) => {
+      if (event.target === taskReportModal) closeDialog(taskReportModal);
+    });
+  }
 
   window.deleteToken = async (id) => {
     if (!confirm("确定要删除这个 Token 吗？")) return;
@@ -697,7 +727,6 @@
       }
 
       refreshTokensBatchBtn.disabled = true;
-      showToast(`批量刷新 Token 中...`, false, { duration: 0 });
       try {
         const res = await fetch("/api/v1/tokens/refresh-batch", {
           method: "POST",
@@ -716,13 +745,24 @@
           return;
         }
         const data = await res.json();
-        const ok = Number(data.refreshed_count || 0);
-        const skipped = Number(data.skipped_count || 0);
-        const fail = Number(data.failed_count || 0);
-        showToast(`批量刷新 Token 完成：成功 ${ok}，跳过 ${skipped}，失败 ${fail}`, fail > 0);
-        await loadTokens();
+        const jobId = String(data?.background_refresh?.job_id || "").trim();
+        if (!jobId) {
+          throw new Error("刷新任务创建失败");
+        }
+        await trackBackgroundJob({
+          title: "批量刷新 Token 进度",
+          initialPayload: data,
+          pollUrl: `/api/v1/tokens/refresh-jobs/${encodeURIComponent(jobId)}`,
+          onComplete: async (payload) => {
+            await loadTokens();
+            const ok = Number(payload?.refreshed_count || payload?.success_count || 0);
+            const skipped = Number(payload?.skipped_count || 0);
+            const fail = Number(payload?.failed_count || 0);
+            showToast(`批量刷新 Token 完成：成功 ${ok}，跳过 ${skipped}，失败 ${fail}`, fail > 0, { duration: 7000 });
+          },
+        });
       } catch (err) {
-        showToast("批量刷新 Token 失败", true);
+        showToast(err.message || "批量刷新 Token 失败", true);
       } finally {
         refreshTokensBatchBtn.disabled = false;
       }
@@ -737,12 +777,12 @@
         return;
       }
       const ok = confirm(
-        `将主动检测选中的 ${selectedIds.length} 个生效 Token。只有返回 Token invalid or expired 时，才会标记为已失效并关闭自动刷新。确定继续吗？`
+        `将主动检测选中的 ${selectedIds.length} 个 Token。明确返回 Token invalid or expired 时会标记为已失效；检测到本地异常或 403 时会标记为异常并关闭自动刷新。确定继续吗？`
       );
       if (!ok) return;
 
       checkInvalidTokensBatchBtn.disabled = true;
-      showToast("正在检测失效 Token...", false, { duration: 0 });
+      showToast("正在检测 Token 状态...", false, { duration: 0 });
       try {
         const res = await fetch("/api/v1/tokens/check-invalid-batch", {
           method: "POST",
@@ -751,22 +791,24 @@
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(data?.detail || "检测失效 Token 失败");
+          throw new Error(data?.detail || "检测 Token 状态失败");
         }
         const invalid = Number(data.invalid_count || 0);
         const changed = Number(data.changed_count || 0);
         const valid = Number(data.valid_count || 0);
+        const abnormal = Number(data.abnormal_count || 0);
+        const abnormalChanged = Number(data.abnormal_changed_count || 0);
         const skipped = Number(data.skipped_count || 0);
         const failed = Number(data.failed_count || 0);
         const disabled = Number(data.disabled_auto_refresh_count || 0);
         showToast(
-          `检测完成：已失效 ${invalid}，新标记 ${changed}，正常 ${valid}，禁用自动刷新 ${disabled}，跳过 ${skipped}，失败 ${failed}`,
+          `检测完成：已失效 ${invalid}，新失效 ${changed}，异常 ${abnormal}，新异常 ${abnormalChanged}，正常 ${valid}，关闭自动刷新 ${disabled}，跳过 ${skipped}，失败 ${failed}`,
           failed > 0,
           { duration: 8000 }
         );
         await loadTokens();
       } catch (err) {
-        showToast(err.message || "检测失效 Token 失败", true, { duration: 8000 });
+        showToast(err.message || "检测 Token 状态失败", true, { duration: 8000 });
       } finally {
         checkInvalidTokensBatchBtn.disabled = false;
         updateTokenSelectionSummary();
@@ -949,6 +991,10 @@
   const confRetryOnStatusCodes = document.getElementById("confRetryOnStatusCodes");
   const confRetryOnErrorTypes = document.getElementById("confRetryOnErrorTypes");
   const confTokenRotationStrategy = document.getElementById("confTokenRotationStrategy");
+  const confTokenSuccessAutoDisableEnabled = document.getElementById("confTokenSuccessAutoDisableEnabled");
+  const confTokenSuccessAutoDisableThreshold = document.getElementById("confTokenSuccessAutoDisableThreshold");
+  const overwriteSuccessCountsBtn = document.getElementById("overwriteSuccessCountsBtn");
+  const overwriteSuccessCountsResult = document.getElementById("overwriteSuccessCountsResult");
   const confRefreshIntervalHours = document.getElementById("confRefreshIntervalHours");
   const confBatchConcurrency = document.getElementById("confBatchConcurrency");
   const confGeneratedMaxSizeMb = document.getElementById("confGeneratedMaxSizeMb");
@@ -1137,6 +1183,12 @@
           ? data.retry_on_error_types.join(",")
           : "timeout,connection,proxy";
         confTokenRotationStrategy.value = String(data.token_rotation_strategy || "round_robin");
+        if (confTokenSuccessAutoDisableEnabled) {
+          confTokenSuccessAutoDisableEnabled.checked = Boolean(data.token_success_auto_disable_enabled || false);
+        }
+        if (confTokenSuccessAutoDisableThreshold) {
+          confTokenSuccessAutoDisableThreshold.value = Number(data.token_success_auto_disable_threshold || 2);
+        }
         confRefreshIntervalHours.value = Number(data.refresh_interval_hours || 15);
         currentBatchConcurrency = Math.max(1, Math.min(100, Number(data.batch_concurrency || 5)));
         confBatchConcurrency.value = currentBatchConcurrency;
@@ -1187,6 +1239,8 @@
           .map(s => String(s).trim().toLowerCase())
           .filter(Boolean),
         token_rotation_strategy: String(confTokenRotationStrategy.value || "round_robin").trim() || "round_robin",
+        token_success_auto_disable_enabled: Boolean(confTokenSuccessAutoDisableEnabled?.checked),
+        token_success_auto_disable_threshold: Math.max(1, Math.min(100000, Number(confTokenSuccessAutoDisableThreshold?.value || 2))),
         refresh_interval_hours: Number(confRefreshIntervalHours.value || 15),
         batch_concurrency: Math.max(1, Math.min(100, Number(confBatchConcurrency.value || 5))),
         generated_max_size_mb: Math.max(100, Math.min(102400, Number(confGeneratedMaxSizeMb.value || 1024))),
@@ -1242,6 +1296,9 @@
       if (!["round_robin", "random"].includes(payload.token_rotation_strategy)) {
         throw new Error("Token 轮换策略无效");
       }
+      if (!Number.isInteger(payload.token_success_auto_disable_threshold) || payload.token_success_auto_disable_threshold < 1 || payload.token_success_auto_disable_threshold > 100000) {
+        throw new Error("Token 自动禁用成功次数必须是 1-100000 的整数");
+      }
 
       const res = await fetch("/api/v1/config", {
         method: "PUT",
@@ -1262,6 +1319,57 @@
     }
     saveConfigBtn.disabled = false;
   });
+
+  if (overwriteSuccessCountsBtn) {
+    overwriteSuccessCountsBtn.addEventListener("click", async () => {
+      const ok = confirm("将根据历史成功生成日志，覆盖所有 token 当前成功次数。确定继续吗？");
+      if (!ok) return;
+
+      overwriteSuccessCountsBtn.disabled = true;
+      if (overwriteSuccessCountsResult) {
+        overwriteSuccessCountsResult.textContent = "正在覆盖回填成功次数...";
+      }
+      try {
+        const res = await fetch("/api/v1/tokens/success-counts/overwrite-from-logs", {
+          method: "POST",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.detail || "覆盖回填成功次数失败");
+        }
+        const lines = [
+          "覆盖回填完成",
+          `扫描日志：${Number(data.scanned_logs || 0)}`,
+          `生成日志：${Number(data.generation_logs || 0)}`,
+          `成功日志：${Number(data.success_logs || 0)}`,
+          `未识别成功日志：${Number(data.unidentified_success_logs || 0)}`,
+          `匹配 Token：${Number(data.matched_tokens || 0)}`,
+          `按 ID 匹配：${Number(data.matched_by_token_id || 0)}`,
+          `按邮箱匹配：${Number(data.matched_by_email || 0)}`,
+          `按名称匹配：${Number(data.matched_by_name || 0)}`,
+          `已修改 Token：${Number(data.changed_tokens || 0)}`,
+          `重置为 0：${Number(data.reset_to_zero_tokens || 0)}`,
+          `有成功次数 Token：${Number(data.nonzero_success_tokens || 0)}`,
+          `总成功次数：${Number(data.total_success_count || 0)}`,
+          `达到阈值标记耗尽：${Number(data.exhausted_by_threshold || 0)}`,
+          `关闭自动刷新：${Number(data.disabled_auto_refresh_profiles || 0)}`,
+        ];
+        if (overwriteSuccessCountsResult) {
+          overwriteSuccessCountsResult.textContent = lines.join("\n");
+        }
+        showToast("成功次数覆盖回填完成", false, { duration: 7000 });
+        await loadTokens();
+      } catch (err) {
+        const message = err.message || "覆盖回填成功次数失败";
+        if (overwriteSuccessCountsResult) {
+          overwriteSuccessCountsResult.textContent = message;
+        }
+        showToast(message, true, { duration: 8000 });
+      } finally {
+        overwriteSuccessCountsBtn.disabled = false;
+      }
+    });
+  }
 
   function formatProxyConnectivityItem(title, item) {
     const data = item && typeof item === "object" ? item : {};
@@ -1667,6 +1775,192 @@
     return parts.join("，");
   }
 
+  function stopActiveTaskTracker() {
+    if (activeTaskTracker?.timer) {
+      clearTimeout(activeTaskTracker.timer);
+    }
+    activeTaskTracker = null;
+  }
+
+  function getTaskBadgeText(status) {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "queued") return "排队中";
+    if (normalized === "running") return "进行中";
+    if (normalized === "succeeded" || normalized === "ok") return "成功";
+    if (normalized === "skipped") return "跳过";
+    if (normalized === "partial") return "部分完成";
+    if (normalized === "failed" || normalized === "error") return "失败";
+    return normalized || "未知";
+  }
+
+  function getTaskHeaderStatusText(status) {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "queued") return "任务排队中";
+    if (normalized === "running") return "任务进行中";
+    if (normalized === "ok") return "任务已完成";
+    if (normalized === "partial") return "任务部分完成";
+    if (normalized === "failed") return "任务失败";
+    return "任务状态未知";
+  }
+
+  function formatTaskDuration(ms) {
+    const value = Number(ms || 0);
+    if (!Number.isFinite(value) || value <= 0) return "-";
+    if (value < 1000) return `${Math.round(value)} ms`;
+    return `${(value / 1000).toFixed(1)} s`;
+  }
+
+  function renderTaskReportItems(items) {
+    if (!taskReportItems) return;
+    const rows = Array.isArray(items) ? items : [];
+    if (!rows.length) {
+      taskReportItems.innerHTML = '<div class="empty-state" style="padding: 20px;">暂无明细</div>';
+      return;
+    }
+    const recent = rows.slice().sort((a, b) => Number(a.index || 0) - Number(b.index || 0)).slice(-20);
+    taskReportItems.innerHTML = recent.map((item) => {
+      const name = String(item.token_account_name || item.profile_name || "").trim();
+      const email = String(item.token_account_email || "").trim();
+      const id = String(item.token_id || item.profile_id || "").trim();
+      const title = name || email || id || `任务 #${Number(item.index || 0) + 1}`;
+      const sub = [email && email !== title ? email : "", id && id !== title ? `ID: ${id}` : ""].filter(Boolean).join(" | ");
+      const detail = String(item.detail || "").trim();
+      const duration = formatTaskDuration(item.refresh_call_ms);
+      const status = String(item.status || "").trim().toLowerCase() || "queued";
+      return `
+        <div class="task-report-item">
+          <div class="task-report-item-head">
+            <div class="task-report-item-title">${escapeHtml(title)}</div>
+            <span class="task-report-badge ${escapeHtml(status)}">${escapeHtml(getTaskBadgeText(status))}</span>
+          </div>
+          <div class="task-report-item-meta">
+            ${sub ? `<div>${escapeHtml(sub)}</div>` : ""}
+            <div>耗时：${escapeHtml(duration)}</div>
+            ${detail ? `<div>${escapeHtml(detail)}</div>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderTaskReport(title, payload) {
+    const background = payload?.background_refresh || {};
+    const total = Number(payload?.total ?? background?.total_count ?? 0) || 0;
+    const completed = Number(background?.completed_count ?? 0) || 0;
+    const queued = Number(background?.queued_count ?? 0) || 0;
+    const running = Number(background?.running_count ?? 0) || 0;
+    const success = Number(payload?.success_count ?? payload?.refreshed_count ?? 0) || 0;
+    const skipped = Number(payload?.skipped_count ?? 0) || 0;
+    const failed = Number(
+      payload?.error_count != null ? payload.error_count : payload?.failed_count ?? 0
+    ) || 0;
+    const duplicate = Number(payload?.duplicate_count ?? 0) || 0;
+    const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : 0;
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const runningItem = items.find((item) => String(item.status || "").trim().toLowerCase() === "running");
+
+    if (taskReportTitle) taskReportTitle.textContent = title;
+    if (taskReportStatus) taskReportStatus.textContent = getTaskHeaderStatusText(payload?.status);
+    if (taskReportProgressText) taskReportProgressText.textContent = `${completed} / ${total}`;
+    if (taskReportProgressBar) taskReportProgressBar.style.width = `${percent}%`;
+    if (taskReportSummary) {
+      const parts = [
+        `总数 ${total}`,
+        `已完成 ${completed}`,
+        `成功 ${success}`,
+      ];
+      if (duplicate > 0) parts.push(`重复 ${duplicate}`);
+      if (skipped > 0) parts.push(`跳过 ${skipped}`);
+      if (failed > 0) parts.push(`失败 ${failed}`);
+      if (queued > 0) parts.push(`排队 ${queued}`);
+      if (running > 0) parts.push(`进行中 ${running}`);
+      const totalMs = Number(payload?.timing?.total_ms || 0);
+      if (totalMs > 0) parts.push(`耗时 ${formatTaskDuration(totalMs)}`);
+      taskReportSummary.textContent = parts.join("，");
+    }
+    if (taskReportCurrent) {
+      if (runningItem) {
+        const currentName = String(
+          runningItem.token_account_name ||
+          runningItem.profile_name ||
+          runningItem.token_account_email ||
+          runningItem.token_id ||
+          runningItem.profile_id ||
+          ""
+        ).trim();
+        taskReportCurrent.textContent = currentName ? `当前处理：${currentName}` : "当前处理：正在执行任务";
+      } else if (String(payload?.status || "").trim().toLowerCase() === "queued") {
+        taskReportCurrent.textContent = "当前处理：等待任务开始";
+      } else if (Boolean(background?.completed)) {
+        taskReportCurrent.textContent = "最终报告已生成，可查看后手动关闭";
+      } else {
+        taskReportCurrent.textContent = "";
+      }
+    }
+    renderTaskReportItems(items);
+    openDialog(taskReportModal);
+  }
+
+  async function trackBackgroundJob({
+    title,
+    initialPayload,
+    pollUrl,
+    onComplete,
+  }) {
+    stopActiveTaskTracker();
+    let payload = initialPayload || {};
+    renderTaskReport(title, payload);
+
+    const run = async () => {
+      try {
+        const res = await fetch(pollUrl);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.detail || "任务状态查询失败");
+        }
+        payload = data || {};
+        renderTaskReport(title, payload);
+        if (payload?.background_refresh?.completed) {
+          stopActiveTaskTracker();
+          if (typeof onComplete === "function") {
+            await onComplete(payload);
+          }
+          return;
+        }
+        activeTaskTracker = {
+          timer: setTimeout(run, 1200),
+          pollUrl,
+        };
+      } catch (err) {
+        stopActiveTaskTracker();
+        renderTaskReport(title, {
+          status: "failed",
+          total: Number(payload?.total || 0),
+          failed_count: 1,
+          items: [
+            {
+              index: 0,
+              status: "failed",
+              detail: err.message || "任务状态查询失败",
+            },
+          ],
+          background_refresh: {
+            total_count: Number(payload?.total || 0),
+            completed_count: Number(payload?.background_refresh?.completed_count || 0),
+            queued_count: 0,
+            running_count: 0,
+            completed: true,
+          },
+        });
+      }
+    };
+
+    activeTaskTracker = {
+      timer: setTimeout(run, 1200),
+      pollUrl,
+    };
+  }
+
   async function importCookies() {
     const text = String(cookieInput?.value || "").trim();
     if (!text) {
@@ -1728,16 +2022,29 @@
             : "Cookie 导入失败";
         throw new Error(detailText);
       }
-
-      showMsg(
-        refreshMsg,
-        buildImportSummaryText("Cookie导入", data),
-        getImportFailedCount(data) > 0,
-        { duration: 8000 }
-      );
+      const jobId = String(data?.background_refresh?.job_id || "").trim();
+      if (!jobId) {
+        throw new Error("Cookie 导入任务创建失败");
+      }
       if (cookieInput) cookieInput.value = "";
       if (cookieFile) cookieFile.value = "";
-      await loadTokens();
+      closeDialog(refreshModal);
+      await trackBackgroundJob({
+        title: "Cookie 导入进度",
+        initialPayload: data,
+        pollUrl: `/api/v1/refresh-profiles/import-cookie-jobs/${encodeURIComponent(jobId)}`,
+        onComplete: async (payload) => {
+          await loadTokens();
+          const hasFailed = getImportFailedCount(payload) > 0;
+          showMsg(
+            refreshMsg,
+            buildImportSummaryText("Cookie导入", payload),
+            hasFailed,
+            { duration: 8000 }
+          );
+          showToast(buildImportSummaryText("Cookie导入", payload), hasFailed, { duration: 7000 });
+        },
+      });
     } catch (err) {
       showMsg(refreshMsg, err.message || "Cookie 导入失败", true, { duration: 8000 });
     } finally {

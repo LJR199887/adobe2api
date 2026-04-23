@@ -456,6 +456,25 @@
     </div>
   </div>
 
+  <div id="taskReportModal" class="dialog-modal" aria-hidden="true">
+    <div class="dialog-card task-report-card" role="dialog" aria-modal="true" aria-label="任务进度">
+      <div class="list-head" style="margin-bottom: 10px;">
+        <h2 id="taskReportTitle">任务进度</h2>
+        <button id="taskReportCloseBtn" class="secondary small" type="button">关闭</button>
+      </div>
+      <div class="task-report-status-row">
+        <div id="taskReportStatus" class="task-report-status">等待开始</div>
+        <div id="taskReportProgressText" class="task-report-progress-text">0 / 0</div>
+      </div>
+      <div class="task-report-progress">
+        <div id="taskReportProgressBar" class="task-report-progress-bar"></div>
+      </div>
+      <div id="taskReportSummary" class="refresh-status">等待任务启动...</div>
+      <div id="taskReportCurrent" class="task-report-current"></div>
+      <div id="taskReportItems" class="task-report-items"></div>
+    </div>
+  </div>
+
   <div id="previewModal" class="preview-modal" aria-hidden="true">
     <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="媒体预览">
       <button id="previewCloseBtn" class="preview-close" type="button">关闭</button>
@@ -488,6 +507,6 @@
 
   <div id="appToast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="/static/admin.js?v=20260422-3"></script>
+  <script src="/static/admin.js?v=20260423-1"></script>
 </body>
 </html>

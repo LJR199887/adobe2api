@@ -285,6 +285,13 @@ class AdobeClient:
             "user-agent": self.user_agent,
         }
 
+    @staticmethod
+    def _raise_auth_or_quota(resp) -> None:
+        access_error = str(resp.headers.get("x-access-error") or "").strip().lower()
+        if access_error == "taste_exhausted":
+            raise QuotaExhaustedError("Adobe quota exhausted for this account")
+        raise AuthError("Token invalid or expired")
+
     def _post_json(self, url: str, headers: dict, payload: dict):
         session = self._session(proxy_kind="basic")
         if session is None:
@@ -483,7 +490,7 @@ class AdobeClient:
         )
 
         if resp.status_code in (401, 403):
-            raise AuthError("Token invalid or expired")
+            self._raise_auth_or_quota(resp)
         if resp.status_code != 200:
             if resp.status_code in (429, 451) or resp.status_code >= 500:
                 raise UpstreamTemporaryError(
@@ -939,10 +946,7 @@ class AdobeClient:
         )
 
         if submit_resp.status_code in (401, 403):
-            access_error = submit_resp.headers.get("x-access-error")
-            if access_error == "taste_exhausted":
-                raise QuotaExhaustedError("Adobe quota exhausted for this account")
-            raise AuthError("Token invalid or expired")
+            self._raise_auth_or_quota(submit_resp)
 
         if submit_resp.status_code != 200:
             if submit_resp.status_code in (429, 451) or submit_resp.status_code >= 500:
@@ -986,7 +990,7 @@ class AdobeClient:
                     poll_url, headers=self._poll_headers(token), timeout=60
                 )
                 if poll_resp.status_code in (401, 403):
-                    raise AuthError("Token invalid or expired")
+                    self._raise_auth_or_quota(poll_resp)
                 if poll_resp.status_code != 200:
                     if poll_resp.status_code in (429, 451) or poll_resp.status_code >= 500:
                         raise UpstreamTemporaryError(
@@ -1180,9 +1184,7 @@ class AdobeClient:
                 access_error,
                 submit_resp.text[:300],
             )
-            if access_error == "taste_exhausted":
-                raise QuotaExhaustedError("Adobe quota exhausted for this account")
-            raise AuthError("Token invalid or expired")
+            self._raise_auth_or_quota(submit_resp)
 
         if submit_resp.status_code != 200:
             logger.error(
@@ -1236,6 +1238,8 @@ class AdobeClient:
                 poll_resp = self._get(
                     poll_url, headers=self._poll_headers(token), timeout=60
                 )
+                if poll_resp.status_code in (401, 403):
+                    self._raise_auth_or_quota(poll_resp)
                 if poll_resp.status_code != 200:
                     logger.error(
                         "poll failed status=%s body=%s",

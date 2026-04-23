@@ -194,6 +194,16 @@ class RequestLogStore:
         return "token invalid or expired" in message
 
     @classmethod
+    def _is_token_invalid_backfill_candidate(cls, item: dict) -> bool:
+        if cls._is_token_invalid_or_expired_error(item):
+            return True
+        try:
+            status_code = int(item.get("status_code") or 0)
+        except Exception:
+            status_code = 0
+        return status_code == 401
+
+    @classmethod
     def _is_failed_item(cls, item: dict) -> bool:
         if not isinstance(item, dict):
             return False
@@ -422,11 +432,9 @@ class RequestLogStore:
                 continue
             if not self._is_generation_request(item):
                 continue
-            if not self._is_token_invalid_or_expired_error(item):
+            if not self._is_token_invalid_backfill_candidate(item):
                 continue
             upstream_job_id = str(item.get("upstream_job_id") or "").strip()
-            if not upstream_job_id:
-                continue
 
             token_id = str(item.get("token_id") or "").strip()
             email = str(item.get("token_account_email") or "").strip()
@@ -453,18 +461,30 @@ class RequestLogStore:
                     "first_ts": ts_val,
                     "last_ts": ts_val,
                     "upstream_job_ids": [],
+                    "has_upstream_job_id": bool(upstream_job_id),
+                    "matched_reasons": [],
                 }
                 grouped[account_key] = bucket
 
             bucket["matched_log_count"] = int(bucket.get("matched_log_count") or 0) + 1
             bucket["first_ts"] = min(float(bucket.get("first_ts") or ts_val), ts_val)
             bucket["last_ts"] = max(float(bucket.get("last_ts") or ts_val), ts_val)
+            if upstream_job_id:
+                bucket["has_upstream_job_id"] = True
             if token_id and not bucket.get("token_id"):
                 bucket["token_id"] = token_id
             if email and not bucket.get("token_account_email"):
                 bucket["token_account_email"] = email
             if name and not bucket.get("token_account_name"):
                 bucket["token_account_name"] = name
+            reason = (
+                "token_invalid_or_expired"
+                if self._is_token_invalid_or_expired_error(item)
+                else "http_401"
+            )
+            reasons = bucket.get("matched_reasons")
+            if isinstance(reasons, list) and reason not in reasons:
+                reasons.append(reason)
             if upstream_job_id:
                 job_ids = bucket.get("upstream_job_ids")
                 if isinstance(job_ids, list) and upstream_job_id not in job_ids:

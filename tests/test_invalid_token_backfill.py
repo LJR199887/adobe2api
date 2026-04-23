@@ -9,7 +9,7 @@ def make_token_manager(tmp_path, monkeypatch):
     return token_mgr.TokenManager()
 
 
-def test_poll_invalid_token_logs_are_backfill_candidates(tmp_path):
+def test_401_token_logs_are_backfill_candidates(tmp_path):
     store = RequestLogStore(tmp_path / "request_logs.jsonl", max_items=100)
     store.add_payload(
         {
@@ -29,24 +29,38 @@ def test_poll_invalid_token_logs_are_backfill_candidates(tmp_path):
     )
     store.add_payload(
         {
-            "id": "submit-invalid",
+            "id": "http-401-without-error-text",
             "ts": 101,
             "method": "POST",
             "path": "/v1/chat/completions",
             "status_code": 401,
             "duration_sec": 1,
             "operation": "chat.completions",
-            "error": "Token invalid or expired.",
+            "error": None,
             "task_status": "FAILED",
             "token_id": "tok_2",
+        }
+    )
+    store.add_payload(
+        {
+            "id": "server-error",
+            "ts": 102,
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "status_code": 503,
+            "duration_sec": 1,
+            "operation": "chat.completions",
+            "error": "upstream temporary error",
+            "task_status": "FAILED",
+            "token_id": "tok_3",
         }
     )
 
     result = store.find_poll_invalid_token_candidates()
 
-    assert result["matched_logs"] == 1
-    assert result["candidate_count"] == 1
-    assert result["candidates"][0]["token_id"] == "tok_1"
+    assert result["matched_logs"] == 2
+    assert result["candidate_count"] == 2
+    assert {item["token_id"] for item in result["candidates"]} == {"tok_1", "tok_2"}
 
 
 def test_report_exhausted_by_identity_disables_active_pool(tmp_path, monkeypatch):

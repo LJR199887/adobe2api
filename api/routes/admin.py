@@ -795,7 +795,7 @@ def build_admin_router(
         refresh_manager.set_enabled(profile_id, False)
         return True, profile_id
 
-    def _disable_token_for_abnormal_check(
+    def _mark_token_abnormal_for_check(
         token_info: dict,
         *,
         detail: str,
@@ -804,13 +804,17 @@ def build_admin_router(
         previous_status = str(token_info.get("status") or "").strip().lower() or "active"
         final_status = previous_status
         status_changed = False
-        if token_id and previous_status in {"active", "error"}:
-            token_manager.set_status(token_id, "disabled")
-            refreshed = token_manager.get_by_id(token_id) or {}
+        if token_id and previous_status not in {"invalid", "exhausted", "abnormal"}:
+            updated = token_manager.report_abnormal_by_identity(token_id=token_id)
+            refreshed = (
+                updated
+                if isinstance(updated, dict) and updated
+                else token_manager.get_by_id(token_id) or {}
+            )
             if isinstance(refreshed, dict) and refreshed:
                 token_info = refreshed
-            final_status = "disabled"
-            status_changed = previous_status != "disabled"
+            final_status = "abnormal"
+            status_changed = previous_status != "abnormal"
 
         profile_disabled = False
         disabled_profile_id = ""
@@ -909,6 +913,13 @@ def build_admin_router(
                 "status_code": status_code,
                 "result": "valid",
                 "detail": "authorized request succeeded",
+            }
+        if status_code == 403:
+            return {
+                "token_id": token_id,
+                "status_code": status_code,
+                "result": "abnormal",
+                "detail": "credits endpoint returned 403",
             }
         return {
             "token_id": token_id,
@@ -1212,7 +1223,7 @@ def build_admin_router(
                 item["auto_refresh_enabled"] = None
                 continue
             pid = str(item.get("refresh_profile_id") or "").strip()
-            if str(item.get("status") or "").strip().lower() == "exhausted" and pid:
+            if str(item.get("status") or "").strip().lower() in {"exhausted", "invalid", "abnormal"} and pid:
                 try:
                     refresh_manager.set_enabled(pid, False)
                 except Exception:
@@ -1362,11 +1373,29 @@ def build_admin_router(
                 return index, "skipped", {"token_id": tid, "detail": "token not found"}
 
             current_status = str(token_info.get("status") or "").strip().lower()
-            if current_status != "active":
-                return index, "abnormal", _disable_token_for_abnormal_check(
+            if current_status in {"invalid", "exhausted", "abnormal"}:
+                return index, "skipped", {
+                    "token_id": tid,
+                    "status": current_status,
+                    "detail": f"token already in terminal status: {current_status}",
+                }
+            if current_status == "disabled":
+                return index, "skipped", {
+                    "token_id": tid,
+                    "status": current_status,
+                    "detail": "disabled token is not checked",
+                }
+            if current_status == "error":
+                return index, "abnormal", _mark_token_abnormal_for_check(
                     token_info,
-                    detail=f"token already in abnormal status: {current_status or 'unknown'}",
+                    detail="token already in request error status",
                 )
+            if current_status != "active":
+                return index, "skipped", {
+                    "token_id": tid,
+                    "status": current_status,
+                    "detail": f"unsupported token status: {current_status or 'unknown'}",
+                }
 
             try:
                 result = _check_token_invalid_or_expired(token_info)
@@ -1401,7 +1430,7 @@ def build_admin_router(
             if result.get("result") == "valid":
                 return index, "valid", result
             if result.get("result") == "abnormal":
-                abnormal_payload = _disable_token_for_abnormal_check(
+                abnormal_payload = _mark_token_abnormal_for_check(
                     token_info,
                     detail=str(result.get("detail") or "").strip()
                     or "token marked as abnormal during invalid check",
@@ -1434,7 +1463,7 @@ def build_admin_router(
                 ).strip()
                 if disabled_profile_id:
                     disabled_profile_ids.append(disabled_profile_id)
-                if str(payload.get("status") or "").strip().lower() == "disabled":
+                if str(payload.get("status") or "").strip().lower() == "abnormal":
                     disabled_tokens.append(str(payload.get("token_id") or "").strip())
             elif status == "valid":
                 valid.append(payload)
@@ -1461,7 +1490,7 @@ def build_admin_router(
             "abnormal_count": len(abnormal),
             "skipped_count": len(skipped),
             "failed_count": len(failed),
-            "disabled_count": len({tid for tid in disabled_tokens if tid}),
+            "abnormal_changed_count": len({tid for tid in disabled_tokens if tid}),
             "disabled_auto_refresh_count": len(set(disabled_profile_ids)),
             "invalid": invalid,
             "valid": valid,
@@ -1485,10 +1514,10 @@ def build_admin_router(
         token_info = token_manager.get_by_id(tid)
         if not token_info:
             raise HTTPException(status_code=404, detail="token not found")
-        if status == "active" and token_info.get("status") in {"exhausted", "invalid"}:
+        if status == "active" and token_info.get("status") in {"exhausted", "invalid", "abnormal"}:
             raise HTTPException(
                 status_code=400,
-                detail="exhausted/invalid token cannot be reactivated; replace with a fresh token",
+                detail="exhausted/invalid/abnormal token cannot be reactivated; replace with a fresh token",
             )
         token_manager.set_status(tid, status)
         if status == "disabled" and token_info.get("auto_refresh"):

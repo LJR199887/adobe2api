@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.routes.admin import build_admin_router
@@ -33,6 +33,16 @@ class DummyTokenManager:
             return None
         previous = str(token.get("status") or "").strip().lower()
         token["status"] = "invalid"
+        result = dict(token)
+        result["_previous_status"] = previous
+        return result
+
+    def report_abnormal_by_identity(self, *, token_id="", **_kwargs):
+        token = self.tokens.get(str(token_id))
+        if not token:
+            return None
+        previous = str(token.get("status") or "").strip().lower()
+        token["status"] = "abnormal"
         result = dict(token)
         result["_previous_status"] = previous
         return result
@@ -87,7 +97,7 @@ def build_client(token_manager, refresh_manager):
     return TestClient(app)
 
 
-def test_invalid_check_marks_missing_account_id_token_disabled():
+def test_invalid_check_marks_missing_account_id_token_abnormal():
     token_manager = DummyTokenManager(
         [
             {
@@ -107,14 +117,14 @@ def test_invalid_check_marks_missing_account_id_token_disabled():
     assert response.status_code == 200
     payload = response.json()
     assert payload["abnormal_count"] == 1
-    assert payload["disabled_count"] == 1
+    assert payload["abnormal_changed_count"] == 1
     assert payload["disabled_auto_refresh_count"] == 1
     assert payload["skipped_count"] == 0
-    assert token_manager.get_by_id("tok-1")["status"] == "disabled"
+    assert token_manager.get_by_id("tok-1")["status"] == "abnormal"
     assert refresh_manager.disabled_profile_ids == ["profile-1"]
 
 
-def test_invalid_check_disables_error_status_token_and_auto_refresh():
+def test_invalid_check_marks_error_status_token_abnormal_and_auto_refresh_off():
     token_manager = DummyTokenManager(
         [
             {
@@ -134,16 +144,16 @@ def test_invalid_check_disables_error_status_token_and_auto_refresh():
     assert response.status_code == 200
     payload = response.json()
     assert payload["abnormal_count"] == 1
-    assert payload["disabled_count"] == 1
+    assert payload["abnormal_changed_count"] == 1
     assert payload["disabled_auto_refresh_count"] == 1
     abnormal = payload["abnormal"][0]
     assert abnormal["previous_status"] == "error"
-    assert abnormal["status"] == "disabled"
-    assert token_manager.get_by_id("tok-2")["status"] == "disabled"
+    assert abnormal["status"] == "abnormal"
+    assert token_manager.get_by_id("tok-2")["status"] == "abnormal"
     assert refresh_manager.disabled_profile_ids == ["profile-2"]
 
 
-def test_invalid_check_keeps_unknown_403_response_as_skipped(monkeypatch):
+def test_invalid_check_marks_403_response_as_abnormal(monkeypatch):
     token_manager = DummyTokenManager(
         [
             {
@@ -171,9 +181,9 @@ def test_invalid_check_keeps_unknown_403_response_as_skipped(monkeypatch):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["abnormal_count"] == 0
-    assert payload["disabled_count"] == 0
-    assert payload["disabled_auto_refresh_count"] == 0
-    assert payload["skipped_count"] == 1
-    assert token_manager.get_by_id("tok-3")["status"] == "active"
-    assert refresh_manager.disabled_profile_ids == []
+    assert payload["abnormal_count"] == 1
+    assert payload["abnormal_changed_count"] == 1
+    assert payload["disabled_auto_refresh_count"] == 1
+    assert payload["skipped_count"] == 0
+    assert token_manager.get_by_id("tok-3")["status"] == "abnormal"
+    assert refresh_manager.disabled_profile_ids == ["profile-3"]

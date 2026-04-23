@@ -510,6 +510,20 @@ class TokenManager:
             token_account_name=token_account_name,
         )
 
+    def report_abnormal_by_identity(
+        self,
+        *,
+        token_id: str = "",
+        token_account_email: str = "",
+        token_account_name: str = "",
+    ) -> Optional[Dict]:
+        return self._report_status_by_identity(
+            "abnormal",
+            token_id=token_id,
+            token_account_email=token_account_email,
+            token_account_name=token_account_name,
+        )
+
     def report_invalid(self, value: str) -> Optional[Dict]:
         updated = None
         with self._lock:

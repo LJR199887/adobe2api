@@ -123,9 +123,21 @@
     "active": "生效中",
     "exhausted": "额度耗尽",
     "invalid": "已失效",
+    "abnormal": "异常",
     "error": "请求异常",
     "disabled": "已禁用"
   };
+  if (tokenStatusFilter && !tokenStatusFilter.querySelector('option[value="abnormal"]')) {
+    const abnormalOption = document.createElement("option");
+    abnormalOption.value = "abnormal";
+    abnormalOption.textContent = STATUS_MAP.abnormal;
+    const errorOption = tokenStatusFilter.querySelector('option[value="error"]');
+    if (errorOption) {
+      tokenStatusFilter.insertBefore(abnormalOption, errorOption);
+    } else {
+      tokenStatusFilter.appendChild(abnormalOption);
+    }
+  }
 
   function getTokenFilters() {
     return {
@@ -332,7 +344,7 @@
 
       const statusClass = `status-${t.status.toLowerCase()}`;
       const isStatusActive = t.status === "active";
-      const isFrozen = t.status === "exhausted" || t.status === "invalid";
+      const isFrozen = t.status === "exhausted" || t.status === "invalid" || t.status === "abnormal";
       const displayStatus = STATUS_MAP[t.status.toLowerCase()] || t.status;
       const tokenProfileName = String(t.refresh_profile_name || "").trim();
       const tokenProfileEmail = String(t.refresh_profile_email || "").trim();
@@ -352,7 +364,7 @@
         ? `<button class="action-mini" onclick="refreshToken('${t.id}')">刷新Token</button>`
         : `<button class="action-mini" disabled title="仅自动刷新 token 支持刷新">刷新Token</button>`;
       const statusBtn = isFrozen
-        ? `<button class="action-mini" disabled title="额度耗尽或已失效 token 不可启用">不可启用</button>`
+        ? `<button class="action-mini" disabled title="额度耗尽、已失效或异常 token 不可启用">不可启用</button>`
         : `<button class="action-mini" onclick="toggleToken('${t.id}', '${isStatusActive ? 'disabled' : 'active'}')">${isStatusActive ? '禁用Token' : '启用Token'}</button>`;
       const actionsGrid = `
         <div class="action-btns">
@@ -765,12 +777,12 @@
         return;
       }
       const ok = confirm(
-        `将主动检测选中的 ${selectedIds.length} 个 Token。明确返回 Token invalid or expired 时会标记为已失效；检测到本地异常状态时会禁用并关闭自动刷新。确定继续吗？`
+        `将主动检测选中的 ${selectedIds.length} 个 Token。明确返回 Token invalid or expired 时会标记为已失效；检测到本地异常或 403 时会标记为异常并关闭自动刷新。确定继续吗？`
       );
       if (!ok) return;
 
       checkInvalidTokensBatchBtn.disabled = true;
-      showToast("正在检测失效 Token...", false, { duration: 0 });
+      showToast("正在检测 Token 状态...", false, { duration: 0 });
       try {
         const res = await fetch("/api/v1/tokens/check-invalid-batch", {
           method: "POST",
@@ -779,24 +791,24 @@
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          throw new Error(data?.detail || "检测失效 Token 失败");
+          throw new Error(data?.detail || "检测 Token 状态失败");
         }
         const invalid = Number(data.invalid_count || 0);
         const changed = Number(data.changed_count || 0);
         const valid = Number(data.valid_count || 0);
         const abnormal = Number(data.abnormal_count || 0);
+        const abnormalChanged = Number(data.abnormal_changed_count || 0);
         const skipped = Number(data.skipped_count || 0);
         const failed = Number(data.failed_count || 0);
-        const disabledCount = Number(data.disabled_count || 0);
         const disabled = Number(data.disabled_auto_refresh_count || 0);
         showToast(
-          `检测完成：已失效 ${invalid}，新标记 ${changed}，异常 ${abnormal}，正常 ${valid}，禁用 ${disabledCount}，关闭自动刷新 ${disabled}，跳过 ${skipped}，失败 ${failed}`,
+          `检测完成：已失效 ${invalid}，新失效 ${changed}，异常 ${abnormal}，新异常 ${abnormalChanged}，正常 ${valid}，关闭自动刷新 ${disabled}，跳过 ${skipped}，失败 ${failed}`,
           failed > 0,
           { duration: 8000 }
         );
         await loadTokens();
       } catch (err) {
-        showToast(err.message || "检测失效 Token 失败", true, { duration: 8000 });
+        showToast(err.message || "检测 Token 状态失败", true, { duration: 8000 });
       } finally {
         checkInvalidTokensBatchBtn.disabled = false;
         updateTokenSelectionSummary();

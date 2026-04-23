@@ -845,6 +845,7 @@ td {
 .status-active { background: rgba(44, 199, 170, 0.2); color: #4de2c4; }
 .status-exhausted { background: rgba(225, 163, 44, 0.2); color: #ffca58; }
 .status-invalid { background: rgba(225, 96, 104, 0.2); color: #ffb4bc; }
+.status-abnormal { background: rgba(255, 132, 64, 0.2); color: #ffb37a; }
 .status-error { background: rgba(225, 96, 104, 0.2); color: #ffb4bc; }
 .status-disabled { background: rgba(255, 255, 255, 0.1); color: #aaa; }
 

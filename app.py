@@ -434,6 +434,12 @@ def _report_token_exhausted(token: str) -> Optional[dict]:
     return token_info
 
 
+def _report_token_invalid(token: str) -> Optional[dict]:
+    token_info = token_manager.report_invalid(token)
+    _disable_auto_refresh_for_token(token_info)
+    return token_info
+
+
 def _append_attempt_log(
     request: Request,
     operation: str,
@@ -806,7 +812,7 @@ def _run_with_token_retries(
                 task_status_override="FAILED",
             )
         except AuthError as exc:
-            token_manager.report_invalid(token)
+            _report_token_invalid(token)
             last_exc = exc
             upstream_job_created = bool(
                 str(getattr(request.state, "log_upstream_job_id", "") or "").strip()

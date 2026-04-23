@@ -430,8 +430,9 @@ class TokenManager:
             self.save()
         return updated
 
-    def report_exhausted_by_identity(
+    def _report_status_by_identity(
         self,
+        status: str,
         *,
         token_id: str = "",
         token_account_email: str = "",
@@ -472,7 +473,7 @@ class TokenManager:
 
             if target is not None:
                 previous_status = str(target.get("status") or "active")
-                target["status"] = "exhausted"
+                target["status"] = status
                 target["error_until"] = 0
                 updated = dict(target)
                 updated["_previous_status"] = previous_status
@@ -481,13 +482,44 @@ class TokenManager:
             self.save()
         return updated
 
-    def report_invalid(self, value: str):
+    def report_exhausted_by_identity(
+        self,
+        *,
+        token_id: str = "",
+        token_account_email: str = "",
+        token_account_name: str = "",
+    ) -> Optional[Dict]:
+        return self._report_status_by_identity(
+            "exhausted",
+            token_id=token_id,
+            token_account_email=token_account_email,
+            token_account_name=token_account_name,
+        )
+
+    def report_invalid_by_identity(
+        self,
+        *,
+        token_id: str = "",
+        token_account_email: str = "",
+        token_account_name: str = "",
+    ) -> Optional[Dict]:
+        return self._report_status_by_identity(
+            "invalid",
+            token_id=token_id,
+            token_account_email=token_account_email,
+            token_account_name=token_account_name,
+        )
+
+    def report_invalid(self, value: str) -> Optional[Dict]:
+        updated = None
         with self._lock:
             t = self._value_index.get(self._normalize_token_value(value))
             if t is not None:
                 t["status"] = "invalid"
                 t["error_until"] = 0
+                updated = dict(t)
             self.save()
+        return updated
 
     def report_error(self, value: str):
         with self._lock:

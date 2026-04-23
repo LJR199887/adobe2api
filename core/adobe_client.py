@@ -288,7 +288,11 @@ class AdobeClient:
     @staticmethod
     def _raise_auth_or_quota(resp) -> None:
         access_error = str(resp.headers.get("x-access-error") or "").strip().lower()
-        if access_error == "taste_exhausted":
+        response_text = str(getattr(resp, "text", "") or "").casefold()
+        if (
+            access_error == "taste_exhausted"
+            or "token quota exhausted" in response_text
+        ):
             raise QuotaExhaustedError("Adobe quota exhausted for this account")
         raise AuthError("Token invalid or expired")
 

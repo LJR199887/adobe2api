@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import requests
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from starlette.responses import RedirectResponse
@@ -24,9 +25,11 @@ from api.schemas import (
     TokenAutoRefreshBatchRequest,
     TokenBatchAddRequest,
     TokenCreditsBatchRefreshRequest,
+    TokenInvalidCheckRequest,
     TokenRefreshBatchRequest,
 )
 from core.proxy_utils import (
+    build_requests_proxies,
     resolve_basic_proxy,
     resolve_resource_proxy,
     test_authorized_endpoint,
@@ -479,6 +482,79 @@ def build_admin_router(
         refresh_manager.set_enabled(profile_id, False)
         return True, profile_id
 
+    def _response_text_for_invalid_check(resp) -> str:
+        parts = [str(getattr(resp, "text", "") or "")]
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = None
+
+        def collect(value: Any):
+            if isinstance(value, dict):
+                for child in value.values():
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+            elif value is not None:
+                parts.append(str(value))
+
+        collect(payload)
+        return "\n".join(parts).casefold()
+
+    def _check_token_invalid_or_expired(token_info: dict) -> dict:
+        token_id = str(token_info.get("id") or "").strip()
+        token_value = str(token_info.get("value") or "").strip()
+        if not token_value:
+            return {"token_id": token_id, "detail": "empty token"}
+
+        account_id = ""
+        try:
+            account_id = str(
+                refresh_manager._extract_account_id(token_value) or ""
+            ).strip()
+        except Exception:
+            account_id = ""
+        if not account_id:
+            return {"token_id": token_id, "detail": "account_id not found in token"}
+
+        cfg = config_manager.get_all()
+        proxy = resolve_basic_proxy(cfg)
+        resp = requests.get(
+            "https://firefly.adobe.io/v1/credits/balance",
+            headers={
+                "Authorization": f"Bearer {token_value}",
+                "x-api-key": "SunbreakWebUI1",
+                "x-account-id": account_id,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+            proxies=build_requests_proxies(proxy),
+        )
+        status_code = int(resp.status_code)
+        text = _response_text_for_invalid_check(resp)
+        if "token invalid or expired" in text:
+            return {
+                "token_id": token_id,
+                "status_code": status_code,
+                "result": "invalid",
+                "detail": "Token invalid or expired",
+            }
+        if status_code == 200:
+            return {
+                "token_id": token_id,
+                "status_code": status_code,
+                "result": "valid",
+                "detail": "authorized request succeeded",
+            }
+        return {
+            "token_id": token_id,
+            "status_code": status_code,
+            "result": "unknown",
+            "detail": f"response did not contain Token invalid or expired ({status_code})",
+        }
+
     def build_basic_business_proxy_result(proxy: str) -> dict[str, Any]:
         result = {
             "name": "basic_business",
@@ -689,186 +765,6 @@ def build_admin_router(
         items = log_store.list_failed_accounts(limit=limit)
         return {"items": items, "total": len(items)}
 
-    @router.post("/api/v1/logs/backfill-invalid-token-exhausted")
-    def backfill_invalid_token_exhausted(request: Request, limit: int = 500):
-        require_admin_auth(request)
-        request_log_scan = log_store.find_poll_invalid_token_candidates(limit=limit)
-        error_detail_scan = error_store.find_invalid_token_candidates(limit=limit)
-
-        merged_candidates: dict[str, dict] = {}
-        for source_name, scan in (
-            ("request_logs", request_log_scan),
-            ("request_errors", error_detail_scan),
-        ):
-            candidates = scan.get("candidates") if isinstance(scan, dict) else []
-            if not isinstance(candidates, list):
-                continue
-            for candidate in candidates:
-                if not isinstance(candidate, dict):
-                    continue
-                account_key = str(candidate.get("account_key") or "").strip()
-                if not account_key:
-                    continue
-                existing = merged_candidates.get(account_key)
-                if existing is None:
-                    copied = dict(candidate)
-                    sources = copied.get("sources")
-                    if not isinstance(sources, list):
-                        sources = []
-                    if source_name not in sources:
-                        sources.append(source_name)
-                    copied["sources"] = sources
-                    merged_candidates[account_key] = copied
-                    continue
-
-                existing["matched_log_count"] = int(
-                    existing.get("matched_log_count") or 0
-                ) + int(candidate.get("matched_log_count") or 0)
-                existing["first_ts"] = min(
-                    float(existing.get("first_ts") or 0),
-                    float(candidate.get("first_ts") or 0),
-                )
-                existing["last_ts"] = max(
-                    float(existing.get("last_ts") or 0),
-                    float(candidate.get("last_ts") or 0),
-                )
-                if candidate.get("token_id") and not existing.get("token_id"):
-                    existing["token_id"] = candidate.get("token_id")
-                if candidate.get("token_account_email") and not existing.get(
-                    "token_account_email"
-                ):
-                    existing["token_account_email"] = candidate.get(
-                        "token_account_email"
-                    )
-                if candidate.get("token_account_name") and not existing.get(
-                    "token_account_name"
-                ):
-                    existing["token_account_name"] = candidate.get("token_account_name")
-                if bool(candidate.get("has_upstream_job_id")):
-                    existing["has_upstream_job_id"] = True
-                for reason in candidate.get("matched_reasons") or []:
-                    reasons = existing.setdefault("matched_reasons", [])
-                    if isinstance(reasons, list) and reason not in reasons:
-                        reasons.append(reason)
-                for job_id in candidate.get("upstream_job_ids") or []:
-                    job_ids = existing.setdefault("upstream_job_ids", [])
-                    if isinstance(job_ids, list) and job_id not in job_ids:
-                        job_ids.append(job_id)
-                sources = existing.setdefault("sources", [])
-                if isinstance(sources, list) and source_name not in sources:
-                    sources.append(source_name)
-
-        candidates = sorted(
-            merged_candidates.values(),
-            key=lambda x: (
-                -float(x.get("last_ts") or 0),
-                str(x.get("account_key") or "").casefold(),
-            ),
-        )[: max(1, min(5000, int(limit or 500)))]
-
-        updated = []
-        skipped = []
-        disabled_profile_ids = []
-        seen_token_ids = set()
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-            token_info = token_manager.report_exhausted_by_identity(
-                token_id=str(candidate.get("token_id") or "").strip(),
-                token_account_email=str(
-                    candidate.get("token_account_email") or ""
-                ).strip(),
-                token_account_name=str(candidate.get("token_account_name") or "").strip(),
-            )
-            if not token_info:
-                skipped.append(
-                    {
-                        "account_key": candidate.get("account_key"),
-                        "token_id": candidate.get("token_id"),
-                        "token_account_email": candidate.get("token_account_email"),
-                        "token_account_name": candidate.get("token_account_name"),
-                        "matched_log_count": candidate.get("matched_log_count"),
-                        "reason": "token not found or account match is ambiguous",
-                    }
-                )
-                continue
-
-            token_id = str(token_info.get("id") or "").strip()
-            if token_id and token_id in seen_token_ids:
-                continue
-            if token_id:
-                seen_token_ids.add(token_id)
-
-            profile_disabled = False
-            disabled_profile_id = ""
-            try:
-                profile_disabled, disabled_profile_id = disable_auto_refresh_for_token_info(
-                    token_info
-                )
-                if disabled_profile_id:
-                    disabled_profile_ids.append(disabled_profile_id)
-            except Exception as exc:
-                skipped.append(
-                    {
-                        "account_key": candidate.get("account_key"),
-                        "token_id": token_id,
-                        "token_account_email": candidate.get("token_account_email"),
-                        "token_account_name": candidate.get("token_account_name"),
-                        "matched_log_count": candidate.get("matched_log_count"),
-                        "reason": f"token exhausted but auto refresh disable failed: {exc}",
-                    }
-                )
-
-            updated.append(
-                {
-                    "token_id": token_id,
-                    "token_account_email": token_info.get("refresh_profile_email")
-                    or candidate.get("token_account_email"),
-                    "token_account_name": token_info.get("refresh_profile_name")
-                    or candidate.get("token_account_name"),
-                    "previous_status": token_info.get("_previous_status"),
-                    "status": token_info.get("status"),
-                    "matched_by": token_info.get("_matched_by"),
-                    "matched_log_count": candidate.get("matched_log_count"),
-                    "matched_reasons": candidate.get("matched_reasons") or [],
-                    "sources": candidate.get("sources") or [],
-                    "auto_refresh_disabled": profile_disabled,
-                    "disabled_profile_id": disabled_profile_id or None,
-                }
-            )
-
-        changed_count = len(
-            [
-                item
-                for item in updated
-                if str(item.get("previous_status") or "").strip().lower()
-                != "exhausted"
-            ]
-        )
-
-        return {
-            "status": "ok",
-            "scanned_logs": int(request_log_scan.get("scanned_logs", 0) or 0)
-            + int(error_detail_scan.get("scanned_logs", 0) or 0),
-            "matched_logs": int(request_log_scan.get("matched_logs", 0) or 0)
-            + int(error_detail_scan.get("matched_logs", 0) or 0),
-            "unidentified_logs": int(
-                request_log_scan.get("unidentified_logs", 0) or 0
-            )
-            + int(error_detail_scan.get("unidentified_logs", 0) or 0),
-            "candidate_count": len(candidates),
-            "request_log_scanned": request_log_scan.get("scanned_logs", 0),
-            "request_log_matched": request_log_scan.get("matched_logs", 0),
-            "error_detail_scanned": error_detail_scan.get("scanned_logs", 0),
-            "error_detail_matched": error_detail_scan.get("matched_logs", 0),
-            "updated_count": len(updated),
-            "changed_count": changed_count,
-            "skipped_count": len(skipped),
-            "disabled_auto_refresh_count": len(set(disabled_profile_ids)),
-            "updated": updated,
-            "skipped": skipped,
-        }
-
     @router.get("/api/v1/logs/errors/{code}")
     def get_error_detail(code: str, request: Request):
         require_admin_auth(request)
@@ -1077,6 +973,118 @@ def build_admin_router(
             "missing_count": len(missing),
             "deleted_ids": deleted,
             "missing_ids": missing,
+        }
+
+    @router.post("/api/v1/tokens/check-invalid-batch")
+    def check_invalid_tokens_batch(req: TokenInvalidCheckRequest, request: Request):
+        require_admin_auth(request)
+        token_ids = [
+            str(x or "").strip() for x in (req.ids or []) if str(x or "").strip()
+        ]
+        if not token_ids:
+            raise HTTPException(status_code=400, detail="ids is required")
+
+        checked = []
+        invalid = []
+        valid = []
+        skipped = []
+        failed = []
+        disabled_profile_ids = []
+        max_workers = min(get_batch_concurrency(), len(token_ids))
+
+        def check_one(index: int, tid: str):
+            token_info = token_manager.get_by_id(tid)
+            if not token_info:
+                return index, "skipped", {"token_id": tid, "detail": "token not found"}
+
+            current_status = str(token_info.get("status") or "").strip().lower()
+            if current_status != "active":
+                return index, "skipped", {
+                    "token_id": tid,
+                    "status": current_status,
+                    "detail": "only active tokens are checked",
+                }
+
+            try:
+                result = _check_token_invalid_or_expired(token_info)
+            except Exception as exc:
+                return index, "failed", {"token_id": tid, "detail": str(exc)}
+
+            if result.get("result") == "invalid":
+                updated = token_manager.report_invalid_by_identity(token_id=tid)
+                profile_disabled = False
+                disabled_profile_id = ""
+                if isinstance(updated, dict):
+                    try:
+                        profile_disabled, disabled_profile_id = (
+                            disable_auto_refresh_for_token_info(updated)
+                        )
+                    except Exception as exc:
+                        result["auto_refresh_disable_error"] = str(exc)
+                result.update(
+                    {
+                        "previous_status": (
+                            updated.get("_previous_status")
+                            if isinstance(updated, dict)
+                            else current_status
+                        ),
+                        "status": "invalid",
+                        "auto_refresh_disabled": profile_disabled,
+                        "disabled_profile_id": disabled_profile_id or None,
+                    }
+                )
+                return index, "invalid", result
+
+            if result.get("result") == "valid":
+                return index, "valid", result
+            return index, "skipped", result
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(check_one, index, tid)
+                for index, tid in enumerate(token_ids)
+            ]
+            done_items = [future.result() for future in as_completed(futures)]
+
+        done_items.sort(key=lambda item: item[0])
+        for _, status, payload in done_items:
+            checked.append(payload)
+            if status == "invalid":
+                invalid.append(payload)
+                disabled_profile_id = str(
+                    payload.get("disabled_profile_id") or ""
+                ).strip()
+                if disabled_profile_id:
+                    disabled_profile_ids.append(disabled_profile_id)
+            elif status == "valid":
+                valid.append(payload)
+            elif status == "failed":
+                failed.append(payload)
+            else:
+                skipped.append(payload)
+
+        changed_count = len(
+            [
+                item
+                for item in invalid
+                if str(item.get("previous_status") or "").strip().lower() != "invalid"
+            ]
+        )
+
+        return {
+            "status": "ok" if not failed else "partial",
+            "total": len(token_ids),
+            "checked_count": len(checked),
+            "invalid_count": len(invalid),
+            "changed_count": changed_count,
+            "valid_count": len(valid),
+            "skipped_count": len(skipped),
+            "failed_count": len(failed),
+            "disabled_auto_refresh_count": len(set(disabled_profile_ids)),
+            "invalid": invalid,
+            "valid": valid,
+            "skipped": skipped,
+            "failed": failed,
         }
 
     @router.delete("/api/v1/tokens/{tid}")

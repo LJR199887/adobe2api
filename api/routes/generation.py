@@ -246,6 +246,12 @@ def build_generation_router(
     def _json_response(status_code: int, content: dict, request: Request) -> JSONResponse:
         return JSONResponse(status_code=status_code, content=content)
 
+    def _report_token_invalid(token: str) -> Any:
+        token_info = token_manager.report_invalid(token)
+        if isinstance(token_info, dict):
+            disable_auto_refresh_for_token(token_info)
+        return token_info
+
     def _normalize_image_request_data(data: dict, prompt: str) -> dict:
         normalized = dict(data or {})
         messages = normalized.get("messages")
@@ -783,7 +789,7 @@ def build_generation_router(
                     final_status_code = 429
                     retryable = attempt < max_attempts
                 except auth_error_cls:
-                    token_manager.report_invalid(token)
+                    _report_token_invalid(token)
                     last_error = "Token invalid or expired."
                     final_status_code = 401
                     retryable = attempt < max_attempts
@@ -1424,7 +1430,7 @@ def build_generation_router(
                     final_status_code = 429
                     retryable = attempt < max_attempts
                 except auth_error_cls:
-                    token_manager.report_invalid(token)
+                    _report_token_invalid(token)
                     last_error = "Token invalid or expired."
                     final_status_code = 401
                     retryable = attempt < max_attempts

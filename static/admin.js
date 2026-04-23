@@ -970,7 +970,6 @@
   // Logs
   const logsTbody = document.querySelector("#logsTable tbody");
   const refreshLogsBtn = document.getElementById("refreshLogsBtn");
-  const backfillInvalidTokenLogsBtn = document.getElementById("backfillInvalidTokenLogsBtn");
   const clearLogsBtn = document.getElementById("clearLogsBtn");
   const logStatsRange = document.getElementById("logStatsRange");
   const logStatsUpdatedAt = document.getElementById("logStatsUpdatedAt");
@@ -2279,28 +2278,6 @@
       if (logsCurrentPage >= logsTotalPages) return;
       logsCurrentPage += 1;
       loadLogs();
-    });
-  }
-
-  if (backfillInvalidTokenLogsBtn) {
-    backfillInvalidTokenLogsBtn.addEventListener("click", async () => {
-      if (!confirm("将扫描请求日志中的 Token invalid or expired 记录，并把对应账号标记为已失效，同时禁用自动刷新。确定继续吗？")) return;
-      backfillInvalidTokenLogsBtn.disabled = true;
-      try {
-        const res = await fetch("/api/v1/logs/backfill-invalid-token-exhausted", { method: "POST" });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.detail || "标记失败");
-        const changed = Number(data?.changed_count || 0);
-        const disabled = Number(data?.disabled_auto_refresh_count || 0);
-        const matched = Number(data?.matched_logs || 0);
-        const skipped = Number(data?.skipped_count || 0);
-        showToast(`检测 ${matched} 条日志，标记已失效 ${changed} 个账号，禁用自动刷新 ${disabled} 个${skipped ? `，跳过 ${skipped} 个` : ""}`, false, { duration: 7000 });
-        await Promise.allSettled([loadTokens(), loadLogs()]);
-      } catch (err) {
-        showToast(err.message || "标记失败", true, { duration: 7000 });
-      } finally {
-        backfillInvalidTokenLogsBtn.disabled = false;
-      }
     });
   }
 

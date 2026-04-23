@@ -9,7 +9,7 @@ def make_token_manager(tmp_path, monkeypatch):
     return token_mgr.TokenManager()
 
 
-def test_401_token_logs_are_backfill_candidates(tmp_path):
+def test_invalid_token_logs_are_backfill_candidates(tmp_path):
     store = RequestLogStore(tmp_path / "request_logs.jsonl", max_items=100)
     store.add_payload(
         {
@@ -58,9 +58,9 @@ def test_401_token_logs_are_backfill_candidates(tmp_path):
 
     result = store.find_poll_invalid_token_candidates()
 
-    assert result["matched_logs"] == 2
-    assert result["candidate_count"] == 2
-    assert {item["token_id"] for item in result["candidates"]} == {"tok_1", "tok_2"}
+    assert result["matched_logs"] == 1
+    assert result["candidate_count"] == 1
+    assert {item["token_id"] for item in result["candidates"]} == {"tok_1"}
 
 
 def test_error_details_are_backfill_candidates(tmp_path):
@@ -102,9 +102,9 @@ def test_error_details_are_backfill_candidates(tmp_path):
 
     result = store.find_invalid_token_candidates()
 
-    assert result["matched_logs"] == 2
-    assert result["candidate_count"] == 2
-    assert {item["token_id"] for item in result["candidates"]} == {"tok_1", "tok_2"}
+    assert result["matched_logs"] == 1
+    assert result["candidate_count"] == 1
+    assert {item["token_id"] for item in result["candidates"]} == {"tok_1"}
 
 
 def test_report_exhausted_by_identity_disables_active_pool(tmp_path, monkeypatch):
@@ -123,5 +123,25 @@ def test_report_exhausted_by_identity_disables_active_pool(tmp_path, monkeypatch
     updated = manager.report_exhausted_by_identity(token_id=token["id"])
 
     assert updated["status"] == "exhausted"
+    assert updated["_previous_status"] == "active"
+    assert manager.get_available() is None
+
+
+def test_report_invalid_by_identity_disables_active_pool(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    token = manager.add(
+        "token-value",
+        {
+            "id": "tok_1",
+            "source": "auto_refresh",
+            "auto_refresh": True,
+            "refresh_profile_id": "profile_1",
+            "refresh_profile_email": "user@example.test",
+        },
+    )
+
+    updated = manager.report_invalid_by_identity(token_id=token["id"])
+
+    assert updated["status"] == "invalid"
     assert updated["_previous_status"] == "active"
     assert manager.get_available() is None

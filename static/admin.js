@@ -2237,20 +2237,20 @@
 
   if (backfillInvalidTokenLogsBtn) {
     backfillInvalidTokenLogsBtn.addEventListener("click", async () => {
-      if (!confirm("\u5c06\u626b\u63cf\u8bf7\u6c42\u65e5\u5fd7\u4e2d\u8f6e\u8be2\u9636\u6bb5\u7684 Token invalid or expired \u8bb0\u5f55\uff0c\u5e76\u628a\u5bf9\u5e94\u8d26\u53f7\u56de\u586b\u4e3a\u989d\u5ea6\u8017\u5c3d\uff0c\u540c\u65f6\u7981\u7528\u81ea\u52a8\u5237\u65b0\u3002\u786e\u5b9a\u7ee7\u7eed\u5417\uff1f")) return;
+      if (!confirm("将扫描请求日志中的 Token invalid or expired 记录，并把对应账号标记为已失效，同时禁用自动刷新。确定继续吗？")) return;
       backfillInvalidTokenLogsBtn.disabled = true;
       try {
         const res = await fetch("/api/v1/logs/backfill-invalid-token-exhausted", { method: "POST" });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data?.detail || "\u56de\u586b\u5931\u8d25");
+        if (!res.ok) throw new Error(data?.detail || "标记失败");
         const changed = Number(data?.changed_count || 0);
         const disabled = Number(data?.disabled_auto_refresh_count || 0);
         const matched = Number(data?.matched_logs || 0);
         const skipped = Number(data?.skipped_count || 0);
-        showToast(`\u68c0\u6d4b ${matched} \u6761\u65e5\u5fd7\uff0c\u56de\u586b ${changed} \u4e2a\u8d26\u53f7\uff0c\u7981\u7528\u81ea\u52a8\u5237\u65b0 ${disabled} \u4e2a${skipped ? `\uff0c\u8df3\u8fc7 ${skipped} \u4e2a` : ""}`, false, { duration: 7000 });
+        showToast(`检测 ${matched} 条日志，标记已失效 ${changed} 个账号，禁用自动刷新 ${disabled} 个${skipped ? `，跳过 ${skipped} 个` : ""}`, false, { duration: 7000 });
         await Promise.allSettled([loadTokens(), loadLogs()]);
       } catch (err) {
-        showToast(err.message || "\u56de\u586b\u5931\u8d25", true, { duration: 7000 });
+        showToast(err.message || "标记失败", true, { duration: 7000 });
       } finally {
         backfillInvalidTokenLogsBtn.disabled = false;
       }

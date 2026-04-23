@@ -64,3 +64,23 @@ def test_video_poll_taste_exhausted_raises_quota(monkeypatch):
             video_conf={"engine": "sora2"},
             prompt="hello world",
         )
+
+
+def test_poll_token_quota_exhausted_text_raises_quota(monkeypatch):
+    client = AdobeClient()
+
+    def fake_post_json(url, headers, payload):
+        return FakeResponse(
+            200,
+            headers={"x-override-status-link": "https://example.test/image/status/1"},
+            json_data={},
+        )
+
+    def fake_get(url, headers, timeout=60, proxy_kind="basic"):
+        return FakeResponse(401, text="Token quota exhausted")
+
+    monkeypatch.setattr(client, "_post_json", fake_post_json)
+    monkeypatch.setattr(client, "_get", fake_get)
+
+    with pytest.raises(QuotaExhaustedError):
+        client.generate(token="token", prompt="hello world")

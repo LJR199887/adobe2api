@@ -773,7 +773,7 @@ def build_admin_router(
         for candidate in candidates:
             if not isinstance(candidate, dict):
                 continue
-            token_info = token_manager.report_exhausted_by_identity(
+            token_info = token_manager.report_invalid_by_identity(
                 token_id=str(candidate.get("token_id") or "").strip(),
                 token_account_email=str(
                     candidate.get("token_account_email") or ""
@@ -815,7 +815,7 @@ def build_admin_router(
                         "token_account_email": candidate.get("token_account_email"),
                         "token_account_name": candidate.get("token_account_name"),
                         "matched_log_count": candidate.get("matched_log_count"),
-                        "reason": f"token exhausted but auto refresh disable failed: {exc}",
+                        "reason": f"token invalid but auto refresh disable failed: {exc}",
                     }
                 )
 
@@ -842,12 +842,13 @@ def build_admin_router(
                 item
                 for item in updated
                 if str(item.get("previous_status") or "").strip().lower()
-                != "exhausted"
+                != "invalid"
             ]
         )
 
         return {
             "status": "ok",
+            "target_status": "invalid",
             "scanned_logs": int(request_log_scan.get("scanned_logs", 0) or 0)
             + int(error_detail_scan.get("scanned_logs", 0) or 0),
             "matched_logs": int(request_log_scan.get("matched_logs", 0) or 0)

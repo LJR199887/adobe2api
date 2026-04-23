@@ -204,13 +204,7 @@ class RequestLogStore:
 
     @classmethod
     def _is_token_invalid_backfill_candidate(cls, item: dict) -> bool:
-        if cls._is_token_invalid_or_expired_error(item):
-            return True
-        try:
-            status_code = int(item.get("status_code") or 0)
-        except Exception:
-            status_code = 0
-        return status_code == 401
+        return cls._is_token_invalid_or_expired_error(item)
 
     @classmethod
     def _is_failed_item(cls, item: dict) -> bool:
@@ -487,11 +481,7 @@ class RequestLogStore:
                 bucket["token_account_email"] = email
             if name and not bucket.get("token_account_name"):
                 bucket["token_account_name"] = name
-            reason = (
-                "token_invalid_or_expired"
-                if self._is_token_invalid_or_expired_error(item)
-                else "http_401"
-            )
+            reason = "token_invalid_or_expired"
             reasons = bucket.get("matched_reasons")
             if isinstance(reasons, list) and reason not in reasons:
                 reasons.append(reason)
@@ -756,13 +746,7 @@ class ErrorDetailStore:
 
     @classmethod
     def _is_token_invalid_backfill_candidate(cls, item: dict) -> bool:
-        if cls._is_token_invalid_or_expired_error(item):
-            return True
-        try:
-            status_code = int(item.get("status_code") or 0)
-        except Exception:
-            status_code = 0
-        return status_code == 401
+        return cls._is_token_invalid_or_expired_error(item)
 
     def find_invalid_token_candidates(self, *, limit: int = 500) -> dict:
         safe_limit = min(max(int(limit or 500), 1), 5000)
@@ -832,11 +816,7 @@ class ErrorDetailStore:
                 bucket["token_account_email"] = email
             if name and not bucket.get("token_account_name"):
                 bucket["token_account_name"] = name
-            reason = (
-                "token_invalid_or_expired"
-                if self._is_token_invalid_or_expired_error(item)
-                else "http_401"
-            )
+            reason = "token_invalid_or_expired"
             reasons = bucket.get("matched_reasons")
             if isinstance(reasons, list) and reason not in reasons:
                 reasons.append(reason)

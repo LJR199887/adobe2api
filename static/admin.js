@@ -991,6 +991,10 @@
   const confRetryOnStatusCodes = document.getElementById("confRetryOnStatusCodes");
   const confRetryOnErrorTypes = document.getElementById("confRetryOnErrorTypes");
   const confTokenRotationStrategy = document.getElementById("confTokenRotationStrategy");
+  const confTokenSuccessAutoDisableEnabled = document.getElementById("confTokenSuccessAutoDisableEnabled");
+  const confTokenSuccessAutoDisableThreshold = document.getElementById("confTokenSuccessAutoDisableThreshold");
+  const overwriteSuccessCountsBtn = document.getElementById("overwriteSuccessCountsBtn");
+  const overwriteSuccessCountsResult = document.getElementById("overwriteSuccessCountsResult");
   const confRefreshIntervalHours = document.getElementById("confRefreshIntervalHours");
   const confBatchConcurrency = document.getElementById("confBatchConcurrency");
   const confGeneratedMaxSizeMb = document.getElementById("confGeneratedMaxSizeMb");
@@ -1179,6 +1183,12 @@
           ? data.retry_on_error_types.join(",")
           : "timeout,connection,proxy";
         confTokenRotationStrategy.value = String(data.token_rotation_strategy || "round_robin");
+        if (confTokenSuccessAutoDisableEnabled) {
+          confTokenSuccessAutoDisableEnabled.checked = Boolean(data.token_success_auto_disable_enabled || false);
+        }
+        if (confTokenSuccessAutoDisableThreshold) {
+          confTokenSuccessAutoDisableThreshold.value = Number(data.token_success_auto_disable_threshold || 2);
+        }
         confRefreshIntervalHours.value = Number(data.refresh_interval_hours || 15);
         currentBatchConcurrency = Math.max(1, Math.min(100, Number(data.batch_concurrency || 5)));
         confBatchConcurrency.value = currentBatchConcurrency;
@@ -1229,6 +1239,8 @@
           .map(s => String(s).trim().toLowerCase())
           .filter(Boolean),
         token_rotation_strategy: String(confTokenRotationStrategy.value || "round_robin").trim() || "round_robin",
+        token_success_auto_disable_enabled: Boolean(confTokenSuccessAutoDisableEnabled?.checked),
+        token_success_auto_disable_threshold: Math.max(1, Math.min(100000, Number(confTokenSuccessAutoDisableThreshold?.value || 2))),
         refresh_interval_hours: Number(confRefreshIntervalHours.value || 15),
         batch_concurrency: Math.max(1, Math.min(100, Number(confBatchConcurrency.value || 5))),
         generated_max_size_mb: Math.max(100, Math.min(102400, Number(confGeneratedMaxSizeMb.value || 1024))),
@@ -1284,6 +1296,9 @@
       if (!["round_robin", "random"].includes(payload.token_rotation_strategy)) {
         throw new Error("Token 轮换策略无效");
       }
+      if (!Number.isInteger(payload.token_success_auto_disable_threshold) || payload.token_success_auto_disable_threshold < 1 || payload.token_success_auto_disable_threshold > 100000) {
+        throw new Error("Token 自动禁用成功次数必须是 1-100000 的整数");
+      }
 
       const res = await fetch("/api/v1/config", {
         method: "PUT",
@@ -1304,6 +1319,57 @@
     }
     saveConfigBtn.disabled = false;
   });
+
+  if (overwriteSuccessCountsBtn) {
+    overwriteSuccessCountsBtn.addEventListener("click", async () => {
+      const ok = confirm("将根据历史成功生成日志，覆盖所有 token 当前成功次数。确定继续吗？");
+      if (!ok) return;
+
+      overwriteSuccessCountsBtn.disabled = true;
+      if (overwriteSuccessCountsResult) {
+        overwriteSuccessCountsResult.textContent = "正在覆盖回填成功次数...";
+      }
+      try {
+        const res = await fetch("/api/v1/tokens/success-counts/overwrite-from-logs", {
+          method: "POST",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.detail || "覆盖回填成功次数失败");
+        }
+        const lines = [
+          "覆盖回填完成",
+          `扫描日志：${Number(data.scanned_logs || 0)}`,
+          `生成日志：${Number(data.generation_logs || 0)}`,
+          `成功日志：${Number(data.success_logs || 0)}`,
+          `未识别成功日志：${Number(data.unidentified_success_logs || 0)}`,
+          `匹配 Token：${Number(data.matched_tokens || 0)}`,
+          `按 ID 匹配：${Number(data.matched_by_token_id || 0)}`,
+          `按邮箱匹配：${Number(data.matched_by_email || 0)}`,
+          `按名称匹配：${Number(data.matched_by_name || 0)}`,
+          `已修改 Token：${Number(data.changed_tokens || 0)}`,
+          `重置为 0：${Number(data.reset_to_zero_tokens || 0)}`,
+          `有成功次数 Token：${Number(data.nonzero_success_tokens || 0)}`,
+          `总成功次数：${Number(data.total_success_count || 0)}`,
+          `达到阈值标记耗尽：${Number(data.exhausted_by_threshold || 0)}`,
+          `关闭自动刷新：${Number(data.disabled_auto_refresh_profiles || 0)}`,
+        ];
+        if (overwriteSuccessCountsResult) {
+          overwriteSuccessCountsResult.textContent = lines.join("\n");
+        }
+        showToast("成功次数覆盖回填完成", false, { duration: 7000 });
+        await loadTokens();
+      } catch (err) {
+        const message = err.message || "覆盖回填成功次数失败";
+        if (overwriteSuccessCountsResult) {
+          overwriteSuccessCountsResult.textContent = message;
+        }
+        showToast(message, true, { duration: 8000 });
+      } finally {
+        overwriteSuccessCountsBtn.disabled = false;
+      }
+    });
+  }
 
   function formatProxyConnectivityItem(title, item) {
     const data = item && typeof item === "object" ? item : {};

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import requests
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from starlette.responses import RedirectResponse
@@ -24,9 +25,11 @@ from api.schemas import (
     TokenAutoRefreshBatchRequest,
     TokenBatchAddRequest,
     TokenCreditsBatchRefreshRequest,
+    TokenInvalidCheckRequest,
     TokenRefreshBatchRequest,
 )
 from core.proxy_utils import (
+    build_requests_proxies,
     resolve_basic_proxy,
     resolve_resource_proxy,
     test_authorized_endpoint,
@@ -478,6 +481,79 @@ def build_admin_router(
             return False, ""
         refresh_manager.set_enabled(profile_id, False)
         return True, profile_id
+
+    def _response_text_for_invalid_check(resp) -> str:
+        parts = [str(getattr(resp, "text", "") or "")]
+        try:
+            payload = resp.json()
+        except Exception:
+            payload = None
+
+        def collect(value: Any):
+            if isinstance(value, dict):
+                for child in value.values():
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+            elif value is not None:
+                parts.append(str(value))
+
+        collect(payload)
+        return "\n".join(parts).casefold()
+
+    def _check_token_invalid_or_expired(token_info: dict) -> dict:
+        token_id = str(token_info.get("id") or "").strip()
+        token_value = str(token_info.get("value") or "").strip()
+        if not token_value:
+            return {"token_id": token_id, "detail": "empty token"}
+
+        account_id = ""
+        try:
+            account_id = str(
+                refresh_manager._extract_account_id(token_value) or ""
+            ).strip()
+        except Exception:
+            account_id = ""
+        if not account_id:
+            return {"token_id": token_id, "detail": "account_id not found in token"}
+
+        cfg = config_manager.get_all()
+        proxy = resolve_basic_proxy(cfg)
+        resp = requests.get(
+            "https://firefly.adobe.io/v1/credits/balance",
+            headers={
+                "Authorization": f"Bearer {token_value}",
+                "x-api-key": "SunbreakWebUI1",
+                "x-account-id": account_id,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+            },
+            timeout=20,
+            proxies=build_requests_proxies(proxy),
+        )
+        status_code = int(resp.status_code)
+        text = _response_text_for_invalid_check(resp)
+        if "token invalid or expired" in text:
+            return {
+                "token_id": token_id,
+                "status_code": status_code,
+                "result": "invalid",
+                "detail": "Token invalid or expired",
+            }
+        if status_code == 200:
+            return {
+                "token_id": token_id,
+                "status_code": status_code,
+                "result": "valid",
+                "detail": "authorized request succeeded",
+            }
+        return {
+            "token_id": token_id,
+            "status_code": status_code,
+            "result": "unknown",
+            "detail": f"response did not contain Token invalid or expired ({status_code})",
+        }
 
     def build_basic_business_proxy_result(proxy: str) -> dict[str, Any]:
         result = {
@@ -1078,6 +1154,118 @@ def build_admin_router(
             "missing_count": len(missing),
             "deleted_ids": deleted,
             "missing_ids": missing,
+        }
+
+    @router.post("/api/v1/tokens/check-invalid-batch")
+    def check_invalid_tokens_batch(req: TokenInvalidCheckRequest, request: Request):
+        require_admin_auth(request)
+        token_ids = [
+            str(x or "").strip() for x in (req.ids or []) if str(x or "").strip()
+        ]
+        if not token_ids:
+            raise HTTPException(status_code=400, detail="ids is required")
+
+        checked = []
+        invalid = []
+        valid = []
+        skipped = []
+        failed = []
+        disabled_profile_ids = []
+        max_workers = min(get_batch_concurrency(), len(token_ids))
+
+        def check_one(index: int, tid: str):
+            token_info = token_manager.get_by_id(tid)
+            if not token_info:
+                return index, "skipped", {"token_id": tid, "detail": "token not found"}
+
+            current_status = str(token_info.get("status") or "").strip().lower()
+            if current_status != "active":
+                return index, "skipped", {
+                    "token_id": tid,
+                    "status": current_status,
+                    "detail": "only active tokens are checked",
+                }
+
+            try:
+                result = _check_token_invalid_or_expired(token_info)
+            except Exception as exc:
+                return index, "failed", {"token_id": tid, "detail": str(exc)}
+
+            if result.get("result") == "invalid":
+                updated = token_manager.report_invalid_by_identity(token_id=tid)
+                profile_disabled = False
+                disabled_profile_id = ""
+                if isinstance(updated, dict):
+                    try:
+                        profile_disabled, disabled_profile_id = (
+                            disable_auto_refresh_for_token_info(updated)
+                        )
+                    except Exception as exc:
+                        result["auto_refresh_disable_error"] = str(exc)
+                result.update(
+                    {
+                        "previous_status": (
+                            updated.get("_previous_status")
+                            if isinstance(updated, dict)
+                            else current_status
+                        ),
+                        "status": "invalid",
+                        "auto_refresh_disabled": profile_disabled,
+                        "disabled_profile_id": disabled_profile_id or None,
+                    }
+                )
+                return index, "invalid", result
+
+            if result.get("result") == "valid":
+                return index, "valid", result
+            return index, "skipped", result
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(check_one, index, tid)
+                for index, tid in enumerate(token_ids)
+            ]
+            done_items = [future.result() for future in as_completed(futures)]
+
+        done_items.sort(key=lambda item: item[0])
+        for _, status, payload in done_items:
+            checked.append(payload)
+            if status == "invalid":
+                invalid.append(payload)
+                disabled_profile_id = str(
+                    payload.get("disabled_profile_id") or ""
+                ).strip()
+                if disabled_profile_id:
+                    disabled_profile_ids.append(disabled_profile_id)
+            elif status == "valid":
+                valid.append(payload)
+            elif status == "failed":
+                failed.append(payload)
+            else:
+                skipped.append(payload)
+
+        changed_count = len(
+            [
+                item
+                for item in invalid
+                if str(item.get("previous_status") or "").strip().lower() != "invalid"
+            ]
+        )
+
+        return {
+            "status": "ok" if not failed else "partial",
+            "total": len(token_ids),
+            "checked_count": len(checked),
+            "invalid_count": len(invalid),
+            "changed_count": changed_count,
+            "valid_count": len(valid),
+            "skipped_count": len(skipped),
+            "failed_count": len(failed),
+            "disabled_auto_refresh_count": len(set(disabled_profile_ids)),
+            "invalid": invalid,
+            "valid": valid,
+            "skipped": skipped,
+            "failed": failed,
         }
 
     @router.delete("/api/v1/tokens/{tid}")

@@ -33,6 +33,10 @@ class TokenCreditsBatchRefreshRequest(BaseModel):
     ids: Optional[List[str]] = None
 
 
+class TokenInvalidCheckRequest(BaseModel):
+    ids: List[str]
+
+
 class TokenAutoRefreshBatchRequest(BaseModel):
     ids: List[str]
     enabled: bool

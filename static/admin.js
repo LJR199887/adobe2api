@@ -67,6 +67,7 @@
   const enableAutoRefreshBatchBtn = document.getElementById("enableAutoRefreshBatchBtn");
   const disableAutoRefreshBatchBtn = document.getElementById("disableAutoRefreshBatchBtn");
   const refreshTokensBatchBtn = document.getElementById("refreshTokensBatchBtn");
+  const checkInvalidTokensBatchBtn = document.getElementById("checkInvalidTokensBatchBtn");
   const refreshModal = document.getElementById("refreshModal");
   const refreshModalCloseBtn = document.getElementById("refreshModalCloseBtn");
   const refreshBtn = document.getElementById("refreshBtn");
@@ -194,6 +195,7 @@
     if (enableAutoRefreshBatchBtn) enableAutoRefreshBatchBtn.disabled = selectedCount <= 0;
     if (disableAutoRefreshBatchBtn) disableAutoRefreshBatchBtn.disabled = selectedCount <= 0;
     if (refreshTokensBatchBtn) refreshTokensBatchBtn.disabled = selectedCount <= 0;
+    if (checkInvalidTokensBatchBtn) checkInvalidTokensBatchBtn.disabled = selectedCount <= 0;
     if (selectAllFilteredTokensBtn) {
       const filteredCount = Array.isArray(latestTokens) ? latestTokens.length : 0;
       selectAllFilteredTokensBtn.disabled = filteredCount <= 0 || selectedCount >= filteredCount;
@@ -723,6 +725,51 @@
         showToast("批量刷新 Token 失败", true);
       } finally {
         refreshTokensBatchBtn.disabled = false;
+      }
+    });
+  }
+
+  if (checkInvalidTokensBatchBtn) {
+    checkInvalidTokensBatchBtn.addEventListener("click", async () => {
+      const selectedIds = Array.from(tokenSelectedIds);
+      if (!selectedIds.length) {
+        alert("请先选择要检测的 Token");
+        return;
+      }
+      const ok = confirm(
+        `将主动检测选中的 ${selectedIds.length} 个生效 Token。只有返回 Token invalid or expired 时，才会标记为已失效并关闭自动刷新。确定继续吗？`
+      );
+      if (!ok) return;
+
+      checkInvalidTokensBatchBtn.disabled = true;
+      showToast("正在检测失效 Token...", false, { duration: 0 });
+      try {
+        const res = await fetch("/api/v1/tokens/check-invalid-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: selectedIds }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.detail || "检测失效 Token 失败");
+        }
+        const invalid = Number(data.invalid_count || 0);
+        const changed = Number(data.changed_count || 0);
+        const valid = Number(data.valid_count || 0);
+        const skipped = Number(data.skipped_count || 0);
+        const failed = Number(data.failed_count || 0);
+        const disabled = Number(data.disabled_auto_refresh_count || 0);
+        showToast(
+          `检测完成：已失效 ${invalid}，新标记 ${changed}，正常 ${valid}，禁用自动刷新 ${disabled}，跳过 ${skipped}，失败 ${failed}`,
+          failed > 0,
+          { duration: 8000 }
+        );
+        await loadTokens();
+      } catch (err) {
+        showToast(err.message || "检测失效 Token 失败", true, { duration: 8000 });
+      } finally {
+        checkInvalidTokensBatchBtn.disabled = false;
+        updateTokenSelectionSummary();
       }
     });
   }

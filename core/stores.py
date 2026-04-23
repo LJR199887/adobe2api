@@ -188,6 +188,11 @@ class RequestLogStore:
         path = str(item.get("path") or "").strip()
         return operation in cls._GENERATION_OPERATIONS or path in cls._GENERATION_PATHS
 
+    @staticmethod
+    def _is_token_invalid_or_expired_error(item: dict) -> bool:
+        message = str(item.get("error") or "").strip().casefold()
+        return "token invalid or expired" in message
+
     @classmethod
     def _is_failed_item(cls, item: dict) -> bool:
         if not isinstance(item, dict):
@@ -390,6 +395,100 @@ class RequestLogStore:
             )
         )
         return items_out[:safe_limit]
+
+    def find_poll_invalid_token_candidates(self, *, limit: int = 500) -> dict:
+        safe_limit = min(max(int(limit or 500), 1), 5000)
+        with self._lock:
+            items = self._read_payloads_locked()
+
+        latest_by_id: dict[str, dict] = {}
+        anonymous_items: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "").strip()
+            if item_id:
+                latest_by_id[item_id] = item
+            else:
+                anonymous_items.append(item)
+
+        deduped_items = [*latest_by_id.values(), *anonymous_items]
+        grouped: dict[str, dict] = {}
+        matched_logs = 0
+        unidentified_logs = 0
+
+        for item in deduped_items:
+            if not isinstance(item, dict):
+                continue
+            if not self._is_generation_request(item):
+                continue
+            if not self._is_token_invalid_or_expired_error(item):
+                continue
+            upstream_job_id = str(item.get("upstream_job_id") or "").strip()
+            if not upstream_job_id:
+                continue
+
+            token_id = str(item.get("token_id") or "").strip()
+            email = str(item.get("token_account_email") or "").strip()
+            name = str(item.get("token_account_name") or "").strip()
+            account_key = token_id or email or name
+            if not account_key:
+                unidentified_logs += 1
+                continue
+
+            matched_logs += 1
+            try:
+                ts_val = float(item.get("ts") or 0)
+            except Exception:
+                ts_val = 0.0
+
+            bucket = grouped.get(account_key)
+            if bucket is None:
+                bucket = {
+                    "account_key": account_key,
+                    "token_id": token_id or None,
+                    "token_account_email": email or None,
+                    "token_account_name": name or None,
+                    "matched_log_count": 0,
+                    "first_ts": ts_val,
+                    "last_ts": ts_val,
+                    "upstream_job_ids": [],
+                }
+                grouped[account_key] = bucket
+
+            bucket["matched_log_count"] = int(bucket.get("matched_log_count") or 0) + 1
+            bucket["first_ts"] = min(float(bucket.get("first_ts") or ts_val), ts_val)
+            bucket["last_ts"] = max(float(bucket.get("last_ts") or ts_val), ts_val)
+            if token_id and not bucket.get("token_id"):
+                bucket["token_id"] = token_id
+            if email and not bucket.get("token_account_email"):
+                bucket["token_account_email"] = email
+            if name and not bucket.get("token_account_name"):
+                bucket["token_account_name"] = name
+            if upstream_job_id:
+                job_ids = bucket.get("upstream_job_ids")
+                if isinstance(job_ids, list) and upstream_job_id not in job_ids:
+                    job_ids.append(upstream_job_id)
+
+        candidates = list(grouped.values())
+        candidates.sort(
+            key=lambda x: (
+                -float(x.get("last_ts") or 0),
+                str(x.get("account_key") or "").casefold(),
+            )
+        )
+        for candidate in candidates:
+            job_ids = candidate.get("upstream_job_ids")
+            if isinstance(job_ids, list):
+                candidate["upstream_job_ids"] = job_ids[:10]
+
+        return {
+            "scanned_logs": len(deduped_items),
+            "matched_logs": matched_logs,
+            "unidentified_logs": unidentified_logs,
+            "candidate_count": len(candidates),
+            "candidates": candidates[:safe_limit],
+        }
 
     def get(self, request_id: str) -> Optional[dict]:
         target = str(request_id or "").strip()

@@ -430,6 +430,57 @@ class TokenManager:
             self.save()
         return updated
 
+    def report_exhausted_by_identity(
+        self,
+        *,
+        token_id: str = "",
+        token_account_email: str = "",
+        token_account_name: str = "",
+    ) -> Optional[Dict]:
+        token_id = str(token_id or "").strip()
+        email = str(token_account_email or "").strip().casefold()
+        name = str(token_account_name or "").strip().casefold()
+
+        updated = None
+        with self._lock:
+            target = self._id_index.get(token_id) if token_id else None
+            match_reason = "token_id" if target is not None else ""
+
+            if target is None and email:
+                matches = [
+                    t
+                    for t in self.tokens
+                    if isinstance(t, dict)
+                    and str(t.get("refresh_profile_email") or "").strip().casefold()
+                    == email
+                ]
+                if len(matches) == 1:
+                    target = matches[0]
+                    match_reason = "token_account_email"
+
+            if target is None and name:
+                matches = [
+                    t
+                    for t in self.tokens
+                    if isinstance(t, dict)
+                    and str(t.get("refresh_profile_name") or "").strip().casefold()
+                    == name
+                ]
+                if len(matches) == 1:
+                    target = matches[0]
+                    match_reason = "token_account_name"
+
+            if target is not None:
+                previous_status = str(target.get("status") or "active")
+                target["status"] = "exhausted"
+                target["error_until"] = 0
+                updated = dict(target)
+                updated["_previous_status"] = previous_status
+                updated["_matched_by"] = match_reason
+
+            self.save()
+        return updated
+
     def report_invalid(self, value: str):
         with self._lock:
             t = self._value_index.get(self._normalize_token_value(value))

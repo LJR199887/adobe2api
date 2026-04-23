@@ -470,6 +470,15 @@ def build_admin_router(
             token_manager.remove(token_id)
         return True
 
+    def disable_auto_refresh_for_token_info(token_info: dict) -> tuple[bool, str]:
+        if not isinstance(token_info, dict) or not bool(token_info.get("auto_refresh")):
+            return False, ""
+        profile_id = str(token_info.get("refresh_profile_id") or "").strip()
+        if not profile_id:
+            return False, ""
+        refresh_manager.set_enabled(profile_id, False)
+        return True, profile_id
+
     def build_basic_business_proxy_result(proxy: str) -> dict[str, Any]:
         result = {
             "name": "basic_business",
@@ -679,6 +688,106 @@ def build_admin_router(
         require_admin_auth(request)
         items = log_store.list_failed_accounts(limit=limit)
         return {"items": items, "total": len(items)}
+
+    @router.post("/api/v1/logs/backfill-invalid-token-exhausted")
+    def backfill_invalid_token_exhausted(request: Request, limit: int = 500):
+        require_admin_auth(request)
+        scan = log_store.find_poll_invalid_token_candidates(limit=limit)
+        candidates = scan.get("candidates") if isinstance(scan, dict) else []
+        if not isinstance(candidates, list):
+            candidates = []
+
+        updated = []
+        skipped = []
+        disabled_profile_ids = []
+        seen_token_ids = set()
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            token_info = token_manager.report_exhausted_by_identity(
+                token_id=str(candidate.get("token_id") or "").strip(),
+                token_account_email=str(
+                    candidate.get("token_account_email") or ""
+                ).strip(),
+                token_account_name=str(candidate.get("token_account_name") or "").strip(),
+            )
+            if not token_info:
+                skipped.append(
+                    {
+                        "account_key": candidate.get("account_key"),
+                        "token_id": candidate.get("token_id"),
+                        "token_account_email": candidate.get("token_account_email"),
+                        "token_account_name": candidate.get("token_account_name"),
+                        "matched_log_count": candidate.get("matched_log_count"),
+                        "reason": "token not found or account match is ambiguous",
+                    }
+                )
+                continue
+
+            token_id = str(token_info.get("id") or "").strip()
+            if token_id and token_id in seen_token_ids:
+                continue
+            if token_id:
+                seen_token_ids.add(token_id)
+
+            profile_disabled = False
+            disabled_profile_id = ""
+            try:
+                profile_disabled, disabled_profile_id = disable_auto_refresh_for_token_info(
+                    token_info
+                )
+                if disabled_profile_id:
+                    disabled_profile_ids.append(disabled_profile_id)
+            except Exception as exc:
+                skipped.append(
+                    {
+                        "account_key": candidate.get("account_key"),
+                        "token_id": token_id,
+                        "token_account_email": candidate.get("token_account_email"),
+                        "token_account_name": candidate.get("token_account_name"),
+                        "matched_log_count": candidate.get("matched_log_count"),
+                        "reason": f"token exhausted but auto refresh disable failed: {exc}",
+                    }
+                )
+
+            updated.append(
+                {
+                    "token_id": token_id,
+                    "token_account_email": token_info.get("refresh_profile_email")
+                    or candidate.get("token_account_email"),
+                    "token_account_name": token_info.get("refresh_profile_name")
+                    or candidate.get("token_account_name"),
+                    "previous_status": token_info.get("_previous_status"),
+                    "status": token_info.get("status"),
+                    "matched_by": token_info.get("_matched_by"),
+                    "matched_log_count": candidate.get("matched_log_count"),
+                    "auto_refresh_disabled": profile_disabled,
+                    "disabled_profile_id": disabled_profile_id or None,
+                }
+            )
+
+        changed_count = len(
+            [
+                item
+                for item in updated
+                if str(item.get("previous_status") or "").strip().lower()
+                != "exhausted"
+            ]
+        )
+
+        return {
+            "status": "ok",
+            "scanned_logs": scan.get("scanned_logs", 0),
+            "matched_logs": scan.get("matched_logs", 0),
+            "unidentified_logs": scan.get("unidentified_logs", 0),
+            "candidate_count": scan.get("candidate_count", 0),
+            "updated_count": len(updated),
+            "changed_count": changed_count,
+            "skipped_count": len(skipped),
+            "disabled_auto_refresh_count": len(set(disabled_profile_ids)),
+            "updated": updated,
+            "skipped": skipped,
+        }
 
     @router.get("/api/v1/logs/errors/{code}")
     def get_error_detail(code: str, request: Request):

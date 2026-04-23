@@ -70,6 +70,15 @@
   const checkInvalidTokensBatchBtn = document.getElementById("checkInvalidTokensBatchBtn");
   const refreshModal = document.getElementById("refreshModal");
   const refreshModalCloseBtn = document.getElementById("refreshModalCloseBtn");
+  const taskReportModal = document.getElementById("taskReportModal");
+  const taskReportCloseBtn = document.getElementById("taskReportCloseBtn");
+  const taskReportTitle = document.getElementById("taskReportTitle");
+  const taskReportStatus = document.getElementById("taskReportStatus");
+  const taskReportProgressText = document.getElementById("taskReportProgressText");
+  const taskReportProgressBar = document.getElementById("taskReportProgressBar");
+  const taskReportSummary = document.getElementById("taskReportSummary");
+  const taskReportCurrent = document.getElementById("taskReportCurrent");
+  const taskReportItems = document.getElementById("taskReportItems");
   const refreshBtn = document.getElementById("refreshBtn");
   const refreshCreditsBatchBtn = document.getElementById("refreshCreditsBatchBtn");
   const tokenSelectAll = document.getElementById("tokenSelectAll");
@@ -95,6 +104,7 @@
   let latestTokens = [];
   let latestTokenSummary = null;
   let latestTokenPagination = null;
+  let activeTaskTracker = null;
   const TOKEN_PAGE_SIZE_OPTIONS = [20, 50, 100, 200, 500, 1000, 2000];
   const TOKEN_PAGE_SIZE_STORAGE_KEY = "adobe2api.tokenPageSize";
   function readTokenPageSize() {
@@ -528,6 +538,14 @@
       if (event.target === refreshModal) closeDialog(refreshModal);
     });
   }
+  if (taskReportCloseBtn) {
+    taskReportCloseBtn.addEventListener("click", () => closeDialog(taskReportModal));
+  }
+  if (taskReportModal) {
+    taskReportModal.addEventListener("click", (event) => {
+      if (event.target === taskReportModal) closeDialog(taskReportModal);
+    });
+  }
 
   window.deleteToken = async (id) => {
     if (!confirm("确定要删除这个 Token 吗？")) return;
@@ -697,7 +715,6 @@
       }
 
       refreshTokensBatchBtn.disabled = true;
-      showToast(`批量刷新 Token 中...`, false, { duration: 0 });
       try {
         const res = await fetch("/api/v1/tokens/refresh-batch", {
           method: "POST",
@@ -716,13 +733,24 @@
           return;
         }
         const data = await res.json();
-        const ok = Number(data.refreshed_count || 0);
-        const skipped = Number(data.skipped_count || 0);
-        const fail = Number(data.failed_count || 0);
-        showToast(`批量刷新 Token 完成：成功 ${ok}，跳过 ${skipped}，失败 ${fail}`, fail > 0);
-        await loadTokens();
+        const jobId = String(data?.background_refresh?.job_id || "").trim();
+        if (!jobId) {
+          throw new Error("刷新任务创建失败");
+        }
+        await trackBackgroundJob({
+          title: "批量刷新 Token 进度",
+          initialPayload: data,
+          pollUrl: `/api/v1/tokens/refresh-jobs/${encodeURIComponent(jobId)}`,
+          onComplete: async (payload) => {
+            await loadTokens();
+            const ok = Number(payload?.refreshed_count || payload?.success_count || 0);
+            const skipped = Number(payload?.skipped_count || 0);
+            const fail = Number(payload?.failed_count || 0);
+            showToast(`批量刷新 Token 完成：成功 ${ok}，跳过 ${skipped}，失败 ${fail}`, fail > 0, { duration: 7000 });
+          },
+        });
       } catch (err) {
-        showToast("批量刷新 Token 失败", true);
+        showToast(err.message || "批量刷新 Token 失败", true);
       } finally {
         refreshTokensBatchBtn.disabled = false;
       }
@@ -1667,6 +1695,192 @@
     return parts.join("，");
   }
 
+  function stopActiveTaskTracker() {
+    if (activeTaskTracker?.timer) {
+      clearTimeout(activeTaskTracker.timer);
+    }
+    activeTaskTracker = null;
+  }
+
+  function getTaskBadgeText(status) {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "queued") return "排队中";
+    if (normalized === "running") return "进行中";
+    if (normalized === "succeeded" || normalized === "ok") return "成功";
+    if (normalized === "skipped") return "跳过";
+    if (normalized === "partial") return "部分完成";
+    if (normalized === "failed" || normalized === "error") return "失败";
+    return normalized || "未知";
+  }
+
+  function getTaskHeaderStatusText(status) {
+    const normalized = String(status || "").trim().toLowerCase();
+    if (normalized === "queued") return "任务排队中";
+    if (normalized === "running") return "任务进行中";
+    if (normalized === "ok") return "任务已完成";
+    if (normalized === "partial") return "任务部分完成";
+    if (normalized === "failed") return "任务失败";
+    return "任务状态未知";
+  }
+
+  function formatTaskDuration(ms) {
+    const value = Number(ms || 0);
+    if (!Number.isFinite(value) || value <= 0) return "-";
+    if (value < 1000) return `${Math.round(value)} ms`;
+    return `${(value / 1000).toFixed(1)} s`;
+  }
+
+  function renderTaskReportItems(items) {
+    if (!taskReportItems) return;
+    const rows = Array.isArray(items) ? items : [];
+    if (!rows.length) {
+      taskReportItems.innerHTML = '<div class="empty-state" style="padding: 20px;">暂无明细</div>';
+      return;
+    }
+    const recent = rows.slice().sort((a, b) => Number(a.index || 0) - Number(b.index || 0)).slice(-20);
+    taskReportItems.innerHTML = recent.map((item) => {
+      const name = String(item.token_account_name || item.profile_name || "").trim();
+      const email = String(item.token_account_email || "").trim();
+      const id = String(item.token_id || item.profile_id || "").trim();
+      const title = name || email || id || `任务 #${Number(item.index || 0) + 1}`;
+      const sub = [email && email !== title ? email : "", id && id !== title ? `ID: ${id}` : ""].filter(Boolean).join(" | ");
+      const detail = String(item.detail || "").trim();
+      const duration = formatTaskDuration(item.refresh_call_ms);
+      const status = String(item.status || "").trim().toLowerCase() || "queued";
+      return `
+        <div class="task-report-item">
+          <div class="task-report-item-head">
+            <div class="task-report-item-title">${escapeHtml(title)}</div>
+            <span class="task-report-badge ${escapeHtml(status)}">${escapeHtml(getTaskBadgeText(status))}</span>
+          </div>
+          <div class="task-report-item-meta">
+            ${sub ? `<div>${escapeHtml(sub)}</div>` : ""}
+            <div>耗时：${escapeHtml(duration)}</div>
+            ${detail ? `<div>${escapeHtml(detail)}</div>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+  }
+
+  function renderTaskReport(title, payload) {
+    const background = payload?.background_refresh || {};
+    const total = Number(payload?.total ?? background?.total_count ?? 0) || 0;
+    const completed = Number(background?.completed_count ?? 0) || 0;
+    const queued = Number(background?.queued_count ?? 0) || 0;
+    const running = Number(background?.running_count ?? 0) || 0;
+    const success = Number(payload?.success_count ?? payload?.refreshed_count ?? 0) || 0;
+    const skipped = Number(payload?.skipped_count ?? 0) || 0;
+    const failed = Number(
+      payload?.error_count != null ? payload.error_count : payload?.failed_count ?? 0
+    ) || 0;
+    const duplicate = Number(payload?.duplicate_count ?? 0) || 0;
+    const percent = total > 0 ? Math.max(0, Math.min(100, Math.round((completed / total) * 100))) : 0;
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+    const runningItem = items.find((item) => String(item.status || "").trim().toLowerCase() === "running");
+
+    if (taskReportTitle) taskReportTitle.textContent = title;
+    if (taskReportStatus) taskReportStatus.textContent = getTaskHeaderStatusText(payload?.status);
+    if (taskReportProgressText) taskReportProgressText.textContent = `${completed} / ${total}`;
+    if (taskReportProgressBar) taskReportProgressBar.style.width = `${percent}%`;
+    if (taskReportSummary) {
+      const parts = [
+        `总数 ${total}`,
+        `已完成 ${completed}`,
+        `成功 ${success}`,
+      ];
+      if (duplicate > 0) parts.push(`重复 ${duplicate}`);
+      if (skipped > 0) parts.push(`跳过 ${skipped}`);
+      if (failed > 0) parts.push(`失败 ${failed}`);
+      if (queued > 0) parts.push(`排队 ${queued}`);
+      if (running > 0) parts.push(`进行中 ${running}`);
+      const totalMs = Number(payload?.timing?.total_ms || 0);
+      if (totalMs > 0) parts.push(`耗时 ${formatTaskDuration(totalMs)}`);
+      taskReportSummary.textContent = parts.join("，");
+    }
+    if (taskReportCurrent) {
+      if (runningItem) {
+        const currentName = String(
+          runningItem.token_account_name ||
+          runningItem.profile_name ||
+          runningItem.token_account_email ||
+          runningItem.token_id ||
+          runningItem.profile_id ||
+          ""
+        ).trim();
+        taskReportCurrent.textContent = currentName ? `当前处理：${currentName}` : "当前处理：正在执行任务";
+      } else if (String(payload?.status || "").trim().toLowerCase() === "queued") {
+        taskReportCurrent.textContent = "当前处理：等待任务开始";
+      } else if (Boolean(background?.completed)) {
+        taskReportCurrent.textContent = "最终报告已生成，可查看后手动关闭";
+      } else {
+        taskReportCurrent.textContent = "";
+      }
+    }
+    renderTaskReportItems(items);
+    openDialog(taskReportModal);
+  }
+
+  async function trackBackgroundJob({
+    title,
+    initialPayload,
+    pollUrl,
+    onComplete,
+  }) {
+    stopActiveTaskTracker();
+    let payload = initialPayload || {};
+    renderTaskReport(title, payload);
+
+    const run = async () => {
+      try {
+        const res = await fetch(pollUrl);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data?.detail || "任务状态查询失败");
+        }
+        payload = data || {};
+        renderTaskReport(title, payload);
+        if (payload?.background_refresh?.completed) {
+          stopActiveTaskTracker();
+          if (typeof onComplete === "function") {
+            await onComplete(payload);
+          }
+          return;
+        }
+        activeTaskTracker = {
+          timer: setTimeout(run, 1200),
+          pollUrl,
+        };
+      } catch (err) {
+        stopActiveTaskTracker();
+        renderTaskReport(title, {
+          status: "failed",
+          total: Number(payload?.total || 0),
+          failed_count: 1,
+          items: [
+            {
+              index: 0,
+              status: "failed",
+              detail: err.message || "任务状态查询失败",
+            },
+          ],
+          background_refresh: {
+            total_count: Number(payload?.total || 0),
+            completed_count: Number(payload?.background_refresh?.completed_count || 0),
+            queued_count: 0,
+            running_count: 0,
+            completed: true,
+          },
+        });
+      }
+    };
+
+    activeTaskTracker = {
+      timer: setTimeout(run, 1200),
+      pollUrl,
+    };
+  }
+
   async function importCookies() {
     const text = String(cookieInput?.value || "").trim();
     if (!text) {
@@ -1728,16 +1942,29 @@
             : "Cookie 导入失败";
         throw new Error(detailText);
       }
-
-      showMsg(
-        refreshMsg,
-        buildImportSummaryText("Cookie导入", data),
-        getImportFailedCount(data) > 0,
-        { duration: 8000 }
-      );
+      const jobId = String(data?.background_refresh?.job_id || "").trim();
+      if (!jobId) {
+        throw new Error("Cookie 导入任务创建失败");
+      }
       if (cookieInput) cookieInput.value = "";
       if (cookieFile) cookieFile.value = "";
-      await loadTokens();
+      closeDialog(refreshModal);
+      await trackBackgroundJob({
+        title: "Cookie 导入进度",
+        initialPayload: data,
+        pollUrl: `/api/v1/refresh-profiles/import-cookie-jobs/${encodeURIComponent(jobId)}`,
+        onComplete: async (payload) => {
+          await loadTokens();
+          const hasFailed = getImportFailedCount(payload) > 0;
+          showMsg(
+            refreshMsg,
+            buildImportSummaryText("Cookie导入", payload),
+            hasFailed,
+            { duration: 8000 }
+          );
+          showToast(buildImportSummaryText("Cookie导入", payload), hasFailed, { duration: 7000 });
+        },
+      });
     } catch (err) {
       showMsg(refreshMsg, err.message || "Cookie 导入失败", true, { duration: 8000 });
     } finally {

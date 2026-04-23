@@ -1,4 +1,4 @@
-from core.stores import RequestLogStore
+from core.stores import ErrorDetailRecord, ErrorDetailStore, RequestLogStore
 from core import token_mgr
 
 
@@ -57,6 +57,50 @@ def test_401_token_logs_are_backfill_candidates(tmp_path):
     )
 
     result = store.find_poll_invalid_token_candidates()
+
+    assert result["matched_logs"] == 2
+    assert result["candidate_count"] == 2
+    assert {item["token_id"] for item in result["candidates"]} == {"tok_1", "tok_2"}
+
+
+def test_error_details_are_backfill_candidates(tmp_path):
+    store = ErrorDetailStore(tmp_path / "request_errors.jsonl", max_items=100)
+    store.add(
+        ErrorDetailRecord(
+            code="ERR-A",
+            ts=100,
+            message="Token invalid or expired.",
+            status_code=401,
+            operation="chat.completions",
+            path="/v1/chat/completions",
+            token_id="tok_1",
+            token_account_email="user@example.test",
+        )
+    )
+    store.add(
+        ErrorDetailRecord(
+            code="ERR-B",
+            ts=101,
+            message="Unauthorized",
+            status_code=401,
+            operation="chat.completions",
+            path="/v1/chat/completions",
+            token_id="tok_2",
+        )
+    )
+    store.add(
+        ErrorDetailRecord(
+            code="ERR-C",
+            ts=102,
+            message="temporary upstream error",
+            status_code=503,
+            operation="chat.completions",
+            path="/v1/chat/completions",
+            token_id="tok_3",
+        )
+    )
+
+    result = store.find_invalid_token_candidates()
 
     assert result["matched_logs"] == 2
     assert result["candidate_count"] == 2

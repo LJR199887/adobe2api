@@ -692,10 +692,79 @@ def build_admin_router(
     @router.post("/api/v1/logs/backfill-invalid-token-exhausted")
     def backfill_invalid_token_exhausted(request: Request, limit: int = 500):
         require_admin_auth(request)
-        scan = log_store.find_poll_invalid_token_candidates(limit=limit)
-        candidates = scan.get("candidates") if isinstance(scan, dict) else []
-        if not isinstance(candidates, list):
-            candidates = []
+        request_log_scan = log_store.find_poll_invalid_token_candidates(limit=limit)
+        error_detail_scan = error_store.find_invalid_token_candidates(limit=limit)
+
+        merged_candidates: dict[str, dict] = {}
+        for source_name, scan in (
+            ("request_logs", request_log_scan),
+            ("request_errors", error_detail_scan),
+        ):
+            candidates = scan.get("candidates") if isinstance(scan, dict) else []
+            if not isinstance(candidates, list):
+                continue
+            for candidate in candidates:
+                if not isinstance(candidate, dict):
+                    continue
+                account_key = str(candidate.get("account_key") or "").strip()
+                if not account_key:
+                    continue
+                existing = merged_candidates.get(account_key)
+                if existing is None:
+                    copied = dict(candidate)
+                    sources = copied.get("sources")
+                    if not isinstance(sources, list):
+                        sources = []
+                    if source_name not in sources:
+                        sources.append(source_name)
+                    copied["sources"] = sources
+                    merged_candidates[account_key] = copied
+                    continue
+
+                existing["matched_log_count"] = int(
+                    existing.get("matched_log_count") or 0
+                ) + int(candidate.get("matched_log_count") or 0)
+                existing["first_ts"] = min(
+                    float(existing.get("first_ts") or 0),
+                    float(candidate.get("first_ts") or 0),
+                )
+                existing["last_ts"] = max(
+                    float(existing.get("last_ts") or 0),
+                    float(candidate.get("last_ts") or 0),
+                )
+                if candidate.get("token_id") and not existing.get("token_id"):
+                    existing["token_id"] = candidate.get("token_id")
+                if candidate.get("token_account_email") and not existing.get(
+                    "token_account_email"
+                ):
+                    existing["token_account_email"] = candidate.get(
+                        "token_account_email"
+                    )
+                if candidate.get("token_account_name") and not existing.get(
+                    "token_account_name"
+                ):
+                    existing["token_account_name"] = candidate.get("token_account_name")
+                if bool(candidate.get("has_upstream_job_id")):
+                    existing["has_upstream_job_id"] = True
+                for reason in candidate.get("matched_reasons") or []:
+                    reasons = existing.setdefault("matched_reasons", [])
+                    if isinstance(reasons, list) and reason not in reasons:
+                        reasons.append(reason)
+                for job_id in candidate.get("upstream_job_ids") or []:
+                    job_ids = existing.setdefault("upstream_job_ids", [])
+                    if isinstance(job_ids, list) and job_id not in job_ids:
+                        job_ids.append(job_id)
+                sources = existing.setdefault("sources", [])
+                if isinstance(sources, list) and source_name not in sources:
+                    sources.append(source_name)
+
+        candidates = sorted(
+            merged_candidates.values(),
+            key=lambda x: (
+                -float(x.get("last_ts") or 0),
+                str(x.get("account_key") or "").casefold(),
+            ),
+        )[: max(1, min(5000, int(limit or 500)))]
 
         updated = []
         skipped = []
@@ -761,6 +830,8 @@ def build_admin_router(
                     "status": token_info.get("status"),
                     "matched_by": token_info.get("_matched_by"),
                     "matched_log_count": candidate.get("matched_log_count"),
+                    "matched_reasons": candidate.get("matched_reasons") or [],
+                    "sources": candidate.get("sources") or [],
                     "auto_refresh_disabled": profile_disabled,
                     "disabled_profile_id": disabled_profile_id or None,
                 }
@@ -777,10 +848,19 @@ def build_admin_router(
 
         return {
             "status": "ok",
-            "scanned_logs": scan.get("scanned_logs", 0),
-            "matched_logs": scan.get("matched_logs", 0),
-            "unidentified_logs": scan.get("unidentified_logs", 0),
-            "candidate_count": scan.get("candidate_count", 0),
+            "scanned_logs": int(request_log_scan.get("scanned_logs", 0) or 0)
+            + int(error_detail_scan.get("scanned_logs", 0) or 0),
+            "matched_logs": int(request_log_scan.get("matched_logs", 0) or 0)
+            + int(error_detail_scan.get("matched_logs", 0) or 0),
+            "unidentified_logs": int(
+                request_log_scan.get("unidentified_logs", 0) or 0
+            )
+            + int(error_detail_scan.get("unidentified_logs", 0) or 0),
+            "candidate_count": len(candidates),
+            "request_log_scanned": request_log_scan.get("scanned_logs", 0),
+            "request_log_matched": request_log_scan.get("matched_logs", 0),
+            "error_detail_scanned": error_detail_scan.get("scanned_logs", 0),
+            "error_detail_matched": error_detail_scan.get("matched_logs", 0),
             "updated_count": len(updated),
             "changed_count": changed_count,
             "skipped_count": len(skipped),

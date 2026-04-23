@@ -795,6 +795,47 @@ def build_admin_router(
         refresh_manager.set_enabled(profile_id, False)
         return True, profile_id
 
+    def _disable_token_for_abnormal_check(
+        token_info: dict,
+        *,
+        detail: str,
+    ) -> dict:
+        token_id = str(token_info.get("id") or "").strip()
+        previous_status = str(token_info.get("status") or "").strip().lower() or "active"
+        final_status = previous_status
+        status_changed = False
+        if token_id and previous_status in {"active", "error"}:
+            token_manager.set_status(token_id, "disabled")
+            refreshed = token_manager.get_by_id(token_id) or {}
+            if isinstance(refreshed, dict) and refreshed:
+                token_info = refreshed
+            final_status = "disabled"
+            status_changed = previous_status != "disabled"
+
+        profile_disabled = False
+        disabled_profile_id = ""
+        auto_refresh_disable_error = ""
+        try:
+            profile_disabled, disabled_profile_id = disable_auto_refresh_for_token_info(
+                token_info
+            )
+        except Exception as exc:
+            auto_refresh_disable_error = str(exc)
+
+        payload = {
+            "token_id": token_id,
+            "result": "abnormal",
+            "detail": str(detail or "").strip() or "token marked as abnormal",
+            "previous_status": previous_status,
+            "status": final_status,
+            "status_changed": status_changed,
+            "auto_refresh_disabled": profile_disabled,
+            "disabled_profile_id": disabled_profile_id or None,
+        }
+        if auto_refresh_disable_error:
+            payload["auto_refresh_disable_error"] = auto_refresh_disable_error
+        return payload
+
     def _response_text_for_invalid_check(resp) -> str:
         parts = [str(getattr(resp, "text", "") or "")]
         try:
@@ -819,7 +860,11 @@ def build_admin_router(
         token_id = str(token_info.get("id") or "").strip()
         token_value = str(token_info.get("value") or "").strip()
         if not token_value:
-            return {"token_id": token_id, "detail": "empty token"}
+            return {
+                "token_id": token_id,
+                "result": "abnormal",
+                "detail": "empty token",
+            }
 
         account_id = ""
         try:
@@ -829,7 +874,11 @@ def build_admin_router(
         except Exception:
             account_id = ""
         if not account_id:
-            return {"token_id": token_id, "detail": "account_id not found in token"}
+            return {
+                "token_id": token_id,
+                "result": "abnormal",
+                "detail": "account_id not found in token",
+            }
 
         cfg = config_manager.get_all()
         proxy = resolve_basic_proxy(cfg)
@@ -1300,9 +1349,11 @@ def build_admin_router(
         checked = []
         invalid = []
         valid = []
+        abnormal = []
         skipped = []
         failed = []
         disabled_profile_ids = []
+        disabled_tokens = []
         max_workers = min(get_batch_concurrency(), len(token_ids))
 
         def check_one(index: int, tid: str):
@@ -1312,11 +1363,10 @@ def build_admin_router(
 
             current_status = str(token_info.get("status") or "").strip().lower()
             if current_status != "active":
-                return index, "skipped", {
-                    "token_id": tid,
-                    "status": current_status,
-                    "detail": "only active tokens are checked",
-                }
+                return index, "abnormal", _disable_token_for_abnormal_check(
+                    token_info,
+                    detail=f"token already in abnormal status: {current_status or 'unknown'}",
+                )
 
             try:
                 result = _check_token_invalid_or_expired(token_info)
@@ -1350,6 +1400,14 @@ def build_admin_router(
 
             if result.get("result") == "valid":
                 return index, "valid", result
+            if result.get("result") == "abnormal":
+                abnormal_payload = _disable_token_for_abnormal_check(
+                    token_info,
+                    detail=str(result.get("detail") or "").strip()
+                    or "token marked as abnormal during invalid check",
+                )
+                abnormal_payload["status_code"] = result.get("status_code")
+                return index, "abnormal", abnormal_payload
             return index, "skipped", result
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -1369,6 +1427,15 @@ def build_admin_router(
                 ).strip()
                 if disabled_profile_id:
                     disabled_profile_ids.append(disabled_profile_id)
+            elif status == "abnormal":
+                abnormal.append(payload)
+                disabled_profile_id = str(
+                    payload.get("disabled_profile_id") or ""
+                ).strip()
+                if disabled_profile_id:
+                    disabled_profile_ids.append(disabled_profile_id)
+                if str(payload.get("status") or "").strip().lower() == "disabled":
+                    disabled_tokens.append(str(payload.get("token_id") or "").strip())
             elif status == "valid":
                 valid.append(payload)
             elif status == "failed":
@@ -1391,11 +1458,14 @@ def build_admin_router(
             "invalid_count": len(invalid),
             "changed_count": changed_count,
             "valid_count": len(valid),
+            "abnormal_count": len(abnormal),
             "skipped_count": len(skipped),
             "failed_count": len(failed),
+            "disabled_count": len({tid for tid in disabled_tokens if tid}),
             "disabled_auto_refresh_count": len(set(disabled_profile_ids)),
             "invalid": invalid,
             "valid": valid,
+            "abnormal": abnormal,
             "skipped": skipped,
             "failed": failed,
         }

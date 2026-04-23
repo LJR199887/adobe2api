@@ -765,7 +765,7 @@
         return;
       }
       const ok = confirm(
-        `将主动检测选中的 ${selectedIds.length} 个生效 Token。只有返回 Token invalid or expired 时，才会标记为已失效并关闭自动刷新。确定继续吗？`
+        `将主动检测选中的 ${selectedIds.length} 个 Token。明确返回 Token invalid or expired 时会标记为已失效；检测到本地异常状态时会禁用并关闭自动刷新。确定继续吗？`
       );
       if (!ok) return;
 
@@ -784,11 +784,13 @@
         const invalid = Number(data.invalid_count || 0);
         const changed = Number(data.changed_count || 0);
         const valid = Number(data.valid_count || 0);
+        const abnormal = Number(data.abnormal_count || 0);
         const skipped = Number(data.skipped_count || 0);
         const failed = Number(data.failed_count || 0);
+        const disabledCount = Number(data.disabled_count || 0);
         const disabled = Number(data.disabled_auto_refresh_count || 0);
         showToast(
-          `检测完成：已失效 ${invalid}，新标记 ${changed}，正常 ${valid}，禁用自动刷新 ${disabled}，跳过 ${skipped}，失败 ${failed}`,
+          `检测完成：已失效 ${invalid}，新标记 ${changed}，异常 ${abnormal}，正常 ${valid}，禁用 ${disabledCount}，关闭自动刷新 ${disabled}，跳过 ${skipped}，失败 ${failed}`,
           failed > 0,
           { duration: 8000 }
         );

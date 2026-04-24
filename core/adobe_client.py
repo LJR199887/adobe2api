@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import os
@@ -64,9 +65,9 @@ class AdobeClient:
         self.token_rotation_strategy = "round_robin"
         self.token_success_auto_disable_enabled = False
         self.token_success_auto_disable_threshold = 2
-        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+        self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
         self.sec_ch_ua = (
-            '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"'
+            '"Google Chrome";v="147", "Not.A/Brand";v="8", "Chromium";v="147"'
         )
 
         self.apply_config(config_manager.get_all())
@@ -256,22 +257,50 @@ class AdobeClient:
             "sec-fetch-dest": "empty",
         }
 
-    def _submit_headers(self, token: str) -> dict:
+    @staticmethod
+    def _extract_user_id_from_token(token: str) -> str:
+        try:
+            parts = str(token or "").split(".")
+            if len(parts) < 2:
+                return ""
+            payload_b64 = parts[1]
+            padding = 4 - len(payload_b64) % 4
+            if padding != 4:
+                payload_b64 += "=" * padding
+            import base64
+
+            jwt = json.loads(base64.urlsafe_b64decode(payload_b64))
+            return str(jwt.get("user_id") or "")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _compute_nonce(user_id: str, prompt: str) -> str:
+        prompt_text = str(prompt or "")
+        return hashlib.sha256(
+            f"{str(user_id or '')}-{prompt_text[:256]}".encode("utf-8")
+        ).hexdigest()
+
+    def _submit_headers(self, token: str, prompt: str = "") -> dict:
         headers = self._browser_headers()
+        user_id = self._extract_user_id_from_token(token)
         headers.update(
             {
                 "Authorization": f"Bearer {token}",
                 "x-api-key": self.api_key,
+                "x-nonce": self._compute_nonce(user_id, prompt),
                 "content-type": "application/json",
                 "accept": "*/*",
             }
         )
         return headers
 
-    def _submit_headers_minimal(self, token: str) -> dict:
+    def _submit_headers_minimal(self, token: str, prompt: str = "") -> dict:
+        user_id = self._extract_user_id_from_token(token)
         return {
             "Authorization": f"Bearer {token}",
             "x-api-key": self.api_key,
+            "x-nonce": self._compute_nonce(user_id, prompt),
             "content-type": "application/json",
             "accept": "*/*",
         }
@@ -279,10 +308,17 @@ class AdobeClient:
     def _poll_headers(self, token: str) -> dict:
         return {
             "Authorization": f"Bearer {token}",
+            "x-api-key": self.api_key,
             "accept": "*/*",
             "referer": "https://firefly.adobe.com/",
             "origin": "https://firefly.adobe.com",
             "user-agent": self.user_agent,
+            "sec-ch-ua": self.sec_ch_ua,
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-site": "cross-site",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-dest": "empty",
         }
 
     @staticmethod
@@ -946,7 +982,9 @@ class AdobeClient:
             reference_mode=reference_mode,
         )
         submit_resp = self._post_json(
-            self.video_submit_url, headers=self._submit_headers(token), payload=payload
+            self.video_submit_url,
+            headers=self._submit_headers(token, prompt=prompt),
+            payload=payload,
         )
 
         if submit_resp.status_code in (401, 403):
@@ -1167,7 +1205,11 @@ class AdobeClient:
             model_specific_payload=model_specific_payload,
         ):
             submit_resp = self._post_json(
-                self.submit_url, headers=self._submit_headers(token), payload=payload
+                self.submit_url,
+                headers=self._submit_headers(
+                    token, prompt=str(payload.get("prompt") or prompt or "")
+                ),
+                payload=payload,
             )
             if submit_resp.status_code == 200:
                 break

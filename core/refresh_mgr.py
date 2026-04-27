@@ -10,6 +10,7 @@ import requests
 
 from core.config_mgr import config_manager
 from core.proxy_utils import build_requests_proxies, resolve_basic_proxy
+from core.sqlite_store import SQLiteStore
 from core.token_mgr import token_manager
 
 
@@ -32,39 +33,60 @@ class RefreshManager:
         self._stop_event = threading.Event()
         self._profiles: List[Dict] = []
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        self._store = SQLiteStore(CONFIG_DIR / "app.db")
         self._load_profiles()
+
+    def _load_json_profiles_locked(self) -> List[Dict]:
+        if not PROFILE_FILE.exists():
+            return []
+        try:
+            payload = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+
+        profiles = payload.get("profiles") if isinstance(payload, dict) else None
+        if not isinstance(profiles, list):
+            return []
+        return [item for item in profiles if isinstance(item, dict)]
+
+    def _normalize_loaded_profiles(self, profiles: List[Dict]) -> List[Dict]:
+        loaded: List[Dict] = []
+        now_ts = int(time.time())
+        for item in profiles:
+            try:
+                normalized = self._normalize_stored_profile(item, now_ts)
+            except Exception:
+                continue
+            loaded.append(normalized)
+        return loaded
 
     def _load_profiles(self):
         with self._lock:
-            if not PROFILE_FILE.exists():
-                self._profiles = []
-                return
             try:
-                payload = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+                profiles = self._store.load_refresh_profiles()
             except Exception:
-                self._profiles = []
-                return
+                profiles = []
 
-            profiles = payload.get("profiles") if isinstance(payload, dict) else None
-            if not isinstance(profiles, list):
-                self._profiles = []
-                return
+            if not profiles:
+                profiles = self._load_json_profiles_locked()
 
-            loaded: List[Dict] = []
-            now_ts = int(time.time())
-            for item in profiles:
+            self._profiles = self._normalize_loaded_profiles(profiles)
+            if self._profiles:
                 try:
-                    normalized = self._normalize_stored_profile(item, now_ts)
+                    self._store.replace_refresh_profiles(self._profiles)
                 except Exception:
-                    continue
-                loaded.append(normalized)
-            self._profiles = loaded
+                    pass
 
     def _save_profiles(self):
         payload = {
             "version": 2,
             "profiles": self._profiles,
         }
+        try:
+            self._store.replace_refresh_profiles(self._profiles)
+            return
+        except Exception:
+            pass
         PROFILE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     @staticmethod

@@ -1,3 +1,5 @@
+import json
+
 from core import refresh_mgr, token_mgr
 
 
@@ -105,3 +107,81 @@ def test_cookie_fingerprint_matches_same_cookie_pairs_in_different_order():
     assert refresh_mgr.RefreshManager.cookie_fingerprint(cookie_text) == (
         refresh_mgr.RefreshManager.cookie_fingerprint(cookie_list)
     )
+
+
+def test_token_manager_migrates_legacy_json_to_sqlite(tmp_path, monkeypatch):
+    monkeypatch.setattr(token_mgr, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(token_mgr, "DATA_FILE", tmp_path / "tokens.json")
+    monkeypatch.setattr(token_mgr, "LEGACY_DATA_FILE", tmp_path / "legacy_tokens.json")
+    (tmp_path / "tokens.json").write_text(
+        json.dumps(
+            [
+                {
+                    "id": "token-1",
+                    "value": "token-A",
+                    "status": "active",
+                    "success_count": 3,
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    manager = token_mgr.TokenManager()
+
+    assert (tmp_path / "app.db").exists()
+    assert manager.get_by_id("token-1")["success_count"] == 3
+
+    (tmp_path / "tokens.json").unlink()
+    reloaded = token_mgr.TokenManager()
+
+    assert reloaded.get_by_id("token-1")["value"] == "token-A"
+
+
+def test_refresh_manager_migrates_legacy_json_to_sqlite(tmp_path, monkeypatch):
+    monkeypatch.setattr(refresh_mgr, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(refresh_mgr, "PROFILE_FILE", tmp_path / "refresh_profile.json")
+    (tmp_path / "refresh_profile.json").write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "profiles": [
+                    {
+                        "id": "profile-1",
+                        "name": "Imported",
+                        "enabled": True,
+                        "imported_at": 123,
+                        "endpoint": {
+                            "url": refresh_mgr.RefreshManager.DEFAULT_REFRESH_URL,
+                            "method": "POST",
+                            "form": {
+                                "client_id": "clio-playground-web",
+                                "guest_allowed": "true",
+                                "scope": refresh_mgr.RefreshManager.DEFAULT_SCOPE,
+                            },
+                            "headers": {
+                                "Cookie": "a=1; b=2",
+                                "Accept": "*/*",
+                                "Accept-Language": "zh-CN,zh;q=0.9",
+                                "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                                "Origin": "https://firefly.adobe.com",
+                                "Referer": "https://firefly.adobe.com/",
+                                "User-Agent": "Mozilla/5.0",
+                            },
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = refresh_mgr.RefreshManager()
+
+    assert (tmp_path / "app.db").exists()
+    assert manager.list_profiles()[0]["id"] == "profile-1"
+
+    (tmp_path / "refresh_profile.json").unlink()
+    reloaded = refresh_mgr.RefreshManager()
+
+    assert reloaded.list_profiles()[0]["name"] == "Imported"

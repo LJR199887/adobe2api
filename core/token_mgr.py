@@ -8,6 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict
 
+from core.sqlite_store import SQLiteStore
+
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_DIR = BASE_DIR / "config"
@@ -26,34 +28,67 @@ class TokenManager:
         self._auto_refresh_profile_index: Dict[str, Dict] = {}
         self._rr_index = 0
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        self._store = SQLiteStore(CONFIG_DIR / "app.db")
         self.load()
+
+    def _load_json_tokens_locked(self) -> List[Dict]:
+        source = DATA_FILE if DATA_FILE.exists() else LEGACY_DATA_FILE
+        if not source.exists():
+            return []
+        try:
+            loaded = json.loads(source.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if not isinstance(loaded, list):
+            return []
+        if source == LEGACY_DATA_FILE and not DATA_FILE.exists():
+            try:
+                DATA_FILE.write_text(json.dumps(loaded, indent=2), encoding="utf-8")
+            except Exception:
+                pass
+        return [item for item in loaded if isinstance(item, dict)]
+
+    @staticmethod
+    def _normalize_loaded_tokens(tokens: List[Dict]) -> List[Dict]:
+        normalized: List[Dict] = []
+        now_ts = time.time()
+        for token in tokens:
+            if not isinstance(token, dict):
+                continue
+            token.setdefault("id", uuid.uuid4().hex[:8])
+            token.setdefault("value", "")
+            token.setdefault("status", "active")
+            token.setdefault("fails", 0)
+            token.setdefault("success_count", 0)
+            token.setdefault("added_at", now_ts)
+            token.setdefault("error_until", 0)
+            normalized.append(token)
+        return normalized
 
     def load(self):
         with self._lock:
-            source = DATA_FILE if DATA_FILE.exists() else LEGACY_DATA_FILE
-            if source.exists():
+            try:
+                self.tokens = self._store.load_tokens()
+            except Exception:
+                self.tokens = []
+
+            if not self.tokens:
+                self.tokens = self._load_json_tokens_locked()
+
+            self.tokens = self._normalize_loaded_tokens(self.tokens)
+            if self.tokens:
                 try:
-                    self.tokens = json.loads(source.read_text(encoding="utf-8"))
-                    now_ts = time.time()
-                    for t in self.tokens:
-                        if not isinstance(t, dict):
-                            continue
-                        t.setdefault("id", uuid.uuid4().hex[:8])
-                        t.setdefault("value", "")
-                        t.setdefault("status", "active")
-                        t.setdefault("fails", 0)
-                        t.setdefault("success_count", 0)
-                        t.setdefault("added_at", now_ts)
-                        t.setdefault("error_until", 0)
-                    if source == LEGACY_DATA_FILE and not DATA_FILE.exists():
-                        DATA_FILE.write_text(
-                            json.dumps(self.tokens, indent=2), encoding="utf-8"
-                        )
+                    self._store.replace_tokens(self.tokens)
                 except Exception:
-                    self.tokens = []
+                    pass
             self._rebuild_indexes_locked()
 
     def save(self):
+        try:
+            self._store.replace_tokens(self.tokens)
+            return
+        except Exception:
+            pass
         DATA_FILE.write_text(json.dumps(self.tokens, indent=2), encoding="utf-8")
 
     @staticmethod

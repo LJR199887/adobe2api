@@ -1211,6 +1211,7 @@ def build_admin_router(
         credits: str = "",
     ):
         require_admin_auth(request)
+        started = time.perf_counter()
         payload = token_manager.list_page(
             page=page,
             page_size=page_size,
@@ -1229,10 +1230,23 @@ def build_admin_router(
                 except Exception:
                     pass
             item["auto_refresh_enabled"] = refresh_manager.is_profile_enabled(pid)
+        pagination = payload.get("pagination") or {}
+        summary = payload.get("summary") or {}
+        logger.info(
+            "token list completed backend=%s page=%s page_size=%s total=%s "
+            "filtered=%s duration_ms=%s route_duration_ms=%s",
+            payload.get("backend") or "unknown",
+            pagination.get("page"),
+            pagination.get("page_size"),
+            summary.get("total"),
+            summary.get("filtered"),
+            payload.get("duration_ms"),
+            round((time.perf_counter() - started) * 1000, 3),
+        )
         return {
             "tokens": tokens,
-            "summary": payload.get("summary") or {},
-            "pagination": payload.get("pagination") or {},
+            "summary": summary,
+            "pagination": pagination,
         }
 
     @router.post("/api/v1/tokens")

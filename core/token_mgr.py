@@ -1,5 +1,6 @@
 import json
 import base64
+import logging
 import threading
 import time
 import uuid
@@ -15,6 +16,7 @@ DATA_DIR = BASE_DIR / "data"
 CONFIG_DIR = BASE_DIR / "config"
 DATA_FILE = CONFIG_DIR / "tokens.json"
 LEGACY_DATA_FILE = DATA_DIR / "tokens.json"
+logger = logging.getLogger("uvicorn.error")
 
 
 class TokenManager:
@@ -880,8 +882,62 @@ class TokenManager:
         status: str = "",
         credits: str = "",
     ) -> Dict:
+        try:
+            return self._list_page_sqlite(
+                page=page,
+                page_size=page_size,
+                status=status,
+                credits=credits,
+            )
+        except Exception as exc:
+            logger.warning("token list sqlite failed, falling back to memory: %s", exc)
+            return self._list_page_memory(
+                page=page,
+                page_size=page_size,
+                status=status,
+                credits=credits,
+            )
+
+    def _list_page_sqlite(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        status: str = "",
+        credits: str = "",
+    ) -> Dict:
+        started = time.perf_counter()
+        payload = self._store.list_tokens_page(
+            page=page,
+            page_size=page_size,
+            status=status,
+            credits=credits,
+        )
+        now_ts = int(time.time())
+        tokens = [
+            self._public_token_locked(token, now_ts)
+            for token in payload.get("tokens", [])
+            if isinstance(token, dict)
+        ]
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
+        result = {
+            "tokens": tokens,
+            "summary": payload.get("summary") or {},
+            "pagination": payload.get("pagination") or {},
+            "backend": "sqlite",
+            "duration_ms": elapsed_ms,
+        }
+        return result
+
+    def _list_page_memory(
+        self,
+        page: int = 1,
+        page_size: int = 50,
+        status: str = "",
+        credits: str = "",
+    ) -> Dict:
+        started = time.perf_counter()
         page = max(1, int(page or 1))
-        page_size = max(1, min(2000, int(page_size or 50)))
+        page_size = max(1, min(200, int(page_size or 50)))
         with self._lock:
             total_count = len(self.tokens)
             active_count = sum(
@@ -917,6 +973,8 @@ class TokenManager:
                     "total": filtered_count,
                     "total_pages": total_pages,
                 },
+                "backend": "memory",
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
             }
 
     def list_all(self):

@@ -185,3 +185,57 @@ def test_refresh_manager_migrates_legacy_json_to_sqlite(tmp_path, monkeypatch):
     reloaded = refresh_mgr.RefreshManager()
 
     assert reloaded.list_profiles()[0]["name"] == "Imported"
+
+
+def test_token_list_page_uses_sqlite_pagination(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    manager.add("token-old", meta={"id": "old", "added_at": 1, "updated_at": 1})
+    manager.add("token-new", meta={"id": "new", "added_at": 2, "updated_at": 3})
+    manager.add("token-mid", meta={"id": "mid", "added_at": 3, "updated_at": 2})
+
+    page_one = manager.list_page(page=1, page_size=2)
+    page_two = manager.list_page(page=2, page_size=2)
+
+    assert page_one["backend"] == "sqlite"
+    assert [item["id"] for item in page_one["tokens"]] == ["new", "mid"]
+    assert [item["id"] for item in page_two["tokens"]] == ["old"]
+    assert page_one["pagination"]["total"] == 3
+    assert page_one["pagination"]["total_pages"] == 2
+
+
+def test_token_list_page_sqlite_filters_status_and_credit_errors(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    manager.add("token-active", meta={"id": "active", "status": "active"})
+    manager.add("token-invalid", meta={"id": "invalid", "status": "invalid"})
+    manager.add(
+        "token-credit-error",
+        meta={
+            "id": "credit-error",
+            "status": "active",
+            "credits_error": "credits request failed: 403",
+        },
+    )
+
+    invalid_page = manager.list_page(status="invalid")
+    credits_page = manager.list_page(credits="error")
+
+    assert invalid_page["backend"] == "sqlite"
+    assert [item["id"] for item in invalid_page["tokens"]] == ["invalid"]
+    assert credits_page["backend"] == "sqlite"
+    assert [item["id"] for item in credits_page["tokens"]] == ["credit-error"]
+    assert credits_page["summary"]["filtered"] == 1
+
+
+def test_token_list_page_falls_back_to_memory_if_sqlite_fails(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    manager.add("token-A", meta={"id": "token-A"})
+
+    def fail_sqlite_page(**kwargs):
+        raise RuntimeError("sqlite unavailable")
+
+    monkeypatch.setattr(manager._store, "list_tokens_page", fail_sqlite_page)
+
+    payload = manager.list_page(page=1, page_size=50)
+
+    assert payload["backend"] == "memory"
+    assert [item["id"] for item in payload["tokens"]] == ["token-A"]

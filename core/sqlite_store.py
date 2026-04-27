@@ -38,6 +38,7 @@ class SQLiteStore:
                         status TEXT,
                         email TEXT,
                         name TEXT,
+                        credits_error TEXT,
                         added_at REAL,
                         updated_at REAL,
                         payload TEXT NOT NULL
@@ -66,6 +67,16 @@ class SQLiteStore:
                 )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_tokens_status ON tokens(status)"
+                )
+                token_columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(tokens)").fetchall()
+                }
+                if "credits_error" not in token_columns:
+                    conn.execute("ALTER TABLE tokens ADD COLUMN credits_error TEXT")
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tokens_credits_error "
+                    "ON tokens(credits_error)"
                 )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_refresh_profiles_fingerprint "
@@ -107,6 +118,7 @@ class SQLiteStore:
             str(token.get("status") or "active").strip(),
             str(token.get("refresh_profile_email") or "").strip(),
             str(token.get("refresh_profile_name") or "").strip(),
+            str(token.get("credits_error") or "").strip(),
             cls._number(token.get("added_at"), now_ts),
             cls._number(token.get("updated_at"), token.get("added_at") or now_ts),
             cls._json_payload(token),
@@ -192,13 +204,103 @@ class SQLiteStore:
             conn.executemany(
                 """
                 INSERT OR REPLACE INTO tokens (
-                    id, value_key, profile_id, status, email, name,
+                    id, value_key, profile_id, status, email, name, credits_error,
                     added_at, updated_at, payload
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
             conn.commit()
+
+    @staticmethod
+    def _token_filter_sql(status: str = "", credits: str = ""):
+        clauses = []
+        params = []
+        status_filter = str(status or "").strip().lower()
+        credits_filter = str(credits or "").strip().lower()
+        if status_filter:
+            clauses.append("status = ?")
+            params.append(status_filter)
+        if credits_filter == "error":
+            clauses.append("COALESCE(credits_error, '') <> ''")
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        return where_sql, params
+
+    def list_tokens_page(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+        status: str = "",
+        credits: str = "",
+    ) -> Dict:
+        self._ensure_schema()
+        page = max(1, int(page or 1))
+        page_size = max(1, min(200, int(page_size or 50)))
+        where_sql, params = self._token_filter_sql(status=status, credits=credits)
+        sort_sql = """
+            CASE
+                WHEN updated_at IS NOT NULL AND updated_at > 0 THEN updated_at
+                WHEN added_at IS NOT NULL AND added_at > 0 THEN added_at
+                ELSE 0
+            END DESC,
+            COALESCE(added_at, 0) DESC,
+            id DESC
+        """
+        with self._lock, self._connect() as conn:
+            total_count = int(
+                conn.execute("SELECT COUNT(*) FROM tokens").fetchone()[0] or 0
+            )
+            active_count = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM tokens "
+                    "WHERE status = 'active'"
+                ).fetchone()[0]
+                or 0
+            )
+            filtered_count = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM tokens {where_sql}",
+                    params,
+                ).fetchone()[0]
+                or 0
+            )
+            total_pages = max(1, (filtered_count + page_size - 1) // page_size)
+            page = min(page, total_pages)
+            offset = (page - 1) * page_size
+            rows = conn.execute(
+                f"""
+                SELECT payload
+                FROM tokens
+                {where_sql}
+                ORDER BY {sort_sql}
+                LIMIT ? OFFSET ?
+                """,
+                [*params, page_size, offset],
+            ).fetchall()
+
+        tokens: List[Dict] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                tokens.append(payload)
+        return {
+            "tokens": tokens,
+            "summary": {
+                "total": total_count,
+                "active": active_count,
+                "filtered": filtered_count,
+            },
+            "pagination": {
+                "page": page,
+                "page_size": page_size,
+                "total": filtered_count,
+                "total_pages": total_pages,
+            },
+        }
 
     def load_refresh_profiles(self) -> List[Dict]:
         self._ensure_schema()

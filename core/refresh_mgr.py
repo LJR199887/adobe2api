@@ -249,6 +249,19 @@ class RefreshManager:
         items.sort(key=lambda x: int(x.get("imported_at") or 0), reverse=True)
         return items
 
+    def storage_info(self) -> Dict:
+        db_path = self._store.db_path
+        with self._lock:
+            return {
+                "backend": "sqlite",
+                "db_path": str(db_path),
+                "db_exists": db_path.exists(),
+                "db_size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+                "refresh_profiles": len(
+                    [p for p in self._profiles if isinstance(p, dict)]
+                ),
+            }
+
     @staticmethod
     def _cookie_string_from_input(cookie_input) -> str:
         if isinstance(cookie_input, str):

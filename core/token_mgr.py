@@ -862,6 +862,17 @@ class TokenManager:
         with self._lock:
             return len(self.tokens)
 
+    def storage_info(self) -> Dict:
+        db_path = self._store.db_path
+        with self._lock:
+            return {
+                "backend": "sqlite",
+                "db_path": str(db_path),
+                "db_exists": db_path.exists(),
+                "db_size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+                "tokens": len([t for t in self.tokens if isinstance(t, dict)]),
+            }
+
     def list_page(
         self,
         page: int = 1,

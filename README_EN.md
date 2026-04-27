@@ -519,9 +519,9 @@ Once you have the exported JSON file, follow these steps to import it:
 
 - Generated media: `data/generated/`
 - Request logs: `data/request_logs.jsonl`
-- Token pool: `config/tokens.json`
+- Token pool and refresh profiles: `config/app.db`
 - Service config: `config/config.json`
-- Refresh profile (local private): `config/refresh_profile.json`
+- On first startup, legacy `config/tokens.json` and `config/refresh_profile.json` are migrated into SQLite automatically
 
 Generated media retention policy:
 

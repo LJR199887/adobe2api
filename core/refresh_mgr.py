@@ -531,6 +531,31 @@ class RefreshManager:
             if len(self._profiles) != before_count:
                 self._save_profiles()
 
+    def remove_profiles_only(self, profile_ids: List[str]) -> Dict:
+        remove_ids = {str(x or "").strip() for x in profile_ids if str(x or "").strip()}
+        if not remove_ids:
+            return {"deleted_ids": [], "missing_ids": []}
+        with self._lock:
+            existing_ids = {
+                str(p.get("id") or "").strip()
+                for p in self._profiles
+                if str(p.get("id") or "").strip()
+            }
+            deleted_ids = sorted(remove_ids & existing_ids)
+            if not deleted_ids:
+                return {"deleted_ids": [], "missing_ids": sorted(remove_ids)}
+            delete_lookup = set(deleted_ids)
+            self._profiles = [
+                p
+                for p in self._profiles
+                if str(p.get("id") or "").strip() not in delete_lookup
+            ]
+            self._save_profiles()
+            return {
+                "deleted_ids": deleted_ids,
+                "missing_ids": sorted(remove_ids - delete_lookup),
+            }
+
     def set_enabled(self, profile_id: str, enabled: bool) -> Dict:
         with self._lock:
             target = self._find_profile_locked(profile_id)

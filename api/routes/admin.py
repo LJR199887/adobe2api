@@ -786,40 +786,6 @@ def build_admin_router(
             token_manager.remove(token_id)
         return True
 
-    def delete_tokens_and_linked_profiles(token_ids: list[str]) -> dict:
-        normalized_ids = [
-            str(x or "").strip() for x in (token_ids or []) if str(x or "").strip()
-        ]
-        if not normalized_ids:
-            return {"deleted_ids": [], "missing_ids": [], "deleted_profile_ids": []}
-
-        token_infos = []
-        missing = []
-        for tid in normalized_ids:
-            token_info = token_manager.get_by_id(tid)
-            if token_info:
-                token_infos.append(token_info)
-            else:
-                missing.append(tid)
-
-        profile_ids = [
-            str(token.get("refresh_profile_id") or "").strip()
-            for token in token_infos
-            if bool(token.get("auto_refresh"))
-            and str(token.get("refresh_profile_id") or "").strip()
-        ]
-        profile_result = refresh_manager.remove_profiles_only(profile_ids)
-        token_result = token_manager.remove_many(
-            [str(token.get("id") or "").strip() for token in token_infos]
-        )
-        deleted_ids = list(token_result.get("deleted_ids") or [])
-        missing_ids = sorted(set(missing) | set(token_result.get("missing_ids") or []))
-        return {
-            "deleted_ids": deleted_ids,
-            "missing_ids": missing_ids,
-            "deleted_profile_ids": list(profile_result.get("deleted_ids") or []),
-        }
-
     def disable_auto_refresh_for_token_info(token_info: dict) -> tuple[bool, str]:
         if not isinstance(token_info, dict) or not bool(token_info.get("auto_refresh")):
             return False, ""
@@ -1382,23 +1348,17 @@ def build_admin_router(
         if not normalized_ids:
             raise HTTPException(status_code=400, detail="ids is required")
 
-        started = time.perf_counter()
-        result = delete_tokens_and_linked_profiles(normalized_ids)
-        deleted = list(result.get("deleted_ids") or [])
-        missing = list(result.get("missing_ids") or [])
+        deleted = []
+        missing = []
+        for tid in normalized_ids:
+            if delete_token_and_linked_profile(tid):
+                deleted.append(tid)
+            else:
+                missing.append(tid)
 
         if not deleted:
             raise HTTPException(status_code=404, detail="no token deleted")
 
-        logger.info(
-            "token batch delete completed requested=%s deleted=%s missing=%s "
-            "profiles_deleted=%s duration_ms=%s",
-            len(normalized_ids),
-            len(deleted),
-            len(missing),
-            len(result.get("deleted_profile_ids") or []),
-            round((time.perf_counter() - started) * 1000, 3),
-        )
         return {
             "status": "ok" if not missing else "partial",
             "deleted_count": len(deleted),

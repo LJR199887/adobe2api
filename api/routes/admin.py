@@ -1211,7 +1211,6 @@ def build_admin_router(
         credits: str = "",
     ):
         require_admin_auth(request)
-        started = time.perf_counter()
         payload = token_manager.list_page(
             page=page,
             page_size=page_size,
@@ -1219,39 +1218,21 @@ def build_admin_router(
             credits=credits,
         )
         tokens = payload.get("tokens") or []
-        auto_refresh_profile_ids = []
         for item in tokens:
             if not bool(item.get("auto_refresh")):
                 item["auto_refresh_enabled"] = None
                 continue
             pid = str(item.get("refresh_profile_id") or "").strip()
-            if not pid:
-                item["auto_refresh_enabled"] = None
-                continue
-            auto_refresh_profile_ids.append(pid)
-        enabled_by_profile = refresh_manager.profiles_enabled(auto_refresh_profile_ids)
-        for item in tokens:
-            if not bool(item.get("auto_refresh")):
-                continue
-            pid = str(item.get("refresh_profile_id") or "").strip()
-            item["auto_refresh_enabled"] = enabled_by_profile.get(pid)
-        pagination = payload.get("pagination") or {}
-        summary = payload.get("summary") or {}
-        logger.info(
-            "token list completed backend=%s page=%s page_size=%s total=%s "
-            "filtered=%s duration_ms=%s route_duration_ms=%s",
-            payload.get("backend") or "unknown",
-            pagination.get("page"),
-            pagination.get("page_size"),
-            summary.get("total"),
-            summary.get("filtered"),
-            payload.get("duration_ms"),
-            round((time.perf_counter() - started) * 1000, 3),
-        )
+            if str(item.get("status") or "").strip().lower() in {"exhausted", "invalid", "abnormal"} and pid:
+                try:
+                    refresh_manager.set_enabled(pid, False)
+                except Exception:
+                    pass
+            item["auto_refresh_enabled"] = refresh_manager.is_profile_enabled(pid)
         return {
             "tokens": tokens,
-            "summary": summary,
-            "pagination": pagination,
+            "summary": payload.get("summary") or {},
+            "pagination": payload.get("pagination") or {},
         }
 
     @router.post("/api/v1/tokens")

@@ -648,18 +648,18 @@ def build_generation_router(
         if not prompt:
             raise HTTPException(status_code=400, detail="prompt cannot be empty")
         _validate_prompt_length(prompt)
-
-        ratio = data.aspect_ratio.strip() or "16:9"
+        model_conf = resolve_model(data.model)
+        ratio, output_resolution, _resolved_model_id = resolve_ratio_and_resolution(
+            {
+                "aspect_ratio": data.aspect_ratio,
+                "output_resolution": data.output_resolution,
+            },
+            data.model,
+        )
         if ratio not in supported_ratios:
             raise HTTPException(status_code=400, detail="unsupported aspect ratio")
-
-        output_resolution = (data.output_resolution or "2K").upper()
         if output_resolution not in {"1K", "2K", "4K"}:
             raise HTTPException(status_code=400, detail="unsupported output_resolution")
-
-        model_conf = resolve_model(data.model)
-        if data.model:
-            output_resolution = model_conf["output_resolution"]
 
         normalized_data = _normalize_image_request_data(
             data.model_dump(),

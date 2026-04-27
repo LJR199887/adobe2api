@@ -416,7 +416,7 @@ curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
   - `submodule: ff-image-generate`
 - Banana 系列默认 `modelSpecificPayload` 调整为：
   - `parameters.addWatermark: false`
-  - 不再强制发送默认 `aspectRatio`
+  - 包含 `aspectRatio` 以确保按请求比例生成
 - 当模型配置传入 `model_specific_payload.parameters` 时，会与默认参数合并。
 - `gpt-image2` 图生图（有参考图）时不再发送 `size`，改为 `modelSpecificPayload.size=auto`。
 - 上游提交请求头 `sec-fetch-site` 改为 `cross-site`（与浏览器请求对齐）。

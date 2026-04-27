@@ -104,7 +104,7 @@ def build_image_payload_candidates(
         "output": {"storeInputs": True},
         "generationMetadata": metadata,
         "modelSpecificPayload": _merge_model_specific_payload(
-            {"parameters": {"addWatermark": False}}
+            {"aspectRatio": aspect_ratio, "parameters": {"addWatermark": False}}
         ),
     }
     if generation_settings:

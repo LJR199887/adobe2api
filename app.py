@@ -1189,11 +1189,12 @@ def _get_redis_health() -> dict[str, Any]:
 
 @app.on_event("startup")
 def _startup_connectivity_checks() -> None:
+    startup_logger = logging.getLogger("uvicorn.error")
     try:
         token_storage = token_manager.storage_info()
         refresh_storage = refresh_manager.storage_info()
         db_path = token_storage.get("db_path") or refresh_storage.get("db_path")
-        logger.info(
+        startup_logger.info(
             "sqlite storage enabled db=%s db_exists=%s db_size_bytes=%s "
             "tokens=%s refresh_profiles=%s",
             db_path,
@@ -1206,7 +1207,7 @@ def _startup_connectivity_checks() -> None:
             int(refresh_storage.get("refresh_profiles") or 0),
         )
     except Exception:
-        logger.exception("sqlite storage status log failed")
+        startup_logger.exception("sqlite storage status log failed")
 
     redis_health = _refresh_redis_health()
     if not redis_health.get("configured"):

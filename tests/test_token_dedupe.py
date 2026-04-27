@@ -65,6 +65,32 @@ def test_add_marks_duplicate_token(tmp_path, monkeypatch):
     assert len(manager.tokens) == 1
 
 
+def test_token_manager_remove_many_saves_once(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    manager.add("token-A", meta={"id": "token-A"})
+    manager.add("token-B", meta={"id": "token-B"})
+    manager.add("token-C", meta={"id": "token-C"})
+
+    save_count = 0
+    original_save = manager.save
+
+    def counting_save():
+        nonlocal save_count
+        save_count += 1
+        original_save()
+
+    monkeypatch.setattr(manager, "save", counting_save)
+
+    result = manager.remove_many(["token-A", "token-C", "missing"])
+
+    assert result["deleted_ids"] == ["token-A", "token-C"]
+    assert result["missing_ids"] == ["missing"]
+    assert manager.get_by_id("token-A") is None
+    assert manager.get_by_id("token-B") is not None
+    assert manager.get_by_id("token-C") is None
+    assert save_count == 1
+
+
 def test_auto_refresh_upsert_merges_duplicate_value_and_profile(tmp_path, monkeypatch):
     manager = make_token_manager(tmp_path, monkeypatch)
     existing = manager.add(
@@ -121,6 +147,31 @@ def test_refresh_manager_bulk_disables_profiles(tmp_path, monkeypatch):
     assert enabled[first["id"]] is False
     assert enabled[second["id"]] is False
     assert enabled["missing"] is None
+
+
+def test_refresh_manager_remove_profiles_only_saves_once(tmp_path, monkeypatch):
+    manager = make_refresh_manager(tmp_path, monkeypatch)
+    first = manager.import_cookie("cookie: a=1", name="First")
+    second = manager.import_cookie("cookie: b=2", name="Second")
+    third = manager.import_cookie("cookie: c=3", name="Third")
+
+    save_count = 0
+    original_save = manager._save_profiles
+
+    def counting_save():
+        nonlocal save_count
+        save_count += 1
+        original_save()
+
+    monkeypatch.setattr(manager, "_save_profiles", counting_save)
+
+    result = manager.remove_profiles_only([first["id"], third["id"], "missing"])
+    remaining_ids = {item["id"] for item in manager.list_profiles()}
+
+    assert result["deleted_ids"] == [first["id"], third["id"]]
+    assert result["missing_ids"] == ["missing"]
+    assert remaining_ids == {second["id"]}
+    assert save_count == 1
 
 
 def test_token_manager_migrates_legacy_json_to_sqlite(tmp_path, monkeypatch):

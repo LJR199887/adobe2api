@@ -2320,48 +2320,31 @@ def build_admin_router(
         )
         request_duplicate_count = len(req.items) - len(import_entries)
 
-        def import_one(idx: int, item):
-            profile_import_started = time.perf_counter()
-            try:
-                profile = refresh_manager.import_cookie(item.cookie, name=item.name)
-            except ValueError as exc:
-                return {
+        profile_import_started = time.perf_counter()
+        logger.info(
+            "import_cookie_batch_profile_import_started total=%s unique=%s",
+            len(req.items),
+            len(import_entries),
+        )
+        done_items = refresh_manager.import_cookies_batch(
+            [
+                {
                     "index": idx,
-                    "imported": None,
-                    "failed": {
-                        "index": idx,
-                        "name": item.name,
-                        "detail": str(exc),
-                    },
-                    "refreshed": None,
-                    "refresh_failed": None,
-                    "timing": {
-                        "profile_import_ms": _elapsed_ms(profile_import_started),
-                    },
+                    "cookie": item.cookie,
+                    "name": item.name,
                 }
-            profile_import_ms = _elapsed_ms(profile_import_started)
+                for idx, item in import_entries
+            ]
+        )
+        profile_import_ms = _elapsed_ms(profile_import_started)
+        logger.info(
+            "import_cookie_batch_profile_import_completed total=%s unique=%s "
+            "duration_ms=%.3f",
+            len(req.items),
+            len(import_entries),
+            profile_import_ms,
+        )
 
-            return {
-                "index": idx,
-                "imported": profile,
-                "failed": None,
-                "timing": {
-                    "profile_import_ms": profile_import_ms,
-                },
-            }
-
-        max_workers = min(get_batch_concurrency(), len(import_entries))
-        if max_workers > 0:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [
-                    executor.submit(import_one, idx, item)
-                    for idx, item in import_entries
-                ]
-                done_items = [future.result() for future in as_completed(futures)]
-        else:
-            done_items = []
-
-        done_items.sort(key=lambda item: item["index"])
         imported_entries = []
         for item in done_items:
             if item["imported"] is not None:

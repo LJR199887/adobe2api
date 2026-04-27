@@ -52,6 +52,36 @@ def test_import_cookie_reuses_existing_profile_for_same_cookie(tmp_path, monkeyp
     assert manager.list_profiles()[0]["name"] == "Second"
 
 
+def test_batch_import_cookies_saves_profiles_once(tmp_path, monkeypatch):
+    manager = make_refresh_manager(tmp_path, monkeypatch)
+
+    save_count = 0
+    original_save = manager._save_profiles
+
+    def counting_save():
+        nonlocal save_count
+        save_count += 1
+        original_save()
+
+    monkeypatch.setattr(manager, "_save_profiles", counting_save)
+
+    result = manager.import_cookies_batch(
+        [
+            {"index": 0, "cookie": "cookie: a=1", "name": "First"},
+            {"index": 1, "cookie": "cookie: b=2", "name": "Second"},
+            {"index": 2, "cookie": "", "name": "Broken"},
+        ]
+    )
+
+    imported = [item for item in result if item["imported"] is not None]
+    failed = [item for item in result if item["failed"] is not None]
+
+    assert [item["index"] for item in imported] == [0, 1]
+    assert [item["index"] for item in failed] == [2]
+    assert len(manager.list_profiles()) == 2
+    assert save_count == 1
+
+
 def test_add_marks_duplicate_token(tmp_path, monkeypatch):
     manager = make_token_manager(tmp_path, monkeypatch)
 

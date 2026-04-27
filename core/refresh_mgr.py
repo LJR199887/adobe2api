@@ -897,7 +897,7 @@ class RefreshManager:
                 target["name"] = display_name or email
             self._save_profiles()
 
-    def refresh_once(self, profile_id: str, refresh_credits: bool = True) -> Dict:
+    def refresh_once(self, profile_id: str) -> Dict:
         total_started = time.perf_counter()
         prepare_started = time.perf_counter()
         snapshot = self._prepare_refresh(profile_id)
@@ -974,17 +974,14 @@ class RefreshManager:
         self._remove_profiles_only(merged_profile_ids)
 
         credits_error = ""
-        credits_skipped = False
         token_id = str(token_record.get("id") or "").strip()
         credits_started = time.perf_counter()
-        if token_id and refresh_credits:
+        if token_id:
             try:
                 self.refresh_credits_for_token_id(token_id)
             except Exception as exc:
                 credits_error = str(exc)
                 token_manager.set_credits_error(token_id, credits_error)
-        elif token_id:
-            credits_skipped = True
         credits_ms = round((time.perf_counter() - credits_started) * 1000, 3)
 
         self._mark_success(profile_id, http_status=resp.status_code)
@@ -997,7 +994,6 @@ class RefreshManager:
             "profile_email": profile_email,
             "expires_in": data.get("expires_in"),
             "credits_error": credits_error,
-            "credits_skipped": credits_skipped,
             "token_duplicate": bool(token_record.get("_duplicate_token")),
             "token_created": bool(token_record.get("_created")),
             "timing": {

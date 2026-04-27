@@ -213,6 +213,13 @@ class AdobeClient:
     @staticmethod
     def _classify_network_error_type(exc: Exception) -> str:
         text = str(exc or "").strip().lower()
+        if (
+            "curl: (16)" in text
+            or "http2" in text
+            or "framing layer" in text
+            or "stream error" in text
+        ):
+            return "connection"
         if "timed out" in text or "timeout" in text:
             return "timeout"
         if "proxy" in text:
@@ -242,6 +249,54 @@ class AdobeClient:
         if proxies:
             kwargs["proxies"] = proxies
         return CurlSession(**kwargs)
+
+    def _requests_request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict,
+        timeout: int = 60,
+        proxy_kind: str = "basic",
+        request_name: str = "request",
+        json_payload: Optional[dict] = None,
+        data_payload: Optional[bytes] = None,
+    ):
+        request_kwargs = {
+            "headers": headers,
+            "timeout": timeout,
+            "proxies": self._requests_proxies(proxy_kind=proxy_kind),
+        }
+        if json_payload is not None:
+            request_kwargs["json"] = json_payload
+        if data_payload is not None:
+            request_kwargs["data"] = data_payload
+        try:
+            if method == "post":
+                return requests.post(url, **request_kwargs)
+            if method == "get":
+                return requests.get(url, **request_kwargs)
+            raise ValueError(f"unsupported request method: {method}")
+        except requests.Timeout as exc:
+            raise UpstreamTemporaryError(
+                f"{request_name} upstream timeout via requests: {exc}",
+                error_type="timeout",
+            )
+        except requests.ProxyError as exc:
+            raise UpstreamTemporaryError(
+                f"{request_name} upstream proxy error via requests: {exc}",
+                error_type="proxy",
+            )
+        except requests.ConnectionError as exc:
+            raise UpstreamTemporaryError(
+                f"{request_name} upstream connection error via requests: {exc}",
+                error_type="connection",
+            )
+        except requests.RequestException as exc:
+            raise UpstreamTemporaryError(
+                f"{request_name} upstream request error via requests: {exc}",
+                error_type="network",
+            )
 
     def _browser_headers(self) -> dict:
         return {
@@ -332,142 +387,137 @@ class AdobeClient:
             raise QuotaExhaustedError("Adobe quota exhausted for this account")
         raise AuthError("Token invalid or expired")
 
-    def _post_json(self, url: str, headers: dict, payload: dict):
+    def _post_json(
+        self,
+        url: str,
+        headers: dict,
+        payload: dict,
+        request_name: str = "request",
+    ):
         session = self._session(proxy_kind="basic")
         if session is None:
-            try:
-                return requests.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=60,
-                    proxies=self._requests_proxies(proxy_kind="basic"),
-                )
-            except requests.Timeout as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream timeout: {exc}", error_type="timeout"
-                )
-            except requests.ProxyError as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream proxy error: {exc}", error_type="proxy"
-                )
-            except requests.ConnectionError as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream connection error: {exc}", error_type="connection"
-                )
-            except requests.RequestException as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream request error: {exc}", error_type="network"
-                )
+            return self._requests_request(
+                "post",
+                url,
+                headers=headers,
+                timeout=60,
+                proxy_kind="basic",
+                request_name=request_name,
+                json_payload=payload,
+            )
         try:
             with session:
                 resp = session.post(url, headers=headers, json=payload)
         except Exception as exc:
-            raise UpstreamTemporaryError(
-                f"upstream session error: {exc}",
-                error_type=self._classify_network_error_type(exc),
+            error_type = self._classify_network_error_type(exc)
+            logger.warning(
+                "%s failed via curl_cffi session; falling back to requests error_type=%s error=%s",
+                request_name,
+                error_type,
+                str(exc),
+            )
+            return self._requests_request(
+                "post",
+                url,
+                headers=headers,
+                timeout=60,
+                proxy_kind="basic",
+                request_name=request_name,
+                json_payload=payload,
             )
         if resp.status_code == 451:
-            try:
-                return requests.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=60,
-                    proxies=self._requests_proxies(proxy_kind="basic"),
-                )
-            except requests.Timeout as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream timeout: {exc}", status_code=451, error_type="timeout"
-                )
-            except requests.ProxyError as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream proxy error: {exc}", status_code=451, error_type="proxy"
-                )
-            except requests.ConnectionError as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream connection error: {exc}",
-                    status_code=451,
-                    error_type="connection",
-                )
-            except requests.RequestException as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream request error: {exc}",
-                    status_code=451,
-                    error_type="network",
-                )
+            logger.warning(
+                "%s returned status 451 via curl_cffi; retrying via requests",
+                request_name,
+            )
+            return self._requests_request(
+                "post",
+                url,
+                headers=headers,
+                timeout=60,
+                proxy_kind="basic",
+                request_name=request_name,
+                json_payload=payload,
+            )
         return resp
 
-    def _post_bytes(self, url: str, headers: dict, payload: bytes, proxy_kind: str = "basic"):
+    def _post_bytes(
+        self,
+        url: str,
+        headers: dict,
+        payload: bytes,
+        proxy_kind: str = "basic",
+        request_name: str = "request",
+    ):
         session = self._session(proxy_kind=proxy_kind)
         if session is None:
-            try:
-                return requests.post(
-                    url,
-                    headers=headers,
-                    data=payload,
-                    timeout=60,
-                    proxies=self._requests_proxies(proxy_kind=proxy_kind),
-                )
-            except requests.Timeout as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream timeout: {exc}", error_type="timeout"
-                )
-            except requests.ProxyError as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream proxy error: {exc}", error_type="proxy"
-                )
-            except requests.ConnectionError as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream connection error: {exc}", error_type="connection"
-                )
-            except requests.RequestException as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream request error: {exc}", error_type="network"
-                )
+            return self._requests_request(
+                "post",
+                url,
+                headers=headers,
+                timeout=60,
+                proxy_kind=proxy_kind,
+                request_name=request_name,
+                data_payload=payload,
+            )
         try:
             with session:
                 resp = session.post(url, headers=headers, data=payload)
         except Exception as exc:
-            raise UpstreamTemporaryError(
-                f"upstream session error: {exc}",
-                error_type=self._classify_network_error_type(exc),
+            error_type = self._classify_network_error_type(exc)
+            logger.warning(
+                "%s failed via curl_cffi session; falling back to requests error_type=%s error=%s",
+                request_name,
+                error_type,
+                str(exc),
+            )
+            return self._requests_request(
+                "post",
+                url,
+                headers=headers,
+                timeout=60,
+                proxy_kind=proxy_kind,
+                request_name=request_name,
+                data_payload=payload,
             )
         return resp
 
-    def _get(self, url: str, headers: dict, timeout: int = 60, proxy_kind: str = "basic"):
+    def _get(
+        self,
+        url: str,
+        headers: dict,
+        timeout: int = 60,
+        proxy_kind: str = "basic",
+        request_name: str = "request",
+    ):
         session = self._session(proxy_kind=proxy_kind)
         if session is None:
-            try:
-                return requests.get(
-                    url,
-                    headers=headers,
-                    timeout=timeout,
-                    proxies=self._requests_proxies(proxy_kind=proxy_kind),
-                )
-            except requests.Timeout as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream timeout: {exc}", error_type="timeout"
-                )
-            except requests.ProxyError as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream proxy error: {exc}", error_type="proxy"
-                )
-            except requests.ConnectionError as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream connection error: {exc}", error_type="connection"
-                )
-            except requests.RequestException as exc:
-                raise UpstreamTemporaryError(
-                    f"upstream request error: {exc}", error_type="network"
-                )
+            return self._requests_request(
+                "get",
+                url,
+                headers=headers,
+                timeout=timeout,
+                proxy_kind=proxy_kind,
+                request_name=request_name,
+            )
         try:
             with session:
                 resp = session.get(url, headers=headers)
         except Exception as exc:
-            raise UpstreamTemporaryError(
-                f"upstream session error: {exc}",
-                error_type=self._classify_network_error_type(exc),
+            error_type = self._classify_network_error_type(exc)
+            logger.warning(
+                "%s failed via curl_cffi session; falling back to requests error_type=%s error=%s",
+                request_name,
+                error_type,
+                str(exc),
+            )
+            return self._requests_request(
+                "get",
+                url,
+                headers=headers,
+                timeout=timeout,
+                proxy_kind=proxy_kind,
+                request_name=request_name,
             )
         return resp
 
@@ -527,6 +577,7 @@ class AdobeClient:
             headers=headers,
             payload=image_bytes,
             proxy_kind="resource",
+            request_name="upload",
         )
 
         if resp.status_code in (401, 403):
@@ -985,6 +1036,7 @@ class AdobeClient:
             self.video_submit_url,
             headers=self._submit_headers(token, prompt=prompt),
             payload=payload,
+            request_name="video submit",
         )
 
         if submit_resp.status_code in (401, 403):
@@ -1029,7 +1081,10 @@ class AdobeClient:
         while True:
             try:
                 poll_resp = self._get(
-                    poll_url, headers=self._poll_headers(token), timeout=60
+                    poll_url,
+                    headers=self._poll_headers(token),
+                    timeout=60,
+                    request_name="video poll",
                 )
                 if poll_resp.status_code in (401, 403):
                     self._raise_auth_or_quota(poll_resp)
@@ -1090,6 +1145,7 @@ class AdobeClient:
                             headers={"accept": "*/*"},
                             timeout=60,
                             proxy_kind="resource",
+                            request_name="video download",
                         )
                         video_resp.raise_for_status()
                         video_bytes = video_resp.content
@@ -1210,6 +1266,7 @@ class AdobeClient:
                     token, prompt=str(payload.get("prompt") or prompt or "")
                 ),
                 payload=payload,
+                request_name="image submit",
             )
             if submit_resp.status_code == 200:
                 break
@@ -1282,7 +1339,10 @@ class AdobeClient:
         while True:
             try:
                 poll_resp = self._get(
-                    poll_url, headers=self._poll_headers(token), timeout=60
+                    poll_url,
+                    headers=self._poll_headers(token),
+                    timeout=60,
+                    request_name="image poll",
                 )
                 if poll_resp.status_code in (401, 403):
                     self._raise_auth_or_quota(poll_resp)
@@ -1348,6 +1408,7 @@ class AdobeClient:
                             headers={"accept": "*/*"},
                             timeout=30,
                             proxy_kind="resource",
+                            request_name="image download",
                         )
                         img_resp.raise_for_status()
                         image_bytes = img_resp.content

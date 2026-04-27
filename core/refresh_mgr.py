@@ -322,7 +322,7 @@ class RefreshManager:
         pairs.sort(key=lambda item: (item[0].casefold(), item[0], item[1]))
         return json.dumps(pairs, ensure_ascii=False, separators=(",", ":"))
 
-    def _prepare_cookie_import(self, cookie_input, name: Optional[str] = None) -> Dict:
+    def import_cookie(self, cookie_input, name: Optional[str] = None) -> Dict:
         cookie = self._cookie_string_from_input(cookie_input)
         if not cookie:
             raise ValueError("cookie is required")
@@ -380,179 +380,76 @@ class RefreshManager:
                 "consecutive_failures": 0,
             },
         }
-        return {
-            "profile_id": profile_id,
-            "profile_name": profile_name,
-            "cookie_fingerprint": cookie_fingerprint,
-            "validated_endpoint": validated["endpoint"],
-            "new_profile": new_profile,
-            "name": name,
-        }
 
-    def _apply_prepared_cookie_import_locked(self, prepared: Dict) -> Dict:
-        profile_id = str(prepared.get("profile_id") or "").strip()
-        profile_name = str(prepared.get("profile_name") or "").strip()
-        cookie_fingerprint = str(prepared.get("cookie_fingerprint") or "").strip()
-        validated_endpoint = prepared.get("validated_endpoint") or {}
-        new_profile = prepared.get("new_profile") or {}
         removed_profile_ids: List[str] = []
-        target = None
-        retained_profiles: List[Dict] = []
-        for profile in self._profiles:
-            endpoint = (
-                profile.get("endpoint")
-                if isinstance(profile.get("endpoint"), dict)
-                else {}
-            )
-            headers = (
-                endpoint.get("headers")
-                if isinstance(endpoint.get("headers"), dict)
-                else {}
-            )
-            existing_cookie = str(headers.get("Cookie") or "").strip()
-            is_same_cookie = (
-                bool(cookie_fingerprint)
-                and self.cookie_fingerprint(existing_cookie) == cookie_fingerprint
-            )
-            if not is_same_cookie:
-                retained_profiles.append(profile)
-                continue
-
-            if target is None:
-                state = (
-                    profile.get("state")
-                    if isinstance(profile.get("state"), dict)
-                    else {}
-                )
-                account = (
-                    profile.get("account")
-                    if isinstance(profile.get("account"), dict)
-                    else {}
-                )
-                profile["enabled"] = True
-                profile["imported_at"] = int(time.time())
-                profile["endpoint"] = validated_endpoint
-                if str(prepared.get("name") or "").strip():
-                    profile["name"] = profile_name
-                state["last_error"] = ""
-                state["consecutive_failures"] = 0
-                state["next_retry_at"] = time.time() + self._refresh_interval_seconds()
-                profile["state"] = state
-                profile["account"] = account
-                target = profile
-                retained_profiles.append(profile)
-                continue
-
-            removed_profile_ids.append(str(profile.get("id") or "").strip())
-
-        self._profiles = retained_profiles
-        if target is None:
-            target = new_profile
-            self._profiles.append(target)
-
-        reused_existing_profile = str(target.get("id") or "").strip() != profile_id
-        return {
-            "target": target,
-            "removed_profile_ids": removed_profile_ids,
-            "reused_existing_profile": reused_existing_profile,
-        }
-
-    def import_cookie(self, cookie_input, name: Optional[str] = None) -> Dict:
-        prepared = self._prepare_cookie_import(cookie_input, name=name)
-        removed_profile_ids: List[str] = []
-        target_id = ""
-        reused_existing_profile = False
         with self._lock:
-            applied = self._apply_prepared_cookie_import_locked(prepared)
-            target = applied.get("target") or {}
-            target_id = str(target.get("id") or "").strip()
-            reused_existing_profile = bool(applied.get("reused_existing_profile"))
-            removed_profile_ids = list(applied.get("removed_profile_ids") or [])
+            target = None
+            retained_profiles: List[Dict] = []
+            for profile in self._profiles:
+                endpoint = (
+                    profile.get("endpoint")
+                    if isinstance(profile.get("endpoint"), dict)
+                    else {}
+                )
+                headers = (
+                    endpoint.get("headers")
+                    if isinstance(endpoint.get("headers"), dict)
+                    else {}
+                )
+                existing_cookie = str(headers.get("Cookie") or "").strip()
+                is_same_cookie = (
+                    bool(cookie_fingerprint)
+                    and self.cookie_fingerprint(existing_cookie) == cookie_fingerprint
+                )
+                if not is_same_cookie:
+                    retained_profiles.append(profile)
+                    continue
+
+                if target is None:
+                    state = (
+                        profile.get("state")
+                        if isinstance(profile.get("state"), dict)
+                        else {}
+                    )
+                    account = (
+                        profile.get("account")
+                        if isinstance(profile.get("account"), dict)
+                        else {}
+                    )
+                    profile["enabled"] = True
+                    profile["imported_at"] = now_ts
+                    profile["endpoint"] = validated["endpoint"]
+                    if str(name or "").strip():
+                        profile["name"] = profile_name
+                    state["last_error"] = ""
+                    state["consecutive_failures"] = 0
+                    state["next_retry_at"] = time.time() + self._refresh_interval_seconds()
+                    profile["state"] = state
+                    profile["account"] = account
+                    target = profile
+                    retained_profiles.append(profile)
+                    continue
+
+                removed_profile_ids.append(str(profile.get("id") or "").strip())
+
+            self._profiles = retained_profiles
+            if target is None:
+                target = new_profile
+                self._profiles.append(target)
             self._save_profiles()
 
+        reused_existing_profile = str(target.get("id") or "").strip() != profile_id
         for profile_id in removed_profile_ids:
             if profile_id:
                 token_manager.remove_auto_refresh_by_profile(profile_id)
 
         with self._lock:
-            current = self._find_profile_locked(target_id)
+            current = self._find_profile_locked(str(target.get("id") or "").strip())
             if not current:
                 raise KeyError("profile not found after import")
             summary = self._summary_locked(current)
             summary["reused_existing_profile"] = reused_existing_profile
             return summary
-
-    def import_cookies_batch(self, entries: List[Dict]) -> List[Dict]:
-        prepared_entries = []
-        done_items = []
-        for entry in entries:
-            idx = int(entry.get("index") or 0)
-            name = entry.get("name")
-            profile_import_started = time.perf_counter()
-            try:
-                prepared = self._prepare_cookie_import(entry.get("cookie"), name=name)
-            except ValueError as exc:
-                done_items.append(
-                    {
-                        "index": idx,
-                        "imported": None,
-                        "failed": {
-                            "index": idx,
-                            "name": name,
-                            "detail": str(exc),
-                        },
-                        "refreshed": None,
-                        "refresh_failed": None,
-                        "timing": {
-                            "profile_import_ms": round(
-                                (time.perf_counter() - profile_import_started) * 1000,
-                                3,
-                            ),
-                        },
-                    }
-                )
-                continue
-            prepared_entries.append(
-                {
-                    "index": idx,
-                    "name": name,
-                    "prepared": prepared,
-                    "started": profile_import_started,
-                }
-            )
-
-        removed_profile_ids: List[str] = []
-        with self._lock:
-            for entry in prepared_entries:
-                applied = self._apply_prepared_cookie_import_locked(entry["prepared"])
-                target = applied.get("target") or {}
-                summary = self._summary_locked(target)
-                summary["reused_existing_profile"] = bool(
-                    applied.get("reused_existing_profile")
-                )
-                removed_profile_ids.extend(applied.get("removed_profile_ids") or [])
-                done_items.append(
-                    {
-                        "index": entry["index"],
-                        "imported": summary,
-                        "failed": None,
-                        "timing": {
-                            "profile_import_ms": round(
-                                (time.perf_counter() - float(entry["started"])) * 1000,
-                                3,
-                            ),
-                        },
-                    }
-                )
-            if prepared_entries:
-                self._save_profiles()
-
-        for profile_id in removed_profile_ids:
-            if profile_id:
-                token_manager.remove_auto_refresh_by_profile(profile_id)
-
-        done_items.sort(key=lambda item: item["index"])
-        return done_items
 
     def export_cookies(self, ids: Optional[List[str]] = None) -> List[Dict]:
         selected_ids = None

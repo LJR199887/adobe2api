@@ -1220,7 +1220,6 @@ def build_admin_router(
         )
         tokens = payload.get("tokens") or []
         auto_refresh_profile_ids = []
-        terminal_profile_ids = []
         for item in tokens:
             if not bool(item.get("auto_refresh")):
                 item["auto_refresh_enabled"] = None
@@ -1230,13 +1229,6 @@ def build_admin_router(
                 item["auto_refresh_enabled"] = None
                 continue
             auto_refresh_profile_ids.append(pid)
-            if str(item.get("status") or "").strip().lower() in {"exhausted", "invalid", "abnormal"} and pid:
-                terminal_profile_ids.append(pid)
-        if terminal_profile_ids:
-            try:
-                refresh_manager.set_enabled_many(terminal_profile_ids, False)
-            except Exception:
-                pass
         enabled_by_profile = refresh_manager.profiles_enabled(auto_refresh_profile_ids)
         for item in tokens:
             if not bool(item.get("auto_refresh")):

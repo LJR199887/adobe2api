@@ -137,7 +137,7 @@ _register_image_model(
     aspect_ratio_options=["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"],
     payload_style="gpt_image2",
     generation_metadata={"module": "text2image", "submodule": "ff-image-generate"},
-    generation_settings={"detailLevel": 1},
+    generation_settings={"detailLevel": 3},
     model_specific_payload={},
 )
 

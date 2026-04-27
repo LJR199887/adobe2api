@@ -473,10 +473,13 @@ To match Adobe Firefly's currently accepted upstream request shape and reduce
   - `submodule: ff-image-generate`
 - Default `modelSpecificPayload` for banana-family models is now:
   - `parameters.addWatermark: false`
-  - no forced default `aspectRatio` field in upstream payload
+  - include `aspectRatio` to enforce requested ratio
 - When model-level overrides provide `model_specific_payload.parameters`, parameters are merged with defaults.
-- For `gpt-image2` image-to-image requests (with references), `size` is omitted and `modelSpecificPayload.size=auto` is used.
+- For `gpt-image2` image-to-image requests (with references), `size` is still sent and derived from `aspect_ratio + output_resolution`, so output ratio won't silently fall back to source-image ratio.
+- Default `generationSettings.detailLevel` for `gpt-image2` is now `3` to align with current upstream request shape.
 - Submit headers now send `sec-fetch-site: cross-site` (browser-aligned).
+- Async endpoint behavior update (2026-04-27):
+  - `/api/v1/generate` now honors request `output_resolution` and `aspect_ratio` for image models (including banana-family models), instead of falling back to model default resolution.
 
 This is an internal upstream-shape alignment only. External API fields remain unchanged (`model`, `prompt`, `output_resolution`, `aspect_ratio`, etc.).
 

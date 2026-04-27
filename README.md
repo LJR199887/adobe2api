@@ -416,10 +416,13 @@ curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
   - `submodule: ff-image-generate`
 - Banana 系列默认 `modelSpecificPayload` 调整为：
   - `parameters.addWatermark: false`
-  - 不再强制发送默认 `aspectRatio`
+  - 包含 `aspectRatio` 以确保按请求比例生成
 - 当模型配置传入 `model_specific_payload.parameters` 时，会与默认参数合并。
-- `gpt-image2` 图生图（有参考图）时不再发送 `size`，改为 `modelSpecificPayload.size=auto`。
+- `gpt-image2` 图生图（有参考图）也会发送 `size`，按请求 `aspect_ratio + output_resolution` 计算，避免回落到原图比例。
+- `gpt-image2` 默认 `generationSettings.detailLevel` 调整为 `3`，与当前上游请求形态对齐。
 - 上游提交请求头 `sec-fetch-site` 改为 `cross-site`（与浏览器请求对齐）。
+- 异步接口行为更新（2026-04-27）：
+  - `/api/v1/generate` 现在会按请求中的 `output_resolution` 与 `aspect_ratio` 生效（包含 Banana 系列），不再回落为模型默认分辨率。
 
 以上为内部上游对齐改动；对外 API 入参不变（`model`、`prompt`、`output_resolution`、`aspect_ratio` 等保持不变）。
 

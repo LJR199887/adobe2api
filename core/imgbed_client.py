@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 import requests
+from requests import exceptions as requests_exceptions
 
 from core.proxy_utils import build_requests_proxies, resolve_resource_proxy
 
@@ -101,7 +102,7 @@ class ImgBedClient:
                 proxies=self._requests_proxies(),
             )
             resp.raise_for_status()
-        except requests.RequestException as exc:
+        except requests_exceptions.RequestException as exc:
             raise ImgBedUploadError(f"imgbed upload failed: {exc}") from exc
         try:
             payload = resp.json()
@@ -133,7 +134,7 @@ class ImgBedClient:
                     proxies=self._requests_proxies(),
                 )
                 resp.raise_for_status()
-        except requests.RequestException as exc:
+        except requests_exceptions.RequestException as exc:
             raise ImgBedUploadError(f"imgbed upload failed: {exc}") from exc
         try:
             payload = resp.json()
@@ -173,7 +174,7 @@ class ImgBedClient:
                 filename=filename,
                 mime_type=guessed_type,
             )
-        except requests.RequestException as exc:
+        except requests_exceptions.RequestException as exc:
             raise ImgBedUploadError(f"imgbed source download failed: {exc}") from exc
         finally:
             if temp_path is not None:

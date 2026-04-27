@@ -447,9 +447,9 @@ curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
 
 - 生成媒体文件：`data/generated/`
 - 请求日志：`data/request_logs.jsonl`
-- Token 池：`config/tokens.json`
+- Token 池与刷新配置：`config/app.db`
 - 服务配置：`config/config.json`
-- 刷新配置：`config/refresh_profile.json`
+- 首次启动会从旧版 `config/tokens.json`、`config/refresh_profile.json` 自动迁移到 SQLite
 
 ## Star History
 

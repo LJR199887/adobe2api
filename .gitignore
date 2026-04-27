@@ -3,8 +3,4 @@ __pycache__
 config/config.json
 config/tokens.json
 config/refresh_profile.json
-config/app.db
-config/app.db-journal
-config/app.db-shm
-config/app.db-wal
 tokens.json

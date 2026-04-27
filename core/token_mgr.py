@@ -1,6 +1,5 @@
 import json
 import base64
-import logging
 import threading
 import time
 import uuid
@@ -9,14 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict
 
-from core.sqlite_store import SQLiteStore
-
 BASE_DIR = Path(__file__).parent.parent
 DATA_DIR = BASE_DIR / "data"
 CONFIG_DIR = BASE_DIR / "config"
 DATA_FILE = CONFIG_DIR / "tokens.json"
 LEGACY_DATA_FILE = DATA_DIR / "tokens.json"
-logger = logging.getLogger("uvicorn.error")
 
 
 class TokenManager:
@@ -30,67 +26,34 @@ class TokenManager:
         self._auto_refresh_profile_index: Dict[str, Dict] = {}
         self._rr_index = 0
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        self._store = SQLiteStore(CONFIG_DIR / "app.db")
         self.load()
-
-    def _load_json_tokens_locked(self) -> List[Dict]:
-        source = DATA_FILE if DATA_FILE.exists() else LEGACY_DATA_FILE
-        if not source.exists():
-            return []
-        try:
-            loaded = json.loads(source.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-        if not isinstance(loaded, list):
-            return []
-        if source == LEGACY_DATA_FILE and not DATA_FILE.exists():
-            try:
-                DATA_FILE.write_text(json.dumps(loaded, indent=2), encoding="utf-8")
-            except Exception:
-                pass
-        return [item for item in loaded if isinstance(item, dict)]
-
-    @staticmethod
-    def _normalize_loaded_tokens(tokens: List[Dict]) -> List[Dict]:
-        normalized: List[Dict] = []
-        now_ts = time.time()
-        for token in tokens:
-            if not isinstance(token, dict):
-                continue
-            token.setdefault("id", uuid.uuid4().hex[:8])
-            token.setdefault("value", "")
-            token.setdefault("status", "active")
-            token.setdefault("fails", 0)
-            token.setdefault("success_count", 0)
-            token.setdefault("added_at", now_ts)
-            token.setdefault("error_until", 0)
-            normalized.append(token)
-        return normalized
 
     def load(self):
         with self._lock:
-            try:
-                self.tokens = self._store.load_tokens()
-            except Exception:
-                self.tokens = []
-
-            if not self.tokens:
-                self.tokens = self._load_json_tokens_locked()
-
-            self.tokens = self._normalize_loaded_tokens(self.tokens)
-            if self.tokens:
+            source = DATA_FILE if DATA_FILE.exists() else LEGACY_DATA_FILE
+            if source.exists():
                 try:
-                    self._store.replace_tokens(self.tokens)
+                    self.tokens = json.loads(source.read_text(encoding="utf-8"))
+                    now_ts = time.time()
+                    for t in self.tokens:
+                        if not isinstance(t, dict):
+                            continue
+                        t.setdefault("id", uuid.uuid4().hex[:8])
+                        t.setdefault("value", "")
+                        t.setdefault("status", "active")
+                        t.setdefault("fails", 0)
+                        t.setdefault("success_count", 0)
+                        t.setdefault("added_at", now_ts)
+                        t.setdefault("error_until", 0)
+                    if source == LEGACY_DATA_FILE and not DATA_FILE.exists():
+                        DATA_FILE.write_text(
+                            json.dumps(self.tokens, indent=2), encoding="utf-8"
+                        )
                 except Exception:
-                    pass
+                    self.tokens = []
             self._rebuild_indexes_locked()
 
     def save(self):
-        try:
-            self._store.replace_tokens(self.tokens)
-            return
-        except Exception:
-            pass
         DATA_FILE.write_text(json.dumps(self.tokens, indent=2), encoding="utf-8")
 
     @staticmethod
@@ -864,17 +827,6 @@ class TokenManager:
         with self._lock:
             return len(self.tokens)
 
-    def storage_info(self) -> Dict:
-        db_path = self._store.db_path
-        with self._lock:
-            return {
-                "backend": "sqlite",
-                "db_path": str(db_path),
-                "db_exists": db_path.exists(),
-                "db_size_bytes": db_path.stat().st_size if db_path.exists() else 0,
-                "tokens": len([t for t in self.tokens if isinstance(t, dict)]),
-            }
-
     def list_page(
         self,
         page: int = 1,
@@ -882,62 +834,8 @@ class TokenManager:
         status: str = "",
         credits: str = "",
     ) -> Dict:
-        try:
-            return self._list_page_sqlite(
-                page=page,
-                page_size=page_size,
-                status=status,
-                credits=credits,
-            )
-        except Exception as exc:
-            logger.warning("token list sqlite failed, falling back to memory: %s", exc)
-            return self._list_page_memory(
-                page=page,
-                page_size=page_size,
-                status=status,
-                credits=credits,
-            )
-
-    def _list_page_sqlite(
-        self,
-        page: int = 1,
-        page_size: int = 50,
-        status: str = "",
-        credits: str = "",
-    ) -> Dict:
-        started = time.perf_counter()
-        payload = self._store.list_tokens_page(
-            page=page,
-            page_size=page_size,
-            status=status,
-            credits=credits,
-        )
-        now_ts = int(time.time())
-        tokens = [
-            self._public_token_locked(token, now_ts)
-            for token in payload.get("tokens", [])
-            if isinstance(token, dict)
-        ]
-        elapsed_ms = round((time.perf_counter() - started) * 1000, 3)
-        result = {
-            "tokens": tokens,
-            "summary": payload.get("summary") or {},
-            "pagination": payload.get("pagination") or {},
-            "backend": "sqlite",
-            "duration_ms": elapsed_ms,
-        }
-        return result
-
-    def _list_page_memory(
-        self,
-        page: int = 1,
-        page_size: int = 50,
-        status: str = "",
-        credits: str = "",
-    ) -> Dict:
-        started = time.perf_counter()
         page = max(1, int(page or 1))
-        page_size = max(1, min(200, int(page_size or 50)))
+        page_size = max(1, min(2000, int(page_size or 50)))
         with self._lock:
             total_count = len(self.tokens)
             active_count = sum(
@@ -973,8 +871,6 @@ class TokenManager:
                     "total": filtered_count,
                     "total_pages": total_pages,
                 },
-                "backend": "memory",
-                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
             }
 
     def list_all(self):

@@ -10,7 +10,6 @@ import requests
 
 from core.config_mgr import config_manager
 from core.proxy_utils import build_requests_proxies, resolve_basic_proxy
-from core.sqlite_store import SQLiteStore
 from core.token_mgr import token_manager
 
 
@@ -33,60 +32,39 @@ class RefreshManager:
         self._stop_event = threading.Event()
         self._profiles: List[Dict] = []
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        self._store = SQLiteStore(CONFIG_DIR / "app.db")
         self._load_profiles()
-
-    def _load_json_profiles_locked(self) -> List[Dict]:
-        if not PROFILE_FILE.exists():
-            return []
-        try:
-            payload = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-
-        profiles = payload.get("profiles") if isinstance(payload, dict) else None
-        if not isinstance(profiles, list):
-            return []
-        return [item for item in profiles if isinstance(item, dict)]
-
-    def _normalize_loaded_profiles(self, profiles: List[Dict]) -> List[Dict]:
-        loaded: List[Dict] = []
-        now_ts = int(time.time())
-        for item in profiles:
-            try:
-                normalized = self._normalize_stored_profile(item, now_ts)
-            except Exception:
-                continue
-            loaded.append(normalized)
-        return loaded
 
     def _load_profiles(self):
         with self._lock:
+            if not PROFILE_FILE.exists():
+                self._profiles = []
+                return
             try:
-                profiles = self._store.load_refresh_profiles()
+                payload = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
             except Exception:
-                profiles = []
+                self._profiles = []
+                return
 
-            if not profiles:
-                profiles = self._load_json_profiles_locked()
+            profiles = payload.get("profiles") if isinstance(payload, dict) else None
+            if not isinstance(profiles, list):
+                self._profiles = []
+                return
 
-            self._profiles = self._normalize_loaded_profiles(profiles)
-            if self._profiles:
+            loaded: List[Dict] = []
+            now_ts = int(time.time())
+            for item in profiles:
                 try:
-                    self._store.replace_refresh_profiles(self._profiles)
+                    normalized = self._normalize_stored_profile(item, now_ts)
                 except Exception:
-                    pass
+                    continue
+                loaded.append(normalized)
+            self._profiles = loaded
 
     def _save_profiles(self):
         payload = {
             "version": 2,
             "profiles": self._profiles,
         }
-        try:
-            self._store.replace_refresh_profiles(self._profiles)
-            return
-        except Exception:
-            pass
         PROFILE_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
     @staticmethod
@@ -248,19 +226,6 @@ class RefreshManager:
             items = [self._summary_locked(p) for p in self._profiles]
         items.sort(key=lambda x: int(x.get("imported_at") or 0), reverse=True)
         return items
-
-    def storage_info(self) -> Dict:
-        db_path = self._store.db_path
-        with self._lock:
-            return {
-                "backend": "sqlite",
-                "db_path": str(db_path),
-                "db_exists": db_path.exists(),
-                "db_size_bytes": db_path.stat().st_size if db_path.exists() else 0,
-                "refresh_profiles": len(
-                    [p for p in self._profiles if isinstance(p, dict)]
-                ),
-            }
 
     @staticmethod
     def _cookie_string_from_input(cookie_input) -> str:
@@ -490,18 +455,6 @@ class RefreshManager:
                 return None
             return bool(target.get("enabled", True))
 
-    def profiles_enabled(self, profile_ids: List[str]) -> Dict[str, Optional[bool]]:
-        lookup_ids = {str(x or "").strip() for x in profile_ids if str(x or "").strip()}
-        if not lookup_ids:
-            return {}
-        result: Dict[str, Optional[bool]] = {pid: None for pid in lookup_ids}
-        with self._lock:
-            for profile in self._profiles:
-                pid = str(profile.get("id") or "").strip()
-                if pid in lookup_ids:
-                    result[pid] = bool(profile.get("enabled", True))
-        return result
-
     def _find_profile_locked(self, profile_id: str) -> Optional[Dict]:
         for p in self._profiles:
             if p.get("id") == profile_id:
@@ -536,44 +489,14 @@ class RefreshManager:
             target = self._find_profile_locked(profile_id)
             if not target:
                 raise KeyError("profile not found")
-            enabled_value = bool(enabled)
-            old_enabled = bool(target.get("enabled", True))
-            target["enabled"] = enabled_value
+            target["enabled"] = bool(enabled)
             state = target.setdefault("state", {})
-            if enabled_value:
+            if enabled:
                 state["next_retry_at"] = time.time() + self._refresh_interval_seconds()
                 state["last_error"] = ""
                 state["consecutive_failures"] = 0
-            if old_enabled != enabled_value or enabled_value:
-                self._save_profiles()
+            self._save_profiles()
             return self._summary_locked(target)
-
-    def set_enabled_many(self, profile_ids: List[str], enabled: bool) -> Dict:
-        lookup_ids = {str(x or "").strip() for x in profile_ids if str(x or "").strip()}
-        if not lookup_ids:
-            return {"requested": 0, "matched": 0, "changed": 0}
-        enabled_value = bool(enabled)
-        matched = 0
-        changed = 0
-        now_next_retry = time.time() + self._refresh_interval_seconds()
-        with self._lock:
-            for profile in self._profiles:
-                pid = str(profile.get("id") or "").strip()
-                if pid not in lookup_ids:
-                    continue
-                matched += 1
-                old_enabled = bool(profile.get("enabled", True))
-                if old_enabled != enabled_value:
-                    changed += 1
-                profile["enabled"] = enabled_value
-                if enabled_value:
-                    state = profile.setdefault("state", {})
-                    state["next_retry_at"] = now_next_retry
-                    state["last_error"] = ""
-                    state["consecutive_failures"] = 0
-            if changed or enabled_value:
-                self._save_profiles()
-        return {"requested": len(lookup_ids), "matched": matched, "changed": changed}
 
     def _prepare_refresh(self, profile_id: str) -> Dict:
         with self._lock:

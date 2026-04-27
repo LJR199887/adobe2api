@@ -109,6 +109,20 @@ def test_cookie_fingerprint_matches_same_cookie_pairs_in_different_order():
     )
 
 
+def test_refresh_manager_bulk_disables_profiles(tmp_path, monkeypatch):
+    manager = make_refresh_manager(tmp_path, monkeypatch)
+    first = manager.import_cookie("cookie: a=1", name="First")
+    second = manager.import_cookie("cookie: b=2", name="Second")
+
+    result = manager.set_enabled_many([first["id"], second["id"]], False)
+    enabled = manager.profiles_enabled([first["id"], second["id"], "missing"])
+
+    assert result["changed"] == 2
+    assert enabled[first["id"]] is False
+    assert enabled[second["id"]] is False
+    assert enabled["missing"] is None
+
+
 def test_token_manager_migrates_legacy_json_to_sqlite(tmp_path, monkeypatch):
     monkeypatch.setattr(token_mgr, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(token_mgr, "DATA_FILE", tmp_path / "tokens.json")

@@ -490,6 +490,18 @@ class RefreshManager:
                 return None
             return bool(target.get("enabled", True))
 
+    def profiles_enabled(self, profile_ids: List[str]) -> Dict[str, Optional[bool]]:
+        lookup_ids = {str(x or "").strip() for x in profile_ids if str(x or "").strip()}
+        if not lookup_ids:
+            return {}
+        result: Dict[str, Optional[bool]] = {pid: None for pid in lookup_ids}
+        with self._lock:
+            for profile in self._profiles:
+                pid = str(profile.get("id") or "").strip()
+                if pid in lookup_ids:
+                    result[pid] = bool(profile.get("enabled", True))
+        return result
+
     def _find_profile_locked(self, profile_id: str) -> Optional[Dict]:
         for p in self._profiles:
             if p.get("id") == profile_id:
@@ -524,14 +536,44 @@ class RefreshManager:
             target = self._find_profile_locked(profile_id)
             if not target:
                 raise KeyError("profile not found")
-            target["enabled"] = bool(enabled)
+            enabled_value = bool(enabled)
+            old_enabled = bool(target.get("enabled", True))
+            target["enabled"] = enabled_value
             state = target.setdefault("state", {})
-            if enabled:
+            if enabled_value:
                 state["next_retry_at"] = time.time() + self._refresh_interval_seconds()
                 state["last_error"] = ""
                 state["consecutive_failures"] = 0
-            self._save_profiles()
+            if old_enabled != enabled_value or enabled_value:
+                self._save_profiles()
             return self._summary_locked(target)
+
+    def set_enabled_many(self, profile_ids: List[str], enabled: bool) -> Dict:
+        lookup_ids = {str(x or "").strip() for x in profile_ids if str(x or "").strip()}
+        if not lookup_ids:
+            return {"requested": 0, "matched": 0, "changed": 0}
+        enabled_value = bool(enabled)
+        matched = 0
+        changed = 0
+        now_next_retry = time.time() + self._refresh_interval_seconds()
+        with self._lock:
+            for profile in self._profiles:
+                pid = str(profile.get("id") or "").strip()
+                if pid not in lookup_ids:
+                    continue
+                matched += 1
+                old_enabled = bool(profile.get("enabled", True))
+                if old_enabled != enabled_value:
+                    changed += 1
+                profile["enabled"] = enabled_value
+                if enabled_value:
+                    state = profile.setdefault("state", {})
+                    state["next_retry_at"] = now_next_retry
+                    state["last_error"] = ""
+                    state["consecutive_failures"] = 0
+            if changed or enabled_value:
+                self._save_profiles()
+        return {"requested": len(lookup_ids), "matched": matched, "changed": changed}
 
     def _prepare_refresh(self, profile_id: str) -> Dict:
         with self._lock:

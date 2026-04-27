@@ -1219,17 +1219,30 @@ def build_admin_router(
             credits=credits,
         )
         tokens = payload.get("tokens") or []
+        auto_refresh_profile_ids = []
+        terminal_profile_ids = []
         for item in tokens:
             if not bool(item.get("auto_refresh")):
                 item["auto_refresh_enabled"] = None
                 continue
             pid = str(item.get("refresh_profile_id") or "").strip()
+            if not pid:
+                item["auto_refresh_enabled"] = None
+                continue
+            auto_refresh_profile_ids.append(pid)
             if str(item.get("status") or "").strip().lower() in {"exhausted", "invalid", "abnormal"} and pid:
-                try:
-                    refresh_manager.set_enabled(pid, False)
-                except Exception:
-                    pass
-            item["auto_refresh_enabled"] = refresh_manager.is_profile_enabled(pid)
+                terminal_profile_ids.append(pid)
+        if terminal_profile_ids:
+            try:
+                refresh_manager.set_enabled_many(terminal_profile_ids, False)
+            except Exception:
+                pass
+        enabled_by_profile = refresh_manager.profiles_enabled(auto_refresh_profile_ids)
+        for item in tokens:
+            if not bool(item.get("auto_refresh")):
+                continue
+            pid = str(item.get("refresh_profile_id") or "").strip()
+            item["auto_refresh_enabled"] = enabled_by_profile.get(pid)
         pagination = payload.get("pagination") or {}
         summary = payload.get("summary") or {}
         logger.info(

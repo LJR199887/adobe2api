@@ -84,7 +84,13 @@ def test_gpt_image2_resolves_firefly_alias_and_2x3_size():
     assert "firefly-gpt-image2" not in MODEL_CATALOG
 
 
-def _build_kling_payload(model_id: str, resolution: str | None = None) -> dict:
+def _build_kling_payload(
+    model_id: str,
+    resolution: str | None = None,
+    source_image_ids: list[str] | None = None,
+    aspect_ratio: str = "9:16",
+    duration: int = 15,
+) -> dict:
     conf = VIDEO_MODEL_CATALOG[model_id]
     if resolution:
         conf = dict(conf)
@@ -94,8 +100,9 @@ def _build_kling_payload(model_id: str, resolution: str | None = None) -> dict:
     return client._build_video_payload(
         video_conf=conf,
         prompt="A cinematic city skyline at sunset",
-        aspect_ratio="9:16",
-        duration=15,
+        aspect_ratio=aspect_ratio,
+        duration=duration,
+        source_image_ids=source_image_ids,
         generate_audio=True,
     )
 
@@ -104,8 +111,10 @@ def test_kling_video_catalog_matches_upstream_request_shape():
     conf = VIDEO_MODEL_CATALOG["kling"]
     payload = _build_kling_payload("kling")
 
-    assert conf["max_input_images"] == 0
+    assert conf["max_input_images"] == 1
     assert conf["resolution_options"] == []
+    assert conf["duration_options"] == list(range(3, 16))
+    assert conf["aspect_ratio_options"] == ["16:9", "9:16"]
     assert VIDEO_MODEL_CATALOG["firefly-kling"]["canonical_model"] == "kling"
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_v3_standard_t2v"
@@ -119,14 +128,38 @@ def test_kling_video_catalog_matches_upstream_request_shape():
     assert "modelSpecificPayload" not in payload
 
 
-def test_kling_video_720p_uses_portrait_720_size():
-    payload = _build_kling_payload("kling", resolution="720p")
+def test_kling_video_landscape_uses_standard_text_to_video():
+    payload = _build_kling_payload("kling", aspect_ratio="16:9", duration=3)
 
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_v3_standard_t2v"
-    assert payload["size"] == {"width": 720, "height": 1280}
+    assert payload["size"] == {"width": 1280, "height": 720}
+    assert payload["duration"] == 3
     assert payload["generateAudio"] is True
+    assert payload["generationSettings"] == {"aspectRatio": "16:9"}
+
+
+def test_kling_image_to_video_uses_standard_i2v_payload_shape():
+    payload = _build_kling_payload(
+        "kling",
+        source_image_ids=["98464b78-7d20-4495-81ad-ee0a1923539a"],
+        duration=15,
+    )
+
+    assert payload["modelId"] == "kling"
+    assert payload["modelVersion"] == "kling_v3_standard_i2v"
+    assert payload["size"] == {"width": 720, "height": 1280}
+    assert payload["duration"] == 15
+    assert payload["generateAudio"] is True
+    assert payload["generationMetadata"] == {"module": "image2video"}
     assert payload["generationSettings"] == {"aspectRatio": "9:16"}
+    assert payload["referenceBlobs"] == [
+        {
+            "id": "98464b78-7d20-4495-81ad-ee0a1923539a",
+            "usage": "frame",
+            "order": 1,
+        }
+    ]
 
 
 def test_kling_omni_video_catalog_matches_upstream_request_shape():

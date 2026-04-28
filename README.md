@@ -167,10 +167,10 @@ Veo31 Fast：
 
 Kling 3.0：
 - 命名：`model=kling`
-- 时长：`duration=15`
-- 比例：`aspect_ratio=9:16`
+- 时长：`duration=3~15`
+- 比例：`aspect_ratio=16:9 / 9:16`
 - 分辨率：不需要传
-- 当前按上游 `kling_v3_standard_t2v` 发送；默认开启 `generateAudio`，不支持参考图
+- 文生视频按上游 `kling_v3_standard_t2v` 发送；图生视频传入 1 张参考图时按上游 `kling_v3_standard_i2v` 发送，参考图使用 `referenceBlobs[*].usage=frame` + `order=1`；默认开启 `generateAudio`
 
 Kling 3.0 Omni：
 - 命名：`model=kling-omni`
@@ -321,6 +321,23 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
         {"type":"image_url","image_url":{"url":"https://example.com/character.png"}}
       ]
     }]
+  }'
+```
+
+Kling 3.0 图生视频（异步任务）：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kling",
+    "prompt": "让画面中的角色向镜头走来，电影级运镜，环境音真实",
+    "duration": 15,
+    "aspect_ratio": "9:16",
+    "generate_audio": true,
+    "async": true,
+    "image_url": "https://example.com/character.png"
   }'
 ```
 

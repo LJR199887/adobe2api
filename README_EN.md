@@ -199,10 +199,10 @@ Veo31 Fast video models:
 Kling 3.0 video model:
 
 - Pattern: `model=firefly-kling` or `model=kling` with separate request fields
-- Duration: pass `duration` as `15`
-- Ratio: pass `aspect_ratio` as `9:16`
+- Duration: pass `duration` as `3` through `15`
+- Ratio: pass `aspect_ratio` as `16:9` / `9:16`
 - Resolution: not required
-- Uses upstream `kling_v3_standard_t2v`; enables `generateAudio` by default; does not accept reference images
+- Text-to-video uses upstream `kling_v3_standard_t2v`; image-to-video with one input image uses upstream `kling_v3_standard_i2v` and sends `referenceBlobs[*].usage=frame` + `order=1`; enables `generateAudio` by default
 
 Kling 3.0 Omni video model:
 
@@ -382,6 +382,23 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
         {"type":"image_url","image_url":{"url":"https://example.com/character.png"}}
       ]
     }]
+  }'
+```
+
+Kling 3.0 image-to-video async task:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "firefly-kling",
+    "prompt": "animate the character walking toward camera, cinematic camera motion, natural ambient sound",
+    "duration": 15,
+    "aspect_ratio": "9:16",
+    "generate_audio": true,
+    "async": true,
+    "image_url": "https://example.com/character.png"
   }'
 ```
 

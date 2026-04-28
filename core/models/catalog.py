@@ -170,6 +170,7 @@ def _register_video_model(
     upstream_model: str | None = None,
     upstream_model_id: str | None = None,
     upstream_model_version: str | None = None,
+    upstream_i2v_model_version: str | None = None,
     upstream_model_version_by_resolution: dict[str, str] | None = None,
     duration: int = 8,
     duration_options: tuple[int, ...] = (),
@@ -187,6 +188,7 @@ def _register_video_model(
         "upstream_model": upstream_model,
         "upstream_model_id": upstream_model_id,
         "upstream_model_version": upstream_model_version,
+        "upstream_i2v_model_version": upstream_i2v_model_version,
         "upstream_model_version_by_resolution": {
             str(key).strip().lower(): str(value)
             for key, value in (upstream_model_version_by_resolution or {}).items()
@@ -319,15 +321,16 @@ _register_video_model(
     engine="kling",
     upstream_model_id="kling",
     upstream_model_version="kling_v3_standard_t2v",
+    upstream_i2v_model_version="kling_v3_standard_i2v",
     duration=15,
-    duration_options=(15,),
+    duration_options=tuple(range(3, 16)),
     aspect_ratio="9:16",
-    aspect_ratio_options=("9:16",),
+    aspect_ratio_options=("16:9", "9:16"),
     resolution="720p",
     resolution_options=(),
     reference_mode="frame",
     reference_mode_options=(),
-    max_input_images=0,
+    max_input_images=1,
 )
 
 _register_video_model(

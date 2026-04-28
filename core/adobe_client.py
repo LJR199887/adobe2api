@@ -904,18 +904,26 @@ class AdobeClient:
         )
         resolution = str(video_conf.get("resolution") or "720p")
         if engine == "kling":
+            has_source_image = bool(source_image_ids)
             resolution_key = resolution.strip().lower()
             model_version = str(
                 video_conf.get("upstream_model_version") or "kling_o3_pro_t2v"
             )
-            model_versions_by_resolution = (
-                video_conf.get("upstream_model_version_by_resolution") or {}
-            )
-            if isinstance(model_versions_by_resolution, dict):
+            if has_source_image:
                 model_version = str(
-                    model_versions_by_resolution.get(resolution_key) or model_version
+                    video_conf.get("upstream_i2v_model_version")
+                    or model_version.replace("_t2v", "_i2v")
                 )
-            return {
+            else:
+                model_versions_by_resolution = (
+                    video_conf.get("upstream_model_version_by_resolution") or {}
+                )
+                if isinstance(model_versions_by_resolution, dict):
+                    model_version = str(
+                        model_versions_by_resolution.get(resolution_key)
+                        or model_version
+                    )
+            payload = {
                 "n": 1,
                 "seeds": [seed_val],
                 "modelId": str(video_conf.get("upstream_model_id") or "kling"),
@@ -924,11 +932,22 @@ class AdobeClient:
                 "prompt": prompt,
                 "size": self._video_size(aspect_ratio, resolution),
                 "generateAudio": bool(generate_audio),
-                "generationMetadata": {"module": "text2video"},
+                "generationMetadata": {
+                    "module": "image2video" if has_source_image else "text2video"
+                },
                 "duration": int(duration),
                 "generationSettings": {"aspectRatio": aspect_ratio},
                 "referenceBlobs": [],
             }
+            if has_source_image:
+                payload["referenceBlobs"] = [
+                    {
+                        "id": str(source_image_ids[0]),
+                        "usage": "frame",
+                        "order": 1,
+                    }
+                ]
+            return payload
 
         if engine in {"veo31-fast", "veo31-standard"}:
             model_version = (

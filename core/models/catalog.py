@@ -177,7 +177,6 @@ def _register_video_model(
     aspect_ratio_options: tuple[str, ...] = (),
     resolution: str | None = None,
     resolution_options: tuple[str, ...] = (),
-    generate_audio_by_resolution: dict[str, bool] | None = None,
     reference_mode: str = "frame",
     reference_mode_options: tuple[str, ...] | None = None,
     max_input_images: int | None = None,
@@ -198,10 +197,6 @@ def _register_video_model(
         "aspect_ratio_options": list(aspect_ratio_options or (aspect_ratio,)),
         "resolution": resolution,
         "resolution_options": list(resolution_options),
-        "generate_audio_by_resolution": {
-            str(key).strip().lower(): bool(value)
-            for key, value in (generate_audio_by_resolution or {}).items()
-        },
         "reference_mode": reference_mode,
         "reference_mode_options": list(
             (reference_mode,)
@@ -331,7 +326,6 @@ _register_video_model(
     aspect_ratio_options=("9:16",),
     resolution="1080p",
     resolution_options=("720p", "1080p"),
-    generate_audio_by_resolution={"720p": False},
     reference_mode="frame",
     reference_mode_options=(),
     max_input_images=0,

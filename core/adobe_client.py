@@ -915,15 +915,6 @@ class AdobeClient:
                 model_version = str(
                     model_versions_by_resolution.get(resolution_key) or model_version
                 )
-            payload_generate_audio = bool(generate_audio)
-            generate_audio_by_resolution = (
-                video_conf.get("generate_audio_by_resolution") or {}
-            )
-            if isinstance(generate_audio_by_resolution, dict):
-                if resolution_key in generate_audio_by_resolution:
-                    payload_generate_audio = bool(
-                        generate_audio_by_resolution[resolution_key]
-                    )
             return {
                 "n": 1,
                 "seeds": [seed_val],
@@ -932,7 +923,7 @@ class AdobeClient:
                 "output": {"storeInputs": True},
                 "prompt": prompt,
                 "size": self._video_size(aspect_ratio, resolution),
-                "generateAudio": payload_generate_audio,
+                "generateAudio": bool(generate_audio),
                 "generationMetadata": {"module": "text2video"},
                 "duration": int(duration),
                 "generationSettings": {"aspectRatio": aspect_ratio},

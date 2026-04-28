@@ -78,6 +78,8 @@ Current supported model families are:
 - `firefly-veo31` (video)
 - `firefly-veo31-ref` (video, reference-image mode)
 - `firefly-veo31-fast` (video)
+- `kling-v3` (video, Kling 3.0 text/image-to-video)
+- `kling-o3` (video, Kling 3.0 Omni text-to-video)
 
 Nano Banana image models (`nano-banana-2`):
 
@@ -193,6 +195,22 @@ Veo31 Fast video models:
 - Examples:
   - `model=firefly-veo31-fast, duration=4, aspect_ratio=16:9, resolution=1080p`
   - `model=firefly-veo31-fast, duration=6, aspect_ratio=9:16, resolution=720p`
+
+Kling 3.0 video model:
+
+- Pattern: `model=kling-v3` with separate request fields
+- Duration: pass `duration` as `3` through `15`
+- Ratio: pass `aspect_ratio` as `16:9` / `9:16`
+- Resolution: not required
+- Text-to-video uses upstream `kling_v3_standard_t2v`; image-to-video with one input image uses upstream `kling_v3_standard_i2v` and sends `referenceBlobs[*].usage=frame` + `order=1`; enables `generateAudio` by default
+
+Kling 3.0 Omni video model:
+
+- Pattern: `model=kling-o3` with separate request fields
+- Duration: pass `duration` as `15`
+- Ratio: pass `aspect_ratio` as `9:16`
+- Resolution: pass `resolution` as `720p` / `1080p`
+- Uses upstream `kling_o3_pro_t2v` for `1080p`; uses upstream `kling_o3_standard_t2v` for `720p`; enables `generateAudio` by default; does not accept reference images
 
 ### 3.1 List models
 
@@ -364,6 +382,39 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
         {"type":"image_url","image_url":{"url":"https://example.com/character.png"}}
       ]
     }]
+  }'
+```
+
+Kling 3.0 text-to-video async task (no image input automatically uses `kling_v3_standard_t2v`):
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kling-v3",
+    "prompt": "Ultraman fights a monster in a ruined city, cinematic tokusatsu camera work, natural ambient sound",
+    "duration": 8,
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "async": true
+  }'
+```
+
+Kling 3.0 image-to-video async task (one image input automatically uses `kling_v3_standard_i2v`):
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kling-v3",
+    "prompt": "animate the character walking toward camera, cinematic camera motion, natural ambient sound",
+    "duration": 15,
+    "aspect_ratio": "9:16",
+    "generate_audio": true,
+    "async": true,
+    "image_url": "https://example.com/character.png"
   }'
 ```
 

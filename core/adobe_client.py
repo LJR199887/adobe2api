@@ -903,6 +903,52 @@ class AdobeClient:
             video_conf.get("upstream_model") or "openai:firefly:colligo:sora2"
         )
         resolution = str(video_conf.get("resolution") or "720p")
+        if engine == "kling":
+            has_source_image = bool(source_image_ids)
+            resolution_key = resolution.strip().lower()
+            model_version = str(
+                video_conf.get("upstream_model_version") or "kling_o3_pro_t2v"
+            )
+            if has_source_image:
+                model_version = str(
+                    video_conf.get("upstream_i2v_model_version")
+                    or model_version.replace("_t2v", "_i2v")
+                )
+            else:
+                model_versions_by_resolution = (
+                    video_conf.get("upstream_model_version_by_resolution") or {}
+                )
+                if isinstance(model_versions_by_resolution, dict):
+                    model_version = str(
+                        model_versions_by_resolution.get(resolution_key)
+                        or model_version
+                    )
+            payload = {
+                "n": 1,
+                "seeds": [seed_val],
+                "modelId": str(video_conf.get("upstream_model_id") or "kling"),
+                "modelVersion": model_version,
+                "output": {"storeInputs": True},
+                "prompt": prompt,
+                "size": self._video_size(aspect_ratio, resolution),
+                "generateAudio": bool(generate_audio),
+                "generationMetadata": {
+                    "module": "image2video" if has_source_image else "text2video"
+                },
+                "duration": int(duration),
+                "generationSettings": {"aspectRatio": aspect_ratio},
+                "referenceBlobs": [],
+            }
+            if has_source_image:
+                payload["referenceBlobs"] = [
+                    {
+                        "id": str(source_image_ids[0]),
+                        "usage": "frame",
+                        "order": 1,
+                    }
+                ]
+            return payload
+
         if engine in {"veo31-fast", "veo31-standard"}:
             model_version = (
                 "3.1-fast-generate" if engine == "veo31-fast" else "3.1-generate"

@@ -337,6 +337,26 @@ class TokenManager:
                 self._remove_token_locked(target)
                 self.save()
 
+    def remove_many(self, token_ids: List[str]) -> Dict:
+        remove_ids = {str(x or "").strip() for x in token_ids if str(x or "").strip()}
+        if not remove_ids:
+            return {"deleted_ids": [], "missing_ids": []}
+        with self._lock:
+            deleted_ids = []
+            for tid in remove_ids:
+                target = self._id_index.get(tid)
+                if target is None:
+                    continue
+                self._remove_token_locked(target)
+                deleted_ids.append(tid)
+            if deleted_ids:
+                self.save()
+            missing_ids = sorted(remove_ids - set(deleted_ids))
+            return {
+                "deleted_ids": sorted(deleted_ids),
+                "missing_ids": missing_ids,
+            }
+
     def remove_auto_refresh_by_profile(self, profile_id: str):
         pid = str(profile_id or "").strip()
         if not pid:

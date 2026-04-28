@@ -310,7 +310,24 @@ _register_video_model(
 
 _register_video_model(
     "kling",
-    description="Kling video model (text-to-video, 15s 1080p)",
+    description="Kling 3.0 video model (text-to-video, 15s 1080p)",
+    engine="kling",
+    upstream_model_id="kling",
+    upstream_model_version="kling_v3_pro_t2v",
+    duration=15,
+    duration_options=(15,),
+    aspect_ratio="9:16",
+    aspect_ratio_options=("9:16",),
+    resolution="1080p",
+    resolution_options=("1080p",),
+    reference_mode="frame",
+    reference_mode_options=(),
+    max_input_images=0,
+)
+
+_register_video_model(
+    "kling-omni",
+    description="Kling 3.0 Omni video model (text-to-video, 15s 1080p)",
     engine="kling",
     upstream_model_id="kling",
     upstream_model_version="kling_o3_pro_t2v",
@@ -332,6 +349,7 @@ for canonical_id in (
     "veo31-ref",
     "veo31-fast",
     "kling",
+    "kling-omni",
 ):
     _register_video_family_alias(f"firefly-{canonical_id}", canonical_id)
 

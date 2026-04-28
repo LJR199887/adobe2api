@@ -69,8 +69,8 @@ def _looks_like_video_model_id(model_id: str) -> bool:
 
 
 VIDEO_MODEL_ERROR_MESSAGE = (
-    "Invalid video model. Use /v1/models to get supported kling, sora2, "
-    "sora2-pro, veo31, veo31-ref or veo31-fast models, then pass "
+    "Invalid video model. Use /v1/models to get supported kling, "
+    "kling-omni, sora2, sora2-pro, veo31, veo31-ref or veo31-fast models, then pass "
     "duration/aspect_ratio/resolution/reference_mode in the request body."
 )
 

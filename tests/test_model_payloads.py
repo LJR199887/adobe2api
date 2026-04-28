@@ -84,11 +84,11 @@ def test_gpt_image2_resolves_firefly_alias_and_2x3_size():
     assert "firefly-gpt-image2" not in MODEL_CATALOG
 
 
-def test_kling_video_catalog_matches_upstream_request_shape():
-    conf = VIDEO_MODEL_CATALOG["kling"]
+def _build_kling_payload(model_id: str) -> dict:
+    conf = VIDEO_MODEL_CATALOG[model_id]
     client = AdobeClient.__new__(AdobeClient)
 
-    payload = client._build_video_payload(
+    return client._build_video_payload(
         video_conf=conf,
         prompt="A cinematic city skyline at sunset",
         aspect_ratio="9:16",
@@ -96,8 +96,31 @@ def test_kling_video_catalog_matches_upstream_request_shape():
         generate_audio=True,
     )
 
+
+def test_kling_video_catalog_matches_upstream_request_shape():
+    conf = VIDEO_MODEL_CATALOG["kling"]
+    payload = _build_kling_payload("kling")
+
     assert conf["max_input_images"] == 0
     assert VIDEO_MODEL_CATALOG["firefly-kling"]["canonical_model"] == "kling"
+    assert payload["modelId"] == "kling"
+    assert payload["modelVersion"] == "kling_v3_pro_t2v"
+    assert payload["prompt"] == "A cinematic city skyline at sunset"
+    assert payload["size"] == {"width": 1080, "height": 1920}
+    assert payload["duration"] == 15
+    assert payload["generateAudio"] is True
+    assert payload["generationMetadata"] == {"module": "text2video"}
+    assert payload["generationSettings"] == {"aspectRatio": "9:16"}
+    assert payload["referenceBlobs"] == []
+    assert "modelSpecificPayload" not in payload
+
+
+def test_kling_omni_video_catalog_matches_upstream_request_shape():
+    conf = VIDEO_MODEL_CATALOG["kling-omni"]
+    payload = _build_kling_payload("kling-omni")
+
+    assert conf["max_input_images"] == 0
+    assert VIDEO_MODEL_CATALOG["firefly-kling-omni"]["canonical_model"] == "kling-omni"
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_o3_pro_t2v"
     assert payload["prompt"] == "A cinematic city skyline at sunset"

@@ -53,7 +53,8 @@ docker compose up -d --build
 - `veo31`（视频）
 - `veo31-ref`（视频，参考图模式）
 - `veo31-fast`（视频）
-- `kling`（视频，文生视频）
+- `kling`（视频，Kling 3.0 文生视频）
+- `kling-omni`（视频，Kling 3.0 Omni 文生视频）
 
 说明：
 - `nano-banana`、`nano-banana2`、`nano-banana-pro` 现在都统一通过 `output_resolution` 选择 `1K` / `2K` / `4K`
@@ -164,8 +165,15 @@ Veo31 Fast：
 - 比例：`aspect_ratio=16:9 / 9:16`
 - 分辨率：`resolution=720p / 1080p`
 
-Kling：
+Kling 3.0：
 - 命名：`model=kling`
+- 时长：`duration=15`
+- 比例：`aspect_ratio=9:16`
+- 分辨率：`resolution=1080p`
+- 当前按上游 `kling_v3_pro_t2v` 文生视频请求发送，不支持参考图
+
+Kling 3.0 Omni：
+- 命名：`model=kling-omni`
 - 时长：`duration=15`
 - 比例：`aspect_ratio=9:16`
 - 分辨率：`resolution=1080p`

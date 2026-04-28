@@ -904,17 +904,35 @@ class AdobeClient:
         )
         resolution = str(video_conf.get("resolution") or "720p")
         if engine == "kling":
+            resolution_key = resolution.strip().lower()
+            model_version = str(
+                video_conf.get("upstream_model_version") or "kling_o3_pro_t2v"
+            )
+            model_versions_by_resolution = (
+                video_conf.get("upstream_model_version_by_resolution") or {}
+            )
+            if isinstance(model_versions_by_resolution, dict):
+                model_version = str(
+                    model_versions_by_resolution.get(resolution_key) or model_version
+                )
+            payload_generate_audio = bool(generate_audio)
+            generate_audio_by_resolution = (
+                video_conf.get("generate_audio_by_resolution") or {}
+            )
+            if isinstance(generate_audio_by_resolution, dict):
+                if resolution_key in generate_audio_by_resolution:
+                    payload_generate_audio = bool(
+                        generate_audio_by_resolution[resolution_key]
+                    )
             return {
                 "n": 1,
                 "seeds": [seed_val],
                 "modelId": str(video_conf.get("upstream_model_id") or "kling"),
-                "modelVersion": str(
-                    video_conf.get("upstream_model_version") or "kling_o3_pro_t2v"
-                ),
+                "modelVersion": model_version,
                 "output": {"storeInputs": True},
                 "prompt": prompt,
                 "size": self._video_size(aspect_ratio, resolution),
-                "generateAudio": bool(generate_audio),
+                "generateAudio": payload_generate_audio,
                 "generationMetadata": {"module": "text2video"},
                 "duration": int(duration),
                 "generationSettings": {"aspectRatio": aspect_ratio},

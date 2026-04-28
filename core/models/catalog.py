@@ -170,12 +170,14 @@ def _register_video_model(
     upstream_model: str | None = None,
     upstream_model_id: str | None = None,
     upstream_model_version: str | None = None,
+    upstream_model_version_by_resolution: dict[str, str] | None = None,
     duration: int = 8,
     duration_options: tuple[int, ...] = (),
     aspect_ratio: str = "16:9",
     aspect_ratio_options: tuple[str, ...] = (),
     resolution: str | None = None,
     resolution_options: tuple[str, ...] = (),
+    generate_audio_by_resolution: dict[str, bool] | None = None,
     reference_mode: str = "frame",
     reference_mode_options: tuple[str, ...] | None = None,
     max_input_images: int | None = None,
@@ -186,12 +188,20 @@ def _register_video_model(
         "upstream_model": upstream_model,
         "upstream_model_id": upstream_model_id,
         "upstream_model_version": upstream_model_version,
+        "upstream_model_version_by_resolution": {
+            str(key).strip().lower(): str(value)
+            for key, value in (upstream_model_version_by_resolution or {}).items()
+        },
         "duration": duration,
         "duration_options": list(duration_options or (duration,)),
         "aspect_ratio": aspect_ratio,
         "aspect_ratio_options": list(aspect_ratio_options or (aspect_ratio,)),
         "resolution": resolution,
         "resolution_options": list(resolution_options),
+        "generate_audio_by_resolution": {
+            str(key).strip().lower(): bool(value)
+            for key, value in (generate_audio_by_resolution or {}).items()
+        },
         "reference_mode": reference_mode,
         "reference_mode_options": list(
             (reference_mode,)
@@ -314,12 +324,14 @@ _register_video_model(
     engine="kling",
     upstream_model_id="kling",
     upstream_model_version="kling_v3_pro_t2v",
+    upstream_model_version_by_resolution={"720p": "kling_v3_standard_t2v"},
     duration=15,
     duration_options=(15,),
     aspect_ratio="9:16",
     aspect_ratio_options=("9:16",),
     resolution="1080p",
     resolution_options=("720p", "1080p"),
+    generate_audio_by_resolution={"720p": False},
     reference_mode="frame",
     reference_mode_options=(),
     max_input_images=0,

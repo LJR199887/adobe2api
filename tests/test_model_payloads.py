@@ -123,8 +123,9 @@ def test_kling_video_720p_uses_portrait_720_size():
     payload = _build_kling_payload("kling", resolution="720p")
 
     assert payload["modelId"] == "kling"
-    assert payload["modelVersion"] == "kling_v3_pro_t2v"
+    assert payload["modelVersion"] == "kling_v3_standard_t2v"
     assert payload["size"] == {"width": 720, "height": 1280}
+    assert payload["generateAudio"] is False
     assert payload["generationSettings"] == {"aspectRatio": "9:16"}
 
 

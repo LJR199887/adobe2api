@@ -170,7 +170,7 @@ Kling 3.0：
 - 时长：`duration=15`
 - 比例：`aspect_ratio=9:16`
 - 分辨率：`resolution=720p / 1080p`
-- 当前按上游 `kling_v3_pro_t2v` 文生视频请求发送，不支持参考图
+- `1080p` 按上游 `kling_v3_pro_t2v` 发送；`720p` 按上游 `kling_v3_standard_t2v` 发送且关闭 `generateAudio`，不支持参考图
 
 Kling 3.0 Omni：
 - 命名：`model=kling-omni`

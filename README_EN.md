@@ -201,7 +201,7 @@ Kling 3.0 video model:
 - Pattern: `model=firefly-kling` or `model=kling` with separate request fields
 - Duration: pass `duration` as `15`
 - Ratio: pass `aspect_ratio` as `9:16`
-- Resolution: fixed `resolution=1080p`
+- Resolution: pass `resolution` as `720p` / `1080p`
 - Uses upstream `kling_v3_pro_t2v` text-to-video payload shape and does not accept reference images
 
 Kling 3.0 Omni video model:

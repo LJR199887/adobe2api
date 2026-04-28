@@ -319,7 +319,7 @@ _register_video_model(
     aspect_ratio="9:16",
     aspect_ratio_options=("9:16",),
     resolution="1080p",
-    resolution_options=("1080p",),
+    resolution_options=("720p", "1080p"),
     reference_mode="frame",
     reference_mode_options=(),
     max_input_images=0,

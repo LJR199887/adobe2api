@@ -84,8 +84,11 @@ def test_gpt_image2_resolves_firefly_alias_and_2x3_size():
     assert "firefly-gpt-image2" not in MODEL_CATALOG
 
 
-def _build_kling_payload(model_id: str) -> dict:
+def _build_kling_payload(model_id: str, resolution: str | None = None) -> dict:
     conf = VIDEO_MODEL_CATALOG[model_id]
+    if resolution:
+        conf = dict(conf)
+        conf["resolution"] = resolution
     client = AdobeClient.__new__(AdobeClient)
 
     return client._build_video_payload(
@@ -102,6 +105,7 @@ def test_kling_video_catalog_matches_upstream_request_shape():
     payload = _build_kling_payload("kling")
 
     assert conf["max_input_images"] == 0
+    assert conf["resolution_options"] == ["720p", "1080p"]
     assert VIDEO_MODEL_CATALOG["firefly-kling"]["canonical_model"] == "kling"
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_v3_pro_t2v"
@@ -113,6 +117,15 @@ def test_kling_video_catalog_matches_upstream_request_shape():
     assert payload["generationSettings"] == {"aspectRatio": "9:16"}
     assert payload["referenceBlobs"] == []
     assert "modelSpecificPayload" not in payload
+
+
+def test_kling_video_720p_uses_portrait_720_size():
+    payload = _build_kling_payload("kling", resolution="720p")
+
+    assert payload["modelId"] == "kling"
+    assert payload["modelVersion"] == "kling_v3_pro_t2v"
+    assert payload["size"] == {"width": 720, "height": 1280}
+    assert payload["generationSettings"] == {"aspectRatio": "9:16"}
 
 
 def test_kling_omni_video_catalog_matches_upstream_request_shape():

@@ -105,12 +105,12 @@ def test_kling_video_catalog_matches_upstream_request_shape():
     payload = _build_kling_payload("kling")
 
     assert conf["max_input_images"] == 0
-    assert conf["resolution_options"] == ["720p", "1080p"]
+    assert conf["resolution_options"] == []
     assert VIDEO_MODEL_CATALOG["firefly-kling"]["canonical_model"] == "kling"
     assert payload["modelId"] == "kling"
-    assert payload["modelVersion"] == "kling_v3_pro_t2v"
+    assert payload["modelVersion"] == "kling_v3_standard_t2v"
     assert payload["prompt"] == "A cinematic city skyline at sunset"
-    assert payload["size"] == {"width": 1080, "height": 1920}
+    assert payload["size"] == {"width": 720, "height": 1280}
     assert payload["duration"] == 15
     assert payload["generateAudio"] is True
     assert payload["generationMetadata"] == {"module": "text2video"}

@@ -170,7 +170,8 @@ Kling 3.0：
 - 时长：`duration=3~15`
 - 比例：`aspect_ratio=16:9 / 9:16`
 - 分辨率：不需要传
-- 文生视频按上游 `kling_v3_standard_t2v` 发送；图生视频传入 1 张参考图时按上游 `kling_v3_standard_i2v` 发送，参考图使用 `referenceBlobs[*].usage=frame` + `order=1`；默认开启 `generateAudio`
+- 文生视频按上游 `kling_v3_standard_t2v` 发送；图生视频传入 1~2 张参考图时按上游 `kling_v3_standard_i2v` 发送，参考图使用 `referenceBlobs[*].usage=frame` + `order=1/2`；默认开启 `generateAudio`
+- 图生视频参考图语义：1 张图 = 首帧；2 张图 = 首帧 + 尾帧
 
 Kling 3.0 Omni：
 - 命名：`model=kling-o3`
@@ -340,7 +341,7 @@ curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
   }'
 ```
 
-Kling 3.0 图生视频（异步任务，传 1 张图片时自动走 `kling_v3_standard_i2v`）：
+Kling 3.0 图生视频（异步任务，传图片时自动走 `kling_v3_standard_i2v`）：
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
@@ -354,6 +355,26 @@ curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
     "generate_audio": true,
     "async": true,
     "image_url": "https://example.com/character.png"
+  }'
+```
+
+Kling 3.0 首尾帧图生视频（异步任务，2 张图分别作为首帧和尾帧）：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kling-v3",
+    "prompt": "让角色从第一张图自然运动到第二张图，镜头平滑推进，电影级运镜",
+    "duration": 8,
+    "aspect_ratio": "9:16",
+    "generate_audio": true,
+    "async": true,
+    "image_urls": [
+      "https://example.com/first-frame.png",
+      "https://example.com/last-frame.png"
+    ]
   }'
 ```
 

@@ -330,7 +330,7 @@ _register_video_model(
     resolution_options=(),
     reference_mode="frame",
     reference_mode_options=(),
-    max_input_images=1,
+    max_input_images=2,
 )
 
 _register_video_model(

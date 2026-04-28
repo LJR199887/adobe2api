@@ -942,10 +942,11 @@ class AdobeClient:
             if has_source_image:
                 payload["referenceBlobs"] = [
                     {
-                        "id": str(source_image_ids[0]),
+                        "id": str(image_id),
                         "usage": "frame",
-                        "order": 1,
+                        "order": idx,
                     }
+                    for idx, image_id in enumerate(source_image_ids[:2], start=1)
                 ]
             return payload
 

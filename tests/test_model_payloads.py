@@ -111,7 +111,7 @@ def test_kling_video_catalog_matches_upstream_request_shape():
     conf = VIDEO_MODEL_CATALOG["kling-v3"]
     payload = _build_kling_payload("kling-v3")
 
-    assert conf["max_input_images"] == 1
+    assert conf["max_input_images"] == 2
     assert conf["resolution_options"] == []
     assert conf["duration_options"] == list(range(3, 16))
     assert conf["aspect_ratio_options"] == ["16:9", "9:16"]
@@ -161,6 +161,34 @@ def test_kling_image_to_video_uses_standard_i2v_payload_shape():
             "usage": "frame",
             "order": 1,
         }
+    ]
+
+
+def test_kling_image_to_video_supports_first_and_last_frame():
+    payload = _build_kling_payload(
+        "kling-v3",
+        source_image_ids=[
+            "1e1fc33c-ad45-4e32-959a-224dc9f76c10",
+            "15db5c7f-0cf5-4b93-83b1-02a5983828ee",
+        ],
+        duration=8,
+    )
+
+    assert payload["modelId"] == "kling"
+    assert payload["modelVersion"] == "kling_v3_standard_i2v"
+    assert payload["duration"] == 8
+    assert payload["generationMetadata"] == {"module": "image2video"}
+    assert payload["referenceBlobs"] == [
+        {
+            "id": "1e1fc33c-ad45-4e32-959a-224dc9f76c10",
+            "usage": "frame",
+            "order": 1,
+        },
+        {
+            "id": "15db5c7f-0cf5-4b93-83b1-02a5983828ee",
+            "usage": "frame",
+            "order": 2,
+        },
     ]
 
 

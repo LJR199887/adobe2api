@@ -202,7 +202,8 @@ Kling 3.0 video model:
 - Duration: pass `duration` as `3` through `15`
 - Ratio: pass `aspect_ratio` as `16:9` / `9:16`
 - Resolution: not required
-- Text-to-video uses upstream `kling_v3_standard_t2v`; image-to-video with one input image uses upstream `kling_v3_standard_i2v` and sends `referenceBlobs[*].usage=frame` + `order=1`; enables `generateAudio` by default
+- Text-to-video uses upstream `kling_v3_standard_t2v`; image-to-video with 1-2 input images uses upstream `kling_v3_standard_i2v` and sends `referenceBlobs[*].usage=frame` + `order=1/2`; enables `generateAudio` by default
+- Image-to-video semantics: 1 image = first frame; 2 images = first frame + last frame
 
 Kling 3.0 Omni video model:
 
@@ -401,7 +402,7 @@ curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
   }'
 ```
 
-Kling 3.0 image-to-video async task (one image input automatically uses `kling_v3_standard_i2v`):
+Kling 3.0 image-to-video async task (image input automatically uses `kling_v3_standard_i2v`):
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
@@ -415,6 +416,26 @@ curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
     "generate_audio": true,
     "async": true,
     "image_url": "https://example.com/character.png"
+  }'
+```
+
+Kling 3.0 first/last-frame image-to-video async task:
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kling-v3",
+    "prompt": "animate naturally from the first image to the second image, smooth cinematic camera motion",
+    "duration": 8,
+    "aspect_ratio": "9:16",
+    "generate_audio": true,
+    "async": true,
+    "image_urls": [
+      "https://example.com/first-frame.png",
+      "https://example.com/last-frame.png"
+    ]
   }'
 ```
 

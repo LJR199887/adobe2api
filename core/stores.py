@@ -222,7 +222,8 @@ class RequestLogStore:
         model = str(item.get("model") or "").strip().lower()
         if model:
             if (
-                "sora" in model
+                "kling" in model
+                or "sora" in model
                 or "veo" in model
                 or "video" in model
                 or "text2video" in model

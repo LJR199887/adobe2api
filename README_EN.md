@@ -78,6 +78,7 @@ Current supported model families are:
 - `firefly-veo31` (video)
 - `firefly-veo31-ref` (video, reference-image mode)
 - `firefly-veo31-fast` (video)
+- `firefly-kling` (video, text-to-video)
 
 Nano Banana image models (`nano-banana-2`):
 
@@ -193,6 +194,14 @@ Veo31 Fast video models:
 - Examples:
   - `model=firefly-veo31-fast, duration=4, aspect_ratio=16:9, resolution=1080p`
   - `model=firefly-veo31-fast, duration=6, aspect_ratio=9:16, resolution=720p`
+
+Kling video model:
+
+- Pattern: `model=firefly-kling` or `model=kling` with separate request fields
+- Duration: pass `duration` as `15`
+- Ratio: pass `aspect_ratio` as `9:16`
+- Resolution: fixed `resolution=1080p`
+- Uses upstream `kling_o3_pro_t2v` text-to-video payload shape and does not accept reference images
 
 ### 3.1 List models
 

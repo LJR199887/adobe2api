@@ -56,14 +56,23 @@ def _looks_like_video_model_id(model_id: str) -> bool:
     normalized = str(model_id or "").strip().lower()
     return normalized.startswith(
         (
+            "kling",
             "sora2",
             "veo31-fast",
             "veo31-",
+            "firefly-kling",
             "firefly-sora2",
             "firefly-veo31-fast",
             "firefly-veo31-",
         )
     )
+
+
+VIDEO_MODEL_ERROR_MESSAGE = (
+    "Invalid video model. Use /v1/models to get supported kling, sora2, "
+    "sora2-pro, veo31, veo31-ref or veo31-fast models, then pass "
+    "duration/aspect_ratio/resolution/reference_mode in the request body."
+)
 
 
 def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | None]:
@@ -202,6 +211,21 @@ def _resolve_video_request_config(model_id: str, data: dict, video_conf: dict) -
     resolved["reference_mode"] = requested_reference_mode
     resolved["resolved_model_id"] = str(resolved.get("canonical_model") or model_id)
     return resolved
+
+
+def _max_video_input_images(
+    video_engine: str, video_reference_mode: str, video_conf: dict
+) -> int:
+    if isinstance(video_conf, dict) and video_conf.get("max_input_images") is not None:
+        try:
+            return max(0, int(video_conf.get("max_input_images") or 0))
+        except Exception:
+            return 0
+    if video_engine == "veo31-standard" and video_reference_mode == "image":
+        return 3
+    if video_engine in {"veo31-fast", "veo31-standard"}:
+        return 2
+    return 1
 
 
 def build_generation_router(
@@ -1175,7 +1199,7 @@ def build_generation_router(
                 status_code=400,
                 content={
                     "error": {
-                        "message": "Invalid video model. Use /v1/models to get supported sora2, sora2-pro, veo31, veo31-ref or veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
+                        "message": VIDEO_MODEL_ERROR_MESSAGE,
                         "type": "invalid_request_error",
                     }
                 },
@@ -1250,15 +1274,9 @@ def build_generation_router(
             final_status_code = 503
             try:
                 input_images = load_input_images(normalized_data.get("messages") or [])
-                if (
-                    video_engine == "veo31-standard"
-                    and video_reference_mode == "image"
-                ):
-                    max_video_inputs = 3
-                else:
-                    max_video_inputs = (
-                        2 if video_engine in {"veo31-fast", "veo31-standard"} else 1
-                    )
+                max_video_inputs = _max_video_input_images(
+                    video_engine, video_reference_mode, resolved_video_conf
+                )
                 if len(input_images) > max_video_inputs:
                     raise RuntimeError(
                         f"video model supports at most {max_video_inputs} input image(s)"
@@ -1544,7 +1562,7 @@ def build_generation_router(
                 status_code=400,
                 content={
                     "error": {
-                        "message": "Invalid video model. Use /v1/models to get supported sora2, sora2-pro, veo31, veo31-ref or veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
+                        "message": VIDEO_MODEL_ERROR_MESSAGE,
                         "type": "invalid_request_error",
                     }
                 },
@@ -1616,15 +1634,9 @@ def build_generation_router(
 
             def _run_once(token: str):
                 source_image_ids: list[str] = []
-                if (
-                    video_engine == "veo31-standard"
-                    and video_reference_mode == "image"
-                ):
-                    max_video_inputs = 3
-                else:
-                    max_video_inputs = (
-                        2 if video_engine in {"veo31-fast", "veo31-standard"} else 1
-                    )
+                max_video_inputs = _max_video_input_images(
+                    video_engine, video_reference_mode, resolved_video_conf
+                )
                 if len(input_images) > max_video_inputs:
                     raise HTTPException(
                         status_code=400,
@@ -1985,7 +1997,7 @@ def build_generation_router(
                 status_code=400,
                 content={
                     "error": {
-                        "message": "Invalid video model. Use /v1/models to get supported sora2, sora2-pro, veo31, veo31-ref or veo31-fast models, then pass duration/aspect_ratio/resolution/reference_mode in the request body.",
+                        "message": VIDEO_MODEL_ERROR_MESSAGE,
                         "type": "invalid_request_error",
                     }
                 },

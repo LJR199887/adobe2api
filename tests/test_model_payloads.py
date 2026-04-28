@@ -1,4 +1,9 @@
-from core.models import MODEL_CATALOG, resolve_ratio_and_resolution
+from core.adobe_client import AdobeClient
+from core.models import (
+    MODEL_CATALOG,
+    VIDEO_MODEL_CATALOG,
+    resolve_ratio_and_resolution,
+)
 from core.models.payloads import build_image_payload_candidates
 
 
@@ -25,7 +30,7 @@ def test_gpt_image2_catalog_entry_matches_upstream_request_shape():
         "module": "text2image",
         "submodule": "ff-image-generate",
     }
-    assert payload["generationSettings"] == {"detailLevel": 1}
+    assert payload["generationSettings"] == {"detailLevel": 3}
     assert "groundSearch" not in payload
     assert "skipCai" not in payload
 
@@ -64,7 +69,7 @@ def test_gpt_image2_image_to_image_uses_top_level_size_from_ratio():
         "module": "text2image",
         "submodule": "ff-image-generate",
     }
-    assert payload["generationSettings"] == {"detailLevel": 1}
+    assert payload["generationSettings"] == {"detailLevel": 3}
 
 
 def test_gpt_image2_resolves_firefly_alias_and_2x3_size():
@@ -77,3 +82,29 @@ def test_gpt_image2_resolves_firefly_alias_and_2x3_size():
     assert output_resolution == "1K"
     assert resolved_model_id == "gpt-image2"
     assert "firefly-gpt-image2" not in MODEL_CATALOG
+
+
+def test_kling_video_catalog_matches_upstream_request_shape():
+    conf = VIDEO_MODEL_CATALOG["kling"]
+    client = AdobeClient.__new__(AdobeClient)
+
+    payload = client._build_video_payload(
+        video_conf=conf,
+        prompt="A cinematic city skyline at sunset",
+        aspect_ratio="9:16",
+        duration=15,
+        generate_audio=True,
+    )
+
+    assert conf["max_input_images"] == 0
+    assert VIDEO_MODEL_CATALOG["firefly-kling"]["canonical_model"] == "kling"
+    assert payload["modelId"] == "kling"
+    assert payload["modelVersion"] == "kling_o3_pro_t2v"
+    assert payload["prompt"] == "A cinematic city skyline at sunset"
+    assert payload["size"] == {"width": 1080, "height": 1920}
+    assert payload["duration"] == 15
+    assert payload["generateAudio"] is True
+    assert payload["generationMetadata"] == {"module": "text2video"}
+    assert payload["generationSettings"] == {"aspectRatio": "9:16"}
+    assert payload["referenceBlobs"] == []
+    assert "modelSpecificPayload" not in payload

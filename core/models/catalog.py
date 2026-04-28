@@ -168,6 +168,8 @@ def _register_video_model(
     description: str,
     engine: str = "sora2",
     upstream_model: str | None = None,
+    upstream_model_id: str | None = None,
+    upstream_model_version: str | None = None,
     duration: int = 8,
     duration_options: tuple[int, ...] = (),
     aspect_ratio: str = "16:9",
@@ -175,12 +177,15 @@ def _register_video_model(
     resolution: str | None = None,
     resolution_options: tuple[str, ...] = (),
     reference_mode: str = "frame",
-    reference_mode_options: tuple[str, ...] = (),
+    reference_mode_options: tuple[str, ...] | None = None,
+    max_input_images: int | None = None,
 ) -> None:
     VIDEO_MODEL_CATALOG[model_id] = {
         "description": description,
         "engine": engine,
         "upstream_model": upstream_model,
+        "upstream_model_id": upstream_model_id,
+        "upstream_model_version": upstream_model_version,
         "duration": duration,
         "duration_options": list(duration_options or (duration,)),
         "aspect_ratio": aspect_ratio,
@@ -188,9 +193,15 @@ def _register_video_model(
         "resolution": resolution,
         "resolution_options": list(resolution_options),
         "reference_mode": reference_mode,
-        "reference_mode_options": list(reference_mode_options or (reference_mode,)),
+        "reference_mode_options": list(
+            (reference_mode,)
+            if reference_mode_options is None
+            else reference_mode_options
+        ),
         "allow_request_overrides": True,
     }
+    if max_input_images is not None:
+        VIDEO_MODEL_CATALOG[model_id]["max_input_images"] = int(max_input_images)
 
 
 def _register_video_family_alias(alias_id: str, canonical_model: str) -> None:
@@ -297,7 +308,31 @@ _register_video_model(
     reference_mode="frame",
 )
 
-for canonical_id in ("sora2", "sora2-pro", "veo31", "veo31-ref", "veo31-fast"):
+_register_video_model(
+    "kling",
+    description="Kling video model (text-to-video, 15s 1080p)",
+    engine="kling",
+    upstream_model_id="kling",
+    upstream_model_version="kling_o3_pro_t2v",
+    duration=15,
+    duration_options=(15,),
+    aspect_ratio="9:16",
+    aspect_ratio_options=("9:16",),
+    resolution="1080p",
+    resolution_options=("1080p",),
+    reference_mode="frame",
+    reference_mode_options=(),
+    max_input_images=0,
+)
+
+for canonical_id in (
+    "sora2",
+    "sora2-pro",
+    "veo31",
+    "veo31-ref",
+    "veo31-fast",
+    "kling",
+):
     _register_video_family_alias(f"firefly-{canonical_id}", canonical_id)
 
 for dur in (4, 8, 12):

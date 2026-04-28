@@ -903,6 +903,24 @@ class AdobeClient:
             video_conf.get("upstream_model") or "openai:firefly:colligo:sora2"
         )
         resolution = str(video_conf.get("resolution") or "720p")
+        if engine == "kling":
+            return {
+                "n": 1,
+                "seeds": [seed_val],
+                "modelId": str(video_conf.get("upstream_model_id") or "kling"),
+                "modelVersion": str(
+                    video_conf.get("upstream_model_version") or "kling_o3_pro_t2v"
+                ),
+                "output": {"storeInputs": True},
+                "prompt": prompt,
+                "size": self._video_size(aspect_ratio, resolution),
+                "generateAudio": bool(generate_audio),
+                "generationMetadata": {"module": "text2video"},
+                "duration": int(duration),
+                "generationSettings": {"aspectRatio": aspect_ratio},
+                "referenceBlobs": [],
+            }
+
         if engine in {"veo31-fast", "veo31-standard"}:
             model_version = (
                 "3.1-fast-generate" if engine == "veo31-fast" else "3.1-generate"

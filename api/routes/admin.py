@@ -414,6 +414,32 @@ def _run_import_refresh_job(
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_map = {}
+
+        def refresh_import_item(index: int, profile_id: str):
+            _mark_import_refresh_job_item_running(job_id, index)
+            return refresh_manager.refresh_once(profile_id, refresh_credits=False)
+
+        def log_import_refresh_progress(refresh_call_ms: float):
+            with _IMPORT_REFRESH_JOB_LOCK:
+                job_items = (_IMPORT_REFRESH_JOBS.get(job_id) or {}).get("items") or []
+                done_count = len(
+                    [
+                        item
+                        for item in job_items
+                        if str(item.get("status") or "").strip().lower()
+                        in {"succeeded", "failed"}
+                    ]
+                )
+            if done_count == total_count or done_count % 10 == 0:
+                logger.info(
+                    "import_cookie_background_refresh_progress job_id=%s "
+                    "completed=%s total=%s refresh_call_ms=%.3f",
+                    job_id,
+                    done_count,
+                    total_count,
+                    refresh_call_ms,
+                )
+
         for index, item in enumerate(items):
             profile_id = str(item.get("profile_id") or "").strip()
             if not profile_id:
@@ -423,9 +449,8 @@ def _run_import_refresh_job(
                     refresh_error="missing profile id",
                 )
                 continue
-            _mark_import_refresh_job_item_running(job_id, index)
             refresh_started = time.perf_counter()
-            future = executor.submit(refresh_manager.refresh_once, profile_id)
+            future = executor.submit(refresh_import_item, index, profile_id)
             future_map[future] = (index, refresh_started)
 
         for future in as_completed(future_map):
@@ -440,6 +465,7 @@ def _run_import_refresh_job(
                     refresh_error=str(exc),
                     refresh_call_ms=refresh_call_ms,
                 )
+                log_import_refresh_progress(refresh_call_ms)
                 continue
             _mark_import_refresh_job_item_result(
                 job_id,
@@ -447,6 +473,7 @@ def _run_import_refresh_job(
                 refresh_result=refresh_result,
                 refresh_call_ms=refresh_call_ms,
             )
+            log_import_refresh_progress(refresh_call_ms)
 
     _mark_import_refresh_job_completed(job_id)
     summary = _build_import_refresh_payload(job_id) or {}

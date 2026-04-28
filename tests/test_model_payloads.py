@@ -134,6 +134,7 @@ def test_kling_omni_video_catalog_matches_upstream_request_shape():
     payload = _build_kling_payload("kling-omni")
 
     assert conf["max_input_images"] == 0
+    assert conf["resolution_options"] == ["720p", "1080p"]
     assert VIDEO_MODEL_CATALOG["firefly-kling-omni"]["canonical_model"] == "kling-omni"
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_o3_pro_t2v"
@@ -145,3 +146,13 @@ def test_kling_omni_video_catalog_matches_upstream_request_shape():
     assert payload["generationSettings"] == {"aspectRatio": "9:16"}
     assert payload["referenceBlobs"] == []
     assert "modelSpecificPayload" not in payload
+
+
+def test_kling_omni_video_720p_uses_standard_o3_model():
+    payload = _build_kling_payload("kling-omni", resolution="720p")
+
+    assert payload["modelId"] == "kling"
+    assert payload["modelVersion"] == "kling_o3_standard_t2v"
+    assert payload["size"] == {"width": 720, "height": 1280}
+    assert payload["generateAudio"] is True
+    assert payload["generationSettings"] == {"aspectRatio": "9:16"}

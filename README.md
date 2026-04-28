@@ -324,7 +324,23 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   }'
 ```
 
-Kling 3.0 图生视频（异步任务）：
+Kling 3.0 文生视频（异步任务，无图片时自动走 `kling_v3_standard_t2v`）：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kling-v3",
+    "prompt": "奥特曼在城市废墟中打怪兽，电影级特摄镜头，环境音真实",
+    "duration": 8,
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "async": true
+  }'
+```
+
+Kling 3.0 图生视频（异步任务，传 1 张图片时自动走 `kling_v3_standard_i2v`）：
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/video/generations" \

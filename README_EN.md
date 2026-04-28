@@ -385,7 +385,23 @@ curl -X POST "http://127.0.0.1:6001/v1/chat/completions" \
   }'
 ```
 
-Kling 3.0 image-to-video async task:
+Kling 3.0 text-to-video async task (no image input automatically uses `kling_v3_standard_t2v`):
+
+```bash
+curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
+  -H "Authorization: Bearer <service_api_key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kling-v3",
+    "prompt": "Ultraman fights a monster in a ruined city, cinematic tokusatsu camera work, natural ambient sound",
+    "duration": 8,
+    "aspect_ratio": "16:9",
+    "generate_audio": true,
+    "async": true
+  }'
+```
+
+Kling 3.0 image-to-video async task (one image input automatically uses `kling_v3_standard_i2v`):
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/v1/video/generations" \

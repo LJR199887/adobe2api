@@ -78,8 +78,8 @@ Current supported model families are:
 - `firefly-veo31` (video)
 - `firefly-veo31-ref` (video, reference-image mode)
 - `firefly-veo31-fast` (video)
-- `firefly-kling` (video, Kling 3.0 text-to-video)
-- `firefly-kling-omni` (video, Kling 3.0 Omni text-to-video)
+- `kling-v3` (video, Kling 3.0 text/image-to-video)
+- `kling-o3` (video, Kling 3.0 Omni text-to-video)
 
 Nano Banana image models (`nano-banana-2`):
 
@@ -198,7 +198,7 @@ Veo31 Fast video models:
 
 Kling 3.0 video model:
 
-- Pattern: `model=firefly-kling` or `model=kling` with separate request fields
+- Pattern: `model=kling-v3` with separate request fields
 - Duration: pass `duration` as `3` through `15`
 - Ratio: pass `aspect_ratio` as `16:9` / `9:16`
 - Resolution: not required
@@ -206,7 +206,7 @@ Kling 3.0 video model:
 
 Kling 3.0 Omni video model:
 
-- Pattern: `model=firefly-kling-omni` or `model=kling-omni` with separate request fields
+- Pattern: `model=kling-o3` with separate request fields
 - Duration: pass `duration` as `15`
 - Ratio: pass `aspect_ratio` as `9:16`
 - Resolution: pass `resolution` as `720p` / `1080p`
@@ -392,7 +392,7 @@ curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "firefly-kling",
+    "model": "kling-v3",
     "prompt": "animate the character walking toward camera, cinematic camera motion, natural ambient sound",
     "duration": 15,
     "aspect_ratio": "9:16",

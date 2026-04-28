@@ -316,8 +316,8 @@ _register_video_model(
 )
 
 _register_video_model(
-    "kling",
-    description="Kling 3.0 video model (text-to-video, 15s)",
+    "kling-v3",
+    description="Kling 3.0 video model (text/image-to-video, 3-15s)",
     engine="kling",
     upstream_model_id="kling",
     upstream_model_version="kling_v3_standard_t2v",
@@ -334,7 +334,7 @@ _register_video_model(
 )
 
 _register_video_model(
-    "kling-omni",
+    "kling-o3",
     description="Kling 3.0 Omni video model (text-to-video, 15s 720p/1080p)",
     engine="kling",
     upstream_model_id="kling",
@@ -357,10 +357,18 @@ for canonical_id in (
     "veo31",
     "veo31-ref",
     "veo31-fast",
-    "kling",
-    "kling-omni",
+    "kling-v3",
+    "kling-o3",
 ):
     _register_video_family_alias(f"firefly-{canonical_id}", canonical_id)
+
+for alias_id, canonical_id in (
+    ("kling", "kling-v3"),
+    ("firefly-kling", "kling-v3"),
+    ("kling-omni", "kling-o3"),
+    ("firefly-kling-omni", "kling-o3"),
+):
+    _register_video_family_alias(alias_id, canonical_id)
 
 for dur in (4, 8, 12):
     for ratio in ("9:16", "16:9"):

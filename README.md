@@ -53,8 +53,8 @@ docker compose up -d --build
 - `veo31`（视频）
 - `veo31-ref`（视频，参考图模式）
 - `veo31-fast`（视频）
-- `kling`（视频，Kling 3.0 文生视频）
-- `kling-omni`（视频，Kling 3.0 Omni 文生视频）
+- `kling-v3`（视频，Kling 3.0 文生/图生视频）
+- `kling-o3`（视频，Kling 3.0 Omni 文生视频）
 
 说明：
 - `nano-banana`、`nano-banana2`、`nano-banana-pro` 现在都统一通过 `output_resolution` 选择 `1K` / `2K` / `4K`
@@ -166,14 +166,14 @@ Veo31 Fast：
 - 分辨率：`resolution=720p / 1080p`
 
 Kling 3.0：
-- 命名：`model=kling`
+- 命名：`model=kling-v3`
 - 时长：`duration=3~15`
 - 比例：`aspect_ratio=16:9 / 9:16`
 - 分辨率：不需要传
 - 文生视频按上游 `kling_v3_standard_t2v` 发送；图生视频传入 1 张参考图时按上游 `kling_v3_standard_i2v` 发送，参考图使用 `referenceBlobs[*].usage=frame` + `order=1`；默认开启 `generateAudio`
 
 Kling 3.0 Omni：
-- 命名：`model=kling-omni`
+- 命名：`model=kling-o3`
 - 时长：`duration=15`
 - 比例：`aspect_ratio=9:16`
 - 分辨率：`resolution=720p / 1080p`
@@ -331,7 +331,7 @@ curl -X POST "http://127.0.0.1:6001/v1/video/generations" \
   -H "Authorization: Bearer <service_api_key>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "kling",
+    "model": "kling-v3",
     "prompt": "让画面中的角色向镜头走来，电影级运镜，环境音真实",
     "duration": 15,
     "aspect_ratio": "9:16",

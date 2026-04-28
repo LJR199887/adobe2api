@@ -108,14 +108,16 @@ def _build_kling_payload(
 
 
 def test_kling_video_catalog_matches_upstream_request_shape():
-    conf = VIDEO_MODEL_CATALOG["kling"]
-    payload = _build_kling_payload("kling")
+    conf = VIDEO_MODEL_CATALOG["kling-v3"]
+    payload = _build_kling_payload("kling-v3")
 
     assert conf["max_input_images"] == 1
     assert conf["resolution_options"] == []
     assert conf["duration_options"] == list(range(3, 16))
     assert conf["aspect_ratio_options"] == ["16:9", "9:16"]
-    assert VIDEO_MODEL_CATALOG["firefly-kling"]["canonical_model"] == "kling"
+    assert VIDEO_MODEL_CATALOG["firefly-kling-v3"]["canonical_model"] == "kling-v3"
+    assert VIDEO_MODEL_CATALOG["kling"]["canonical_model"] == "kling-v3"
+    assert VIDEO_MODEL_CATALOG["firefly-kling"]["canonical_model"] == "kling-v3"
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_v3_standard_t2v"
     assert payload["prompt"] == "A cinematic city skyline at sunset"
@@ -129,7 +131,7 @@ def test_kling_video_catalog_matches_upstream_request_shape():
 
 
 def test_kling_video_landscape_uses_standard_text_to_video():
-    payload = _build_kling_payload("kling", aspect_ratio="16:9", duration=3)
+    payload = _build_kling_payload("kling-v3", aspect_ratio="16:9", duration=3)
 
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_v3_standard_t2v"
@@ -141,7 +143,7 @@ def test_kling_video_landscape_uses_standard_text_to_video():
 
 def test_kling_image_to_video_uses_standard_i2v_payload_shape():
     payload = _build_kling_payload(
-        "kling",
+        "kling-v3",
         source_image_ids=["98464b78-7d20-4495-81ad-ee0a1923539a"],
         duration=15,
     )
@@ -163,12 +165,14 @@ def test_kling_image_to_video_uses_standard_i2v_payload_shape():
 
 
 def test_kling_omni_video_catalog_matches_upstream_request_shape():
-    conf = VIDEO_MODEL_CATALOG["kling-omni"]
-    payload = _build_kling_payload("kling-omni")
+    conf = VIDEO_MODEL_CATALOG["kling-o3"]
+    payload = _build_kling_payload("kling-o3")
 
     assert conf["max_input_images"] == 0
     assert conf["resolution_options"] == ["720p", "1080p"]
-    assert VIDEO_MODEL_CATALOG["firefly-kling-omni"]["canonical_model"] == "kling-omni"
+    assert VIDEO_MODEL_CATALOG["firefly-kling-o3"]["canonical_model"] == "kling-o3"
+    assert VIDEO_MODEL_CATALOG["kling-omni"]["canonical_model"] == "kling-o3"
+    assert VIDEO_MODEL_CATALOG["firefly-kling-omni"]["canonical_model"] == "kling-o3"
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_o3_pro_t2v"
     assert payload["prompt"] == "A cinematic city skyline at sunset"
@@ -182,7 +186,7 @@ def test_kling_omni_video_catalog_matches_upstream_request_shape():
 
 
 def test_kling_omni_video_720p_uses_standard_o3_model():
-    payload = _build_kling_payload("kling-omni", resolution="720p")
+    payload = _build_kling_payload("kling-o3", resolution="720p")
 
     assert payload["modelId"] == "kling"
     assert payload["modelVersion"] == "kling_o3_standard_t2v"

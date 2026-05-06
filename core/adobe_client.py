@@ -994,58 +994,27 @@ class AdobeClient:
             return payload
 
         payload = {
-            "n": 1,
+            "size": self._video_size(aspect_ratio, resolution),
             "seeds": [seed_val],
+            "prompt": prompt,
+            "duration": int(duration),
+            "generateAudio": bool(generate_audio),
+            "generationMetadata": {"module": "text2video"},
             "modelId": "sora",
             "modelVersion": "sora-2",
-            "size": self._video_size(aspect_ratio, resolution),
-            "duration": int(duration),
-            "fps": 24,
-            "prompt": self._build_video_prompt_json(
-                prompt=prompt,
-                duration=duration,
-                negative_prompt=negative_prompt,
-                timeline_events=timeline_events,
-                audio=audio,
-            ),
-            "generationMetadata": {"module": "text2video"},
-            "model": upstream_model,
-            "generateAudio": bool(generate_audio),
-            "generateLoop": False,
-            "transparentBackground": False,
-            "seed": str(seed_val),
-            "locale": str(locale or "en-US").strip() or "en-US",
-            "camera": {
-                "angle": "none",
-                "shotSize": "none",
-                "motion": None,
-                "promptStyle": None,
-            },
-            "negativePrompt": negative_prompt or "",
-            "jobMode": "standard",
-            "debugGenerationEndpoint": "",
-            "referenceBlobs": [],
-            "referenceFrames": [],
-            "referenceImages": [],
-            "referenceVideo": None,
-            "cameraMotionReferenceVideo": None,
-            "characterReference": None,
-            "editReferenceVideo": None,
             "output": {"storeInputs": True},
         }
+        if negative_prompt:
+            payload["negativePrompt"] = negative_prompt
         if source_image_ids:
-            first_id = str(source_image_ids[0])
-            payload["referenceBlobs"] = [
-                {"id": first_id, "usage": "general", "promptReference": 1}
-            ]
-            reference_frames = [{"localBlobRef": first_id}, None]
-            if engine == "veo31-fast" and len(source_image_ids) > 1:
-                last_id = str(source_image_ids[1])
-                payload["referenceBlobs"].append(
-                    {"id": last_id, "usage": "general", "promptReference": 2}
-                )
-                reference_frames[1] = {"localBlobRef": last_id}
-            payload["referenceFrames"] = reference_frames
+            payload["referenceBlobs"] = []
+            for idx, image_id in enumerate(source_image_ids[:2], start=1):
+                blob = {
+                    "id": str(image_id),
+                    "usage": "general",
+                    "promptReference": idx,
+                }
+                payload["referenceBlobs"].append(blob)
         return payload
 
     def generate_video(

@@ -993,31 +993,27 @@ class AdobeClient:
                         )
             return payload
 
-        has_source_image = bool(source_image_ids)
         payload = {
             "size": self._video_size(aspect_ratio, resolution),
             "seeds": [seed_val],
             "prompt": prompt,
             "duration": int(duration),
             "generateAudio": bool(generate_audio),
-            "generationMetadata": {
-                "module": "image2video" if has_source_image else "text2video"
-            },
+            "generationMetadata": {"module": "text2video"},
             "modelId": "sora",
             "modelVersion": "sora-2",
             "output": {"storeInputs": True},
         }
         if negative_prompt:
             payload["negativePrompt"] = negative_prompt
-        if has_source_image:
-            blob_usage = "frame" if str(reference_mode or "frame").strip().lower() == "frame" else "general"
+        if source_image_ids:
             payload["referenceBlobs"] = []
             for idx, image_id in enumerate(source_image_ids[:2], start=1):
-                blob = {"id": str(image_id), "usage": blob_usage}
-                if blob_usage == "frame":
-                    blob["order"] = idx
-                else:
-                    blob["promptReference"] = idx
+                blob = {
+                    "id": str(image_id),
+                    "usage": "general",
+                    "promptReference": idx,
+                }
                 payload["referenceBlobs"].append(blob)
         return payload
 

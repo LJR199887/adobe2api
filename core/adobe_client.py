@@ -1001,7 +1001,10 @@ class AdobeClient:
             "prompt": prompt,
             "duration": int(duration),
             "generateAudio": bool(generate_audio),
-            "generationMetadata": {"module": "text2video"},
+            "generationMetadata": {
+                "module": "text2video",
+                "submodule": "ff-video-generate",
+            },
             "modelId": "sora",
             "modelVersion": "sora-2",
             "output": {"storeInputs": True},

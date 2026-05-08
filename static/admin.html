@@ -500,11 +500,6 @@
         <div><span>额度耗尽 Token</span><strong id="cleanupExhaustedTokenCount">0</strong></div>
         <div><span>将删除刷新配置</span><strong id="cleanupExhaustedProfileCount">0</strong></div>
       </div>
-      <label class="checkbox-label cleanup-checkbox" style="user-select: none;">
-        <input type="checkbox" id="cleanupExhaustedIncludeProfiles" checked />
-        同时删除对应刷新配置
-      </label>
-      <p class="help">确认后会删除所有当前状态为“额度耗尽”的 Token。未勾选时只删除 Token，不删除 refresh profile。</p>
       <div class="actions" style="margin-top: 16px;">
         <button id="cleanupExhaustedConfirmBtn" class="danger" type="button">确认删除</button>
         <span id="cleanupExhaustedMsg" class="msg"></span>

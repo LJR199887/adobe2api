@@ -83,7 +83,6 @@
   const cleanupExhaustedModal = document.getElementById("cleanupExhaustedModal");
   const cleanupExhaustedCloseBtn = document.getElementById("cleanupExhaustedCloseBtn");
   const cleanupExhaustedConfirmBtn = document.getElementById("cleanupExhaustedConfirmBtn");
-  const cleanupExhaustedIncludeProfiles = document.getElementById("cleanupExhaustedIncludeProfiles");
   const cleanupExhaustedTokenCount = document.getElementById("cleanupExhaustedTokenCount");
   const cleanupExhaustedProfileCount = document.getElementById("cleanupExhaustedProfileCount");
   const cleanupExhaustedMsg = document.getElementById("cleanupExhaustedMsg");
@@ -288,9 +287,7 @@
 
   function renderCleanupExhaustedPreview() {
     const tokenCount = Number(cleanupExhaustedPreview.exhausted_token_count || 0);
-    const profileCount = cleanupExhaustedIncludeProfiles?.checked
-      ? Number(cleanupExhaustedPreview.refresh_profile_count || 0)
-      : 0;
+    const profileCount = Number(cleanupExhaustedPreview.refresh_profile_count || 0);
     if (cleanupExhaustedTokenCount) cleanupExhaustedTokenCount.textContent = String(tokenCount);
     if (cleanupExhaustedProfileCount) cleanupExhaustedProfileCount.textContent = String(profileCount);
     if (cleanupExhaustedConfirmBtn) cleanupExhaustedConfirmBtn.disabled = tokenCount <= 0;
@@ -879,10 +876,6 @@
     });
   }
 
-  if (cleanupExhaustedIncludeProfiles) {
-    cleanupExhaustedIncludeProfiles.addEventListener("change", renderCleanupExhaustedPreview);
-  }
-
   if (cleanupExhaustedCloseBtn) {
     cleanupExhaustedCloseBtn.addEventListener("click", () => closeDialog(cleanupExhaustedModal));
   }
@@ -892,7 +885,6 @@
       cleanupExhaustedTokensBtn.disabled = true;
       showMsg(cleanupExhaustedMsg, "", false, { duration: 0 });
       try {
-        if (cleanupExhaustedIncludeProfiles) cleanupExhaustedIncludeProfiles.checked = true;
         await loadCleanupExhaustedPreview();
         openDialog(cleanupExhaustedModal);
       } catch (err) {
@@ -910,13 +902,12 @@
         showMsg(cleanupExhaustedMsg, "当前没有额度耗尽 Token", true);
         return;
       }
-      const includeProfiles = Boolean(cleanupExhaustedIncludeProfiles?.checked);
       cleanupExhaustedConfirmBtn.disabled = true;
       try {
         const res = await fetch("/api/v1/tokens/cleanup-exhausted", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ include_refresh_profiles: includeProfiles }),
+          body: JSON.stringify({ include_refresh_profiles: true }),
         });
         if (!res.ok) {
           let detail = "清理额度耗尽失败";

@@ -15,6 +15,8 @@ class GenerateRequest(BaseModel):
     input_images: Optional[Any] = None
     reference_image: Optional[Any] = None
     reference_images: Optional[Any] = None
+    seed: Optional[Any] = None
+    seeds: Optional[Any] = None
 
 
 class TokenAddRequest(BaseModel):

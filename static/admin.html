@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/admin.css?v=20260422-3" />
+  <link rel="stylesheet" href="/static/admin.css?v=20260508-1" />
 </head>
 <body>
   <div class="bg-orb bg-orb-a"></div>
@@ -41,6 +41,7 @@
           <div class="actions">
             <button id="exportTokensBtn" class="secondary">导出 Token</button>
             <button id="exportCookiesBtn" class="secondary">导出 Cookie</button>
+            <button id="cleanupExhaustedTokensBtn" class="danger">清理额度耗尽</button>
             <button id="deleteTokensBatchBtn" class="danger">批量删除</button>
             <button id="enableAutoRefreshBatchBtn" class="secondary">开启自动刷新</button>
             <button id="disableAutoRefreshBatchBtn" class="secondary">关闭自动刷新</button>
@@ -255,6 +256,20 @@
               <label for="confTokenSuccessAutoDisableThreshold">Token 自动禁用成功次数</label>
               <input type="number" id="confTokenSuccessAutoDisableThreshold" class="input-text" min="1" max="100000" step="1" placeholder="默认 2" />
               <p class="help">例如填 2 并开启后，一个 token 成功完成 2 次任务就会自动禁用；填 5 则成功 5 次后自动禁用。</p>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label" style="user-select: none;">
+                <input type="checkbox" id="confTokenExhaustedAutoDeleteEnabled" />
+                启用自动清理额度耗尽 Token
+              </label>
+              <p class="help">开启后，会定期删除达到保留时长的额度耗尽 Token，并同步删除对应刷新配置。默认关闭。</p>
+            </div>
+
+            <div class="form-group">
+              <label for="confTokenExhaustedAutoDeleteHours">额度耗尽保留时长 (小时)</label>
+              <input type="number" id="confTokenExhaustedAutoDeleteHours" class="input-text" min="1" max="8760" step="1" placeholder="默认 24" />
+              <p class="help">例如填 24，额度耗尽超过 24 小时后自动清理；最小 1 小时。</p>
             </div>
 
             <div class="form-group">
@@ -475,6 +490,23 @@
     </div>
   </div>
 
+  <div id="cleanupExhaustedModal" class="dialog-modal" aria-hidden="true">
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="清理额度耗尽 Token">
+      <div class="list-head" style="margin-bottom: 10px;">
+        <h2>清理额度耗尽</h2>
+        <button id="cleanupExhaustedCloseBtn" class="secondary small" type="button">关闭</button>
+      </div>
+      <div class="cleanup-summary">
+        <div><span>额度耗尽 Token</span><strong id="cleanupExhaustedTokenCount">0</strong></div>
+        <div><span>将删除刷新配置</span><strong id="cleanupExhaustedProfileCount">0</strong></div>
+      </div>
+      <div class="actions" style="margin-top: 16px;">
+        <button id="cleanupExhaustedConfirmBtn" class="danger" type="button">确认删除</button>
+        <span id="cleanupExhaustedMsg" class="msg"></span>
+      </div>
+    </div>
+  </div>
+
   <div id="previewModal" class="preview-modal" aria-hidden="true">
     <div class="preview-modal-dialog" role="dialog" aria-modal="true" aria-label="媒体预览">
       <button id="previewCloseBtn" class="preview-close" type="button">关闭</button>
@@ -507,6 +539,6 @@
 
   <div id="appToast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="/static/admin.js?v=20260423-1"></script>
+  <script src="/static/admin.js?v=20260508-1"></script>
 </body>
 </html>

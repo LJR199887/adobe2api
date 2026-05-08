@@ -478,11 +478,14 @@ class TokenManager:
 
     def report_exhausted(self, value: str) -> Optional[Dict]:
         updated = None
+        now_ts = time.time()
         with self._lock:
             t = self._value_index.get(self._normalize_token_value(value))
             if t is not None:
                 t["status"] = "exhausted"
                 t["error_until"] = 0
+                t["updated_at"] = now_ts
+                t.setdefault("exhausted_at", now_ts)
                 updated = dict(t)
             self.save()
         return updated
@@ -529,9 +532,13 @@ class TokenManager:
                     match_reason = "token_account_name"
 
             if target is not None:
+                now_ts = time.time()
                 previous_status = str(target.get("status") or "active")
                 target["status"] = status
                 target["error_until"] = 0
+                target["updated_at"] = now_ts
+                if status == "exhausted":
+                    target.setdefault("exhausted_at", now_ts)
                 updated = dict(target)
                 updated["_previous_status"] = previous_status
                 updated["_matched_by"] = match_reason
@@ -583,11 +590,13 @@ class TokenManager:
 
     def report_invalid(self, value: str) -> Optional[Dict]:
         updated = None
+        now_ts = time.time()
         with self._lock:
             t = self._value_index.get(self._normalize_token_value(value))
             if t is not None:
                 t["status"] = "invalid"
                 t["error_until"] = 0
+                t["updated_at"] = now_ts
                 updated = dict(t)
             self.save()
         return updated
@@ -636,8 +645,11 @@ class TokenManager:
             except Exception:
                 threshold = 0
             if bool(auto_disable_enabled) and threshold > 0 and success_count >= threshold:
+                now_ts = time.time()
                 t["status"] = "exhausted"
                 t["error_until"] = 0
+                t["updated_at"] = now_ts
+                t.setdefault("exhausted_at", now_ts)
                 disabled_by_limit = True
             self.save()
             result = dict(t)
@@ -739,8 +751,11 @@ class TokenManager:
                 ):
                     if str(token.get("status") or "").strip().lower() != "exhausted":
                         exhausted_by_threshold += 1
+                    now_ts = time.time()
                     token["status"] = "exhausted"
                     token["error_until"] = 0
+                    token["updated_at"] = now_ts
+                    token.setdefault("exhausted_at", now_ts)
                     profile_id = str(token.get("refresh_profile_id") or "").strip()
                     if bool(token.get("auto_refresh")) and profile_id:
                         exhausted_profile_ids.add(profile_id)
@@ -858,6 +873,7 @@ class TokenManager:
             "success_count": token.get("success_count", 0),
             "added_at": token.get("added_at", 0),
             "updated_at": token.get("updated_at"),
+            "exhausted_at": token.get("exhausted_at"),
             "error_until": token.get("error_until", 0),
             "source": token.get("source", "manual"),
             "auto_refresh": bool(token.get("auto_refresh", False)),
@@ -1031,6 +1047,8 @@ class TokenManager:
                         "refresh_profile_name": t.get("refresh_profile_name"),
                         "refresh_profile_email": t.get("refresh_profile_email"),
                         "added_at": t.get("added_at"),
+                        "updated_at": t.get("updated_at"),
+                        "exhausted_at": t.get("exhausted_at"),
                     }
                 )
             return out

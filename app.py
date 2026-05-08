@@ -704,6 +704,7 @@ def _run_with_token_retries(
     operation_name: str,
     run_once: Callable[[str], Any],
     set_request_error_detail: Optional[Callable[..., str]] = None,
+    on_retry: Optional[Callable[[int, str], None]] = None,
 ) -> Any:
     max_attempts = client.retry_max_attempts if client.retry_enabled else 1
     max_attempts = max(1, int(max_attempts))
@@ -842,10 +843,16 @@ def _run_with_token_retries(
             upstream_job_created = bool(
                 str(getattr(request.state, "log_upstream_job_id", "") or "").strip()
             )
+            is_generation_operation = operation_name in {
+                "api.generate",
+                "images.generations",
+                "video.generations",
+                "chat.completions",
+            }
             retryable = (
                 attempt < max_attempts
                 and client.should_retry_temporary_error(exc)
-                and not upstream_job_created
+                and (not upstream_job_created or is_generation_operation)
             )
             status_part = f"status={exc.status_code}" if exc.status_code else "status=?"
             type_part = f"type={exc.error_type or 'temporary'}"
@@ -915,6 +922,15 @@ def _run_with_token_retries(
 
         if retryable:
             delay = client._retry_delay_for_attempt(attempt)
+            if on_retry:
+                try:
+                    on_retry(attempt, retry_reason)
+                except Exception:
+                    logger.exception(
+                        "retry callback failed operation=%s attempt=%s",
+                        operation_name,
+                        attempt,
+                    )
             logger.warning(
                 "retrying operation=%s attempt=%s/%s reason=%s delay=%.2fs strategy=%s",
                 operation_name,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from typing import Optional
 
 
@@ -39,6 +38,17 @@ def size_from_ratio(ratio: str, output_resolution: str = "2K") -> dict:
     return ratio_map.get(ratio, ratio_map["16:9"])
 
 
+def _normalize_image_seeds(seeds: Optional[list[int]] = None) -> Optional[list[int]]:
+    for seed in seeds or []:
+        try:
+            value = int(seed)
+        except Exception:
+            continue
+        if 0 <= value <= 999999:
+            return [value]
+    return None
+
+
 def build_image_payload_candidates(
     *,
     prompt: str,
@@ -51,7 +61,10 @@ def build_image_payload_candidates(
     generation_metadata: Optional[dict] = None,
     generation_settings: Optional[dict] = None,
     model_specific_payload: Optional[dict] = None,
+    seeds: Optional[list[int]] = None,
 ) -> list[dict]:
+    seed_values = _normalize_image_seeds(seeds)
+
     def _merge_model_specific_payload(default_payload: dict) -> dict:
         merged = dict(default_payload)
         extra = dict(model_specific_payload or {})
@@ -73,13 +86,14 @@ def build_image_payload_candidates(
             "modelVersion": upstream_model_version,
             "n": 1,
             "prompt": prompt,
-            "seeds": [int(time.time()) % 999999],
             "size": size_from_ratio(aspect_ratio, output_resolution),
             "referenceBlobs": [],
             "output": {"storeInputs": True},
             "modelSpecificPayload": dict(model_specific_payload or {}),
             "generationMetadata": metadata,
         }
+        if seed_values:
+            payload["seeds"] = seed_values
         if source_image_ids:
             payload["referenceBlobs"] = [
                 {"id": img_id, "usage": "subject"} for img_id in source_image_ids
@@ -97,7 +111,6 @@ def build_image_payload_candidates(
         "n": 1,
         "prompt": prompt,
         "size": size_from_ratio(aspect_ratio, output_resolution),
-        "seeds": [int(time.time()) % 999999],
         "groundSearch": False,
         "output": {"storeInputs": True},
         "generationMetadata": metadata,
@@ -105,6 +118,8 @@ def build_image_payload_candidates(
             {"aspectRatio": aspect_ratio, "parameters": {"addWatermark": False}}
         ),
     }
+    if seed_values:
+        base_payload["seeds"] = seed_values
     if generation_settings:
         base_payload["generationSettings"] = dict(generation_settings)
 

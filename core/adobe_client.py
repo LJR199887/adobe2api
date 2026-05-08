@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -616,6 +617,7 @@ class AdobeClient:
         generation_metadata: Optional[dict] = None,
         generation_settings: Optional[dict] = None,
         model_specific_payload: Optional[dict] = None,
+        seeds: Optional[list[int]] = None,
     ) -> list[dict]:
         return build_image_payload_candidates(
             prompt=prompt,
@@ -628,6 +630,7 @@ class AdobeClient:
             generation_metadata=generation_metadata,
             generation_settings=generation_settings,
             model_specific_payload=model_specific_payload,
+            seeds=seeds,
         )
 
     @staticmethod
@@ -896,8 +899,9 @@ class AdobeClient:
         timeline_events: Optional[dict] = None,
         audio: Optional[dict] = None,
         reference_mode: str = "frame",
+        seeds: Optional[list[int]] = None,
     ) -> dict:
-        seed_val = int(time.time()) % 999999
+        seed_values = self._normalize_video_seeds(seeds)
         engine = str(video_conf.get("engine") or "sora2")
         upstream_model = str(
             video_conf.get("upstream_model") or "openai:firefly:colligo:sora2"
@@ -925,7 +929,6 @@ class AdobeClient:
                     )
             payload = {
                 "n": 1,
-                "seeds": [seed_val],
                 "modelId": str(video_conf.get("upstream_model_id") or "kling"),
                 "modelVersion": model_version,
                 "output": {"storeInputs": True},
@@ -939,6 +942,8 @@ class AdobeClient:
                 "generationSettings": {"aspectRatio": aspect_ratio},
                 "referenceBlobs": [],
             }
+            if seed_values:
+                payload["seeds"] = seed_values
             if has_source_image:
                 payload["referenceBlobs"] = [
                     {
@@ -956,7 +961,6 @@ class AdobeClient:
             )
             payload = {
                 "n": 1,
-                "seeds": [seed_val],
                 "modelId": "veo",
                 "modelVersion": model_version,
                 "output": {"storeInputs": True},
@@ -973,6 +977,8 @@ class AdobeClient:
                     }
                 },
             }
+            if seed_values:
+                payload["seeds"] = seed_values
             if source_image_ids:
                 if engine == "veo31-standard" and str(reference_mode) == "image":
                     for image_id in source_image_ids[:3]:
@@ -995,7 +1001,6 @@ class AdobeClient:
 
         payload = {
             "size": self._video_size(aspect_ratio, resolution),
-            "seeds": [seed_val],
             "prompt": prompt,
             "duration": int(duration),
             "generateAudio": bool(generate_audio),
@@ -1004,6 +1009,8 @@ class AdobeClient:
             "modelVersion": "sora-2",
             "output": {"storeInputs": True},
         }
+        if seed_values:
+            payload["seeds"] = seed_values
         if negative_prompt:
             payload["negativePrompt"] = negative_prompt
         if source_image_ids:
@@ -1016,6 +1023,33 @@ class AdobeClient:
                 }
                 payload["referenceBlobs"].append(blob)
         return payload
+
+    @staticmethod
+    def _normalize_video_seeds(
+        seeds: Optional[list[int]] = None,
+    ) -> Optional[list[int]]:
+        normalized: list[int] = []
+        for seed in seeds or []:
+            try:
+                value = int(seed)
+            except Exception:
+                continue
+            if 0 <= value <= 999999:
+                normalized.append(value)
+        if normalized:
+            return normalized[:1]
+        return None
+
+    @staticmethod
+    def _is_video_unsafe_error(exc: Exception) -> bool:
+        status_code = getattr(exc, "status_code", None)
+        try:
+            if int(status_code or 0) != 451:
+                return False
+        except Exception:
+            return False
+        text = str(exc or "").lower()
+        return "video_unsafe" in text or "appears to be unsafe" in text or "451" in text
 
     def generate_video(
         self,
@@ -1035,6 +1069,7 @@ class AdobeClient:
         out_path: Optional[Path] = None,
         progress_cb: Optional[Callable[[dict], None]] = None,
         return_upstream_url: bool = False,
+        seeds: Optional[list[int]] = None,
     ) -> tuple[Optional[bytes], dict]:
         payload = self._build_video_payload(
             video_conf=video_conf,
@@ -1048,6 +1083,7 @@ class AdobeClient:
             timeline_events=timeline_events,
             audio=audio,
             reference_mode=reference_mode,
+            seeds=seeds,
         )
         submit_resp = self._post_json(
             self.video_submit_url,
@@ -1198,6 +1234,13 @@ class AdobeClient:
                             pass
                     raise AdobeRequestError(f"video job failed: {latest}")
             except UpstreamTemporaryError as exc:
+                if self._is_video_unsafe_error(exc):
+                    logger.warning(
+                        "video poll returned unsafe result; retrying requires a new upstream job id=%s error=%s",
+                        upstream_job_id,
+                        str(exc),
+                    )
+                    raise
                 can_retry_same_job = self.should_retry_temporary_error(exc) and (
                     time.time() - start < timeout
                 )
@@ -1262,6 +1305,7 @@ class AdobeClient:
         out_path: Optional[Path] = None,
         progress_cb: Optional[Callable[[dict], None]] = None,
         return_upstream_url: bool = False,
+        seeds: Optional[list[int]] = None,
     ) -> tuple[Optional[bytes], dict]:
         submit_resp = None
         last_error = ""
@@ -1276,6 +1320,7 @@ class AdobeClient:
             generation_metadata=generation_metadata,
             generation_settings=generation_settings,
             model_specific_payload=model_specific_payload,
+            seeds=seeds,
         ):
             submit_resp = self._post_json(
                 self.submit_url,

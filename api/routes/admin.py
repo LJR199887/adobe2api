@@ -25,6 +25,7 @@ from api.schemas import (
     TokenAutoRefreshBatchRequest,
     TokenBatchAddRequest,
     TokenCreditsBatchRefreshRequest,
+    TokenExhaustedCleanupRequest,
     TokenInvalidCheckRequest,
     TokenRefreshBatchRequest,
 )
@@ -38,6 +39,7 @@ from core.proxy_utils import (
 
 
 logger = logging.getLogger("uvicorn.error")
+_EXHAUSTED_CLEANUP_THREAD_STARTED = False
 
 _IMPORT_REFRESH_JOB_TTL_SECONDS = 1800
 _IMPORT_REFRESH_JOB_LOCK = threading.Lock()
@@ -847,6 +849,140 @@ def build_admin_router(
             "deleted_profile_ids": list(profile_result.get("deleted_ids") or []),
         }
 
+    def _exhausted_tokens() -> list[dict]:
+        return [
+            token
+            for token in token_manager.list_all()
+            if str(token.get("status") or "").strip().lower() == "exhausted"
+        ]
+
+    def _linked_profile_ids_for_tokens(tokens: list[dict]) -> list[str]:
+        profile_ids = {
+            str(token.get("refresh_profile_id") or "").strip()
+            for token in tokens
+            if str(token.get("refresh_profile_id") or "").strip()
+        }
+        return sorted(profile_ids)
+
+    def _existing_refresh_profile_ids(profile_ids: list[str]) -> list[str]:
+        targets = {str(x or "").strip() for x in profile_ids if str(x or "").strip()}
+        if not targets:
+            return []
+        existing = {
+            str(profile.get("id") or "").strip()
+            for profile in refresh_manager.list_profiles()
+            if str(profile.get("id") or "").strip()
+        }
+        return sorted(targets & existing)
+
+    def _cleanup_exhausted_preview(tokens: list[dict] | None = None) -> dict:
+        exhausted = _exhausted_tokens() if tokens is None else list(tokens)
+        profile_ids = _existing_refresh_profile_ids(
+            _linked_profile_ids_for_tokens(exhausted)
+        )
+        return {
+            "status": "ok",
+            "exhausted_token_count": len(exhausted),
+            "refresh_profile_count": len(profile_ids),
+        }
+
+    def _delete_exhausted_tokens(
+        *,
+        include_refresh_profiles: bool = True,
+        older_than_ts: float | None = None,
+    ) -> dict:
+        exhausted = _exhausted_tokens()
+        if older_than_ts is not None:
+            filtered = []
+            for token in exhausted:
+                status_ts = 0.0
+                for key in ("exhausted_at", "updated_at", "added_at"):
+                    try:
+                        status_ts = float(token.get(key) or 0)
+                    except Exception:
+                        status_ts = 0.0
+                    if status_ts > 0:
+                        break
+                if status_ts > 0 and status_ts <= older_than_ts:
+                    filtered.append(token)
+            exhausted = filtered
+
+        token_ids = [
+            str(token.get("id") or "").strip()
+            for token in exhausted
+            if str(token.get("id") or "").strip()
+        ]
+        profile_ids = _existing_refresh_profile_ids(
+            _linked_profile_ids_for_tokens(exhausted)
+        )
+        if include_refresh_profiles and profile_ids:
+            profile_result = refresh_manager.remove_profiles_only(profile_ids)
+        else:
+            profile_result = {"deleted_ids": [], "missing_ids": profile_ids}
+        token_result = token_manager.remove_many(token_ids)
+        deleted = list(token_result.get("deleted_ids") or [])
+        missing = list(token_result.get("missing_ids") or [])
+        return {
+            "status": "ok" if not missing else "partial",
+            "candidate_count": len(exhausted),
+            "deleted_count": len(deleted),
+            "missing_count": len(missing),
+            "deleted_ids": deleted,
+            "missing_ids": missing,
+            "refresh_profile_count": len(profile_ids),
+            "deleted_refresh_profile_count": len(
+                profile_result.get("deleted_ids") or []
+            ),
+            "deleted_refresh_profile_ids": list(
+                profile_result.get("deleted_ids") or []
+            ),
+        }
+
+    def _run_exhausted_auto_cleanup_once() -> dict | None:
+        if not bool(config_manager.get("token_exhausted_auto_delete_enabled", False)):
+            return None
+        try:
+            keep_hours = int(config_manager.get("token_exhausted_auto_delete_hours", 24) or 24)
+        except Exception:
+            keep_hours = 24
+        keep_hours = max(1, min(8760, keep_hours))
+        older_than_ts = time.time() - keep_hours * 3600
+        result = _delete_exhausted_tokens(
+            include_refresh_profiles=True,
+            older_than_ts=older_than_ts,
+        )
+        if int(result.get("deleted_count") or 0) > 0:
+            logger.info(
+                "token exhausted auto cleanup completed keep_hours=%s "
+                "deleted=%s profiles_deleted=%s",
+                keep_hours,
+                result.get("deleted_count"),
+                result.get("deleted_refresh_profile_count"),
+            )
+        return result
+
+    def _start_exhausted_auto_cleanup_worker() -> None:
+        global _EXHAUSTED_CLEANUP_THREAD_STARTED
+        if _EXHAUSTED_CLEANUP_THREAD_STARTED:
+            return
+        _EXHAUSTED_CLEANUP_THREAD_STARTED = True
+
+        def worker() -> None:
+            while True:
+                try:
+                    _run_exhausted_auto_cleanup_once()
+                except Exception:
+                    logger.exception("token exhausted auto cleanup failed")
+                time.sleep(300)
+
+        threading.Thread(
+            target=worker,
+            name="token-exhausted-auto-cleanup",
+            daemon=True,
+        ).start()
+
+    _start_exhausted_auto_cleanup_worker()
+
     def disable_auto_refresh_for_token_info(token_info: dict) -> tuple[bool, str]:
         if not isinstance(token_info, dict) or not bool(token_info.get("auto_refresh")):
             return False, ""
@@ -1433,6 +1569,30 @@ def build_admin_router(
             "deleted_ids": deleted,
             "missing_ids": missing,
         }
+
+    @router.get("/api/v1/tokens/cleanup-exhausted/preview")
+    def preview_cleanup_exhausted_tokens(request: Request):
+        require_admin_auth(request)
+        return _cleanup_exhausted_preview()
+
+    @router.post("/api/v1/tokens/cleanup-exhausted")
+    def cleanup_exhausted_tokens(
+        req: TokenExhaustedCleanupRequest, request: Request
+    ):
+        require_admin_auth(request)
+        started = time.perf_counter()
+        result = _delete_exhausted_tokens(
+            include_refresh_profiles=bool(req.include_refresh_profiles)
+        )
+        logger.info(
+            "token exhausted cleanup completed candidates=%s deleted=%s "
+            "profiles_deleted=%s duration_ms=%s",
+            result.get("candidate_count"),
+            result.get("deleted_count"),
+            result.get("deleted_refresh_profile_count"),
+            round((time.perf_counter() - started) * 1000, 3),
+        )
+        return result
 
     @router.post("/api/v1/tokens/check-invalid-batch")
     def check_invalid_tokens_batch(req: TokenInvalidCheckRequest, request: Request):
@@ -2045,6 +2205,31 @@ def build_admin_router(
                 )
             update_data["token_success_auto_disable_threshold"] = (
                 token_success_auto_disable_threshold
+            )
+        if "token_exhausted_auto_delete_enabled" in incoming:
+            update_data["token_exhausted_auto_delete_enabled"] = bool(
+                incoming["token_exhausted_auto_delete_enabled"]
+            )
+        if "token_exhausted_auto_delete_hours" in incoming:
+            try:
+                token_exhausted_auto_delete_hours = int(
+                    incoming["token_exhausted_auto_delete_hours"]
+                )
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail="token_exhausted_auto_delete_hours must be an integer between 1 and 8760",
+                )
+            if (
+                token_exhausted_auto_delete_hours < 1
+                or token_exhausted_auto_delete_hours > 8760
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="token_exhausted_auto_delete_hours must be between 1 and 8760",
+                )
+            update_data["token_exhausted_auto_delete_hours"] = (
+                token_exhausted_auto_delete_hours
             )
         if "batch_concurrency" in incoming:
             try:

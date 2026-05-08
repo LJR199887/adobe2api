@@ -34,6 +34,8 @@ class ConfigManager:
             "token_rotation_strategy": "round_robin",
             "token_success_auto_disable_enabled": False,
             "token_success_auto_disable_threshold": 2,
+            "token_exhausted_auto_delete_enabled": False,
+            "token_exhausted_auto_delete_hours": 24,
             "batch_concurrency": 5,
             "generated_max_size_mb": 1024,
             "generated_prune_size_mb": 200,

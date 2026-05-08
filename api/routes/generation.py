@@ -105,6 +105,37 @@ def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | Non
     return locale, timeline_events, audio
 
 
+def _resolve_generation_seeds(data: dict) -> list[int] | None:
+    raw_seeds = data.get("seeds")
+    if raw_seeds is None:
+        raw_seed = data.get("seed")
+        if raw_seed is None or str(raw_seed).strip() == "":
+            return None
+        raw_seeds = [raw_seed]
+    elif not isinstance(raw_seeds, list):
+        raw_seeds = [raw_seeds]
+
+    seeds: list[int] = []
+    for item in raw_seeds:
+        if item is None or str(item).strip() == "":
+            continue
+        try:
+            seed = int(str(item).strip())
+        except Exception:
+            raise HTTPException(status_code=400, detail="seed must be an integer")
+        if seed < 0 or seed > 999999:
+            raise HTTPException(
+                status_code=400,
+                detail="seed must be between 0 and 999999",
+            )
+        seeds.append(seed)
+    return seeds[:1] or None
+
+
+def _resolve_video_seeds(data: dict) -> list[int] | None:
+    return _resolve_generation_seeds(data)
+
+
 def _coerce_video_duration(value: Any, allowed: list[int], default: int) -> int:
     if value is None or str(value).strip() == "":
         return default
@@ -410,12 +441,17 @@ def build_generation_router(
             normalized_data, model_id
         )
         model_conf = resolve_model(resolved_model_id)
+        image_seeds = _resolve_generation_seeds(normalized_data)
 
         try:
             input_images = load_input_images(normalized_data.get("messages") or [])
             set_request_task_progress(
                 request, task_status="IN_PROGRESS", task_progress=0.0
             )
+            image_retry_state = {"force_random_seed": False}
+
+            def _force_random_image_seed(_attempt: int, _reason: str) -> None:
+                image_retry_state["force_random_seed"] = True
 
             def _run_once(token: str):
                 source_image_ids: list[str] = []
@@ -468,6 +504,11 @@ def build_generation_router(
                     out_path=None if direct_result_url else out_path,
                     progress_cb=_image_progress_cb,
                     return_upstream_url=direct_result_url,
+                    seeds=(
+                        None
+                        if image_retry_state.get("force_random_seed")
+                        else image_seeds
+                    ),
                 )
                 upstream_image_url = _extract_upstream_asset_url(meta, "image")
                 if imgbed_upload_enabled:
@@ -505,6 +546,7 @@ def build_generation_router(
                 request=request,
                 operation_name="images.generations",
                 run_once=_run_once,
+                on_retry=_force_random_image_seed,
             )
 
         except quota_error_cls:
@@ -690,6 +732,7 @@ def build_generation_router(
             prompt,
         )
         input_images = load_input_images(normalized_data.get("messages") or [])
+        image_seeds = _resolve_generation_seeds(normalized_data)
 
         job = store.create(prompt=prompt, aspect_ratio=ratio)
         request_started = time.time()
@@ -709,6 +752,7 @@ def build_generation_router(
             max_attempts = max(1, int(max_attempts))
             last_error = "No active tokens available in the pool"
             final_status_code = 503
+            force_random_image_seed = False
 
             for attempt in range(1, max_attempts + 1):
                 if attempt == 1 and first_token:
@@ -758,6 +802,7 @@ def build_generation_router(
                         source_image_ids=source_image_ids,
                         out_path=None if direct_result_url else out_path,
                         return_upstream_url=direct_result_url,
+                        seeds=None if force_random_image_seed else image_seeds,
                     )
                     upstream_image_url = _extract_upstream_asset_url(meta, "image")
                     if imgbed_upload_enabled:
@@ -812,11 +857,15 @@ def build_generation_router(
                     last_error = "Token quota exhausted."
                     final_status_code = 429
                     retryable = attempt < max_attempts
+                    if retryable:
+                        force_random_image_seed = True
                 except auth_error_cls:
                     _report_token_invalid(token)
                     last_error = "Token invalid or expired."
                     final_status_code = 401
                     retryable = attempt < max_attempts
+                    if retryable:
+                        force_random_image_seed = True
                 except upstream_temp_error_cls as exc:
                     last_error = str(exc)
                     final_status_code = int(getattr(exc, "status_code", 503) or 503)
@@ -824,6 +873,8 @@ def build_generation_router(
                         attempt < max_attempts
                         and client.should_retry_temporary_error(exc)
                     )
+                    if retryable:
+                        force_random_image_seed = True
                 except Exception as exc:
                     final_status_code = 500
                     set_request_task_progress(
@@ -1248,6 +1299,7 @@ def build_generation_router(
         video_locale, timeline_events, video_audio = _resolve_sora_video_extras(
             normalized_data
         )
+        video_seeds = _resolve_video_seeds(normalized_data)
 
         job = store.create(
             prompt=prompt,
@@ -1272,6 +1324,7 @@ def build_generation_router(
             max_attempts = max(1, int(max_attempts))
             last_error = "No active tokens available in the pool"
             final_status_code = 503
+            force_random_video_seed = False
             try:
                 input_images = load_input_images(normalized_data.get("messages") or [])
                 max_video_inputs = _max_video_input_images(
@@ -1371,6 +1424,7 @@ def build_generation_router(
                         except Exception:
                             old_size = 0
 
+                    attempt_video_seeds = None if force_random_video_seed else video_seeds
                     video_bytes, video_meta = client.generate_video(
                         token=token,
                         video_conf=resolved_video_conf or {},
@@ -1388,6 +1442,7 @@ def build_generation_router(
                         out_path=None if direct_result_url else tmp_path,
                         progress_cb=_video_progress_cb,
                         return_upstream_url=direct_result_url,
+                        seeds=attempt_video_seeds,
                     )
                     upstream_video_url = _extract_upstream_asset_url(
                         video_meta, "video"
@@ -1447,11 +1502,15 @@ def build_generation_router(
                     last_error = "Token quota exhausted."
                     final_status_code = 429
                     retryable = attempt < max_attempts
+                    if retryable:
+                        force_random_video_seed = True
                 except auth_error_cls:
                     _report_token_invalid(token)
                     last_error = "Token invalid or expired."
                     final_status_code = 401
                     retryable = attempt < max_attempts
+                    if retryable:
+                        force_random_video_seed = True
                 except upstream_temp_error_cls as exc:
                     last_error = str(exc)
                     final_status_code = int(getattr(exc, "status_code", 503) or 503)
@@ -1459,6 +1518,8 @@ def build_generation_router(
                         attempt < max_attempts
                         and client.should_retry_temporary_error(exc)
                     )
+                    if retryable:
+                        force_random_video_seed = True
                 except Exception as exc:
                     final_status_code = 500
                     set_request_task_progress(
@@ -1625,12 +1686,14 @@ def build_generation_router(
         video_locale, timeline_events, video_audio = _resolve_sora_video_extras(
             normalized_data
         )
+        video_seeds = _resolve_video_seeds(normalized_data)
 
         try:
             input_images = load_input_images(normalized_data.get("messages") or [])
             set_request_task_progress(
                 request, task_status="IN_PROGRESS", task_progress=0.0
             )
+            video_retry_state = {"force_random_seed": False}
 
             def _run_once(token: str):
                 source_image_ids: list[str] = []
@@ -1676,24 +1739,32 @@ def build_generation_router(
                     except Exception:
                         old_size = 0
 
-                video_bytes, video_meta = client.generate_video(
-                    token=token,
-                    video_conf=resolved_video_conf or {},
-                    prompt=prompt,
-                    aspect_ratio=ratio,
-                    duration=duration,
-                    source_image_ids=source_image_ids,
-                    timeout=max(int(client.generate_timeout), 600),
-                    negative_prompt=negative_prompt,
-                    generate_audio=generate_audio,
-                    locale=video_locale,
-                    timeline_events=timeline_events,
-                    audio=video_audio,
-                    reference_mode=video_reference_mode,
-                    out_path=None if direct_result_url else tmp_path,
-                    progress_cb=_video_progress_cb,
-                    return_upstream_url=direct_result_url,
+                attempt_video_seeds = (
+                    None if video_retry_state.get("force_random_seed") else video_seeds
                 )
+                try:
+                    video_bytes, video_meta = client.generate_video(
+                        token=token,
+                        video_conf=resolved_video_conf or {},
+                        prompt=prompt,
+                        aspect_ratio=ratio,
+                        duration=duration,
+                        source_image_ids=source_image_ids,
+                        timeout=max(int(client.generate_timeout), 600),
+                        negative_prompt=negative_prompt,
+                        generate_audio=generate_audio,
+                        locale=video_locale,
+                        timeline_events=timeline_events,
+                        audio=video_audio,
+                        reference_mode=video_reference_mode,
+                        out_path=None if direct_result_url else tmp_path,
+                        progress_cb=_video_progress_cb,
+                        return_upstream_url=direct_result_url,
+                        seeds=attempt_video_seeds,
+                    )
+                except (quota_error_cls, auth_error_cls, upstream_temp_error_cls):
+                    video_retry_state["force_random_seed"] = True
+                    raise
                 upstream_video_url = _extract_upstream_asset_url(video_meta, "video")
                 video_ext = video_ext_from_meta(video_meta)
                 if imgbed_upload_enabled:
@@ -2016,12 +2087,17 @@ def build_generation_router(
             data, model_id or None
         )
         image_model_conf = resolve_model(resolved_model_id)
+        image_seeds = _resolve_generation_seeds(data)
 
         try:
             input_images = load_input_images(data.get("messages") or [])
             set_request_task_progress(
                 request, task_status="IN_PROGRESS", task_progress=0.0
             )
+            image_retry_state = {"force_random_seed": False}
+
+            def _force_random_image_seed(_attempt: int, _reason: str) -> None:
+                image_retry_state["force_random_seed"] = True
 
             def _run_once(token: str):
                 source_image_ids: list[str] = []
@@ -2080,6 +2156,11 @@ def build_generation_router(
                     out_path=None if direct_result_url else out_path,
                     progress_cb=_image_progress_cb,
                     return_upstream_url=direct_result_url,
+                    seeds=(
+                        None
+                        if image_retry_state.get("force_random_seed")
+                        else image_seeds
+                    ),
                 )
                 upstream_image_url = _extract_upstream_asset_url(meta, "image")
                 if imgbed_upload_enabled:
@@ -2141,6 +2222,7 @@ def build_generation_router(
                 request=request,
                 operation_name="chat.completions",
                 run_once=_run_once,
+                on_retry=_force_random_image_seed,
             )
         except quota_error_cls:
             error_code = str(

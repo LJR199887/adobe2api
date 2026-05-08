@@ -46,6 +46,10 @@ class TokenRefreshBatchRequest(BaseModel):
     ids: Optional[List[str]] = None
 
 
+class TokenExhaustedCleanupRequest(BaseModel):
+    include_refresh_profiles: bool = True
+
+
 class ConfigUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     admin_username: Optional[str] = None
@@ -65,6 +69,8 @@ class ConfigUpdateRequest(BaseModel):
     token_rotation_strategy: Optional[str] = None
     token_success_auto_disable_enabled: Optional[bool] = None
     token_success_auto_disable_threshold: Optional[int] = None
+    token_exhausted_auto_delete_enabled: Optional[bool] = None
+    token_exhausted_auto_delete_hours: Optional[int] = None
     batch_concurrency: Optional[int] = None
     generated_max_size_mb: Optional[int] = None
     generated_prune_size_mb: Optional[int] = None

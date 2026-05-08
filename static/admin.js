@@ -63,6 +63,7 @@
   const openCookieImportBtn = document.getElementById("openCookieImportBtn");
   const exportTokensBtn = document.getElementById("exportTokensBtn");
   const exportCookiesBtn = document.getElementById("exportCookiesBtn");
+  const cleanupExhaustedTokensBtn = document.getElementById("cleanupExhaustedTokensBtn");
   const deleteTokensBatchBtn = document.getElementById("deleteTokensBatchBtn");
   const enableAutoRefreshBatchBtn = document.getElementById("enableAutoRefreshBatchBtn");
   const disableAutoRefreshBatchBtn = document.getElementById("disableAutoRefreshBatchBtn");
@@ -79,6 +80,13 @@
   const taskReportSummary = document.getElementById("taskReportSummary");
   const taskReportCurrent = document.getElementById("taskReportCurrent");
   const taskReportItems = document.getElementById("taskReportItems");
+  const cleanupExhaustedModal = document.getElementById("cleanupExhaustedModal");
+  const cleanupExhaustedCloseBtn = document.getElementById("cleanupExhaustedCloseBtn");
+  const cleanupExhaustedConfirmBtn = document.getElementById("cleanupExhaustedConfirmBtn");
+  const cleanupExhaustedIncludeProfiles = document.getElementById("cleanupExhaustedIncludeProfiles");
+  const cleanupExhaustedTokenCount = document.getElementById("cleanupExhaustedTokenCount");
+  const cleanupExhaustedProfileCount = document.getElementById("cleanupExhaustedProfileCount");
+  const cleanupExhaustedMsg = document.getElementById("cleanupExhaustedMsg");
   const refreshBtn = document.getElementById("refreshBtn");
   const refreshCreditsBatchBtn = document.getElementById("refreshCreditsBatchBtn");
   const tokenSelectAll = document.getElementById("tokenSelectAll");
@@ -274,6 +282,27 @@
     if (!modalEl) return;
     modalEl.classList.remove("open");
     modalEl.setAttribute("aria-hidden", "true");
+  }
+
+  let cleanupExhaustedPreview = { exhausted_token_count: 0, refresh_profile_count: 0 };
+
+  function renderCleanupExhaustedPreview() {
+    const tokenCount = Number(cleanupExhaustedPreview.exhausted_token_count || 0);
+    const profileCount = cleanupExhaustedIncludeProfiles?.checked
+      ? Number(cleanupExhaustedPreview.refresh_profile_count || 0)
+      : 0;
+    if (cleanupExhaustedTokenCount) cleanupExhaustedTokenCount.textContent = String(tokenCount);
+    if (cleanupExhaustedProfileCount) cleanupExhaustedProfileCount.textContent = String(profileCount);
+    if (cleanupExhaustedConfirmBtn) cleanupExhaustedConfirmBtn.disabled = tokenCount <= 0;
+  }
+
+  async function loadCleanupExhaustedPreview() {
+    const res = await fetch("/api/v1/tokens/cleanup-exhausted/preview");
+    if (!res.ok) {
+      throw new Error("加载清理预览失败");
+    }
+    cleanupExhaustedPreview = await res.json();
+    renderCleanupExhaustedPreview();
   }
 
   function formatExpiry(token) {
@@ -850,6 +879,71 @@
     });
   }
 
+  if (cleanupExhaustedIncludeProfiles) {
+    cleanupExhaustedIncludeProfiles.addEventListener("change", renderCleanupExhaustedPreview);
+  }
+
+  if (cleanupExhaustedCloseBtn) {
+    cleanupExhaustedCloseBtn.addEventListener("click", () => closeDialog(cleanupExhaustedModal));
+  }
+
+  if (cleanupExhaustedTokensBtn) {
+    cleanupExhaustedTokensBtn.addEventListener("click", async () => {
+      cleanupExhaustedTokensBtn.disabled = true;
+      showMsg(cleanupExhaustedMsg, "", false, { duration: 0 });
+      try {
+        if (cleanupExhaustedIncludeProfiles) cleanupExhaustedIncludeProfiles.checked = true;
+        await loadCleanupExhaustedPreview();
+        openDialog(cleanupExhaustedModal);
+      } catch (err) {
+        showToast(err.message || "加载清理预览失败", true);
+      } finally {
+        cleanupExhaustedTokensBtn.disabled = false;
+      }
+    });
+  }
+
+  if (cleanupExhaustedConfirmBtn) {
+    cleanupExhaustedConfirmBtn.addEventListener("click", async () => {
+      const tokenCount = Number(cleanupExhaustedPreview.exhausted_token_count || 0);
+      if (tokenCount <= 0) {
+        showMsg(cleanupExhaustedMsg, "当前没有额度耗尽 Token", true);
+        return;
+      }
+      const includeProfiles = Boolean(cleanupExhaustedIncludeProfiles?.checked);
+      cleanupExhaustedConfirmBtn.disabled = true;
+      try {
+        const res = await fetch("/api/v1/tokens/cleanup-exhausted", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ include_refresh_profiles: includeProfiles }),
+        });
+        if (!res.ok) {
+          let detail = "清理额度耗尽失败";
+          try {
+            const body = await res.json();
+            detail = body.detail || JSON.stringify(body);
+          } catch (_) {
+            detail = await res.text();
+          }
+          throw new Error(detail || "清理额度耗尽失败");
+        }
+        const data = await res.json();
+        const deleted = Number(data.deleted_count || 0);
+        const deletedProfiles = Number(data.deleted_refresh_profile_count || 0);
+        tokenSelectedIds.clear();
+        closeDialog(cleanupExhaustedModal);
+        await loadTokens();
+        showToast(`清理完成：删除 ${deleted} 个 Token，刷新配置 ${deletedProfiles} 个`, false, { duration: 5000 });
+      } catch (err) {
+        showMsg(cleanupExhaustedMsg, err.message || "清理额度耗尽失败", true, { duration: 0 });
+        showToast(err.message || "清理额度耗尽失败", true);
+      } finally {
+        cleanupExhaustedConfirmBtn.disabled = false;
+      }
+    });
+  }
+
   if (deleteTokensBatchBtn) {
     deleteTokensBatchBtn.addEventListener("click", async () => {
       const selectedIds = Array.from(tokenSelectedIds);
@@ -993,6 +1087,8 @@
   const confTokenRotationStrategy = document.getElementById("confTokenRotationStrategy");
   const confTokenSuccessAutoDisableEnabled = document.getElementById("confTokenSuccessAutoDisableEnabled");
   const confTokenSuccessAutoDisableThreshold = document.getElementById("confTokenSuccessAutoDisableThreshold");
+  const confTokenExhaustedAutoDeleteEnabled = document.getElementById("confTokenExhaustedAutoDeleteEnabled");
+  const confTokenExhaustedAutoDeleteHours = document.getElementById("confTokenExhaustedAutoDeleteHours");
   const overwriteSuccessCountsBtn = document.getElementById("overwriteSuccessCountsBtn");
   const overwriteSuccessCountsResult = document.getElementById("overwriteSuccessCountsResult");
   const confRefreshIntervalHours = document.getElementById("confRefreshIntervalHours");
@@ -1189,6 +1285,12 @@
         if (confTokenSuccessAutoDisableThreshold) {
           confTokenSuccessAutoDisableThreshold.value = Number(data.token_success_auto_disable_threshold || 2);
         }
+        if (confTokenExhaustedAutoDeleteEnabled) {
+          confTokenExhaustedAutoDeleteEnabled.checked = Boolean(data.token_exhausted_auto_delete_enabled || false);
+        }
+        if (confTokenExhaustedAutoDeleteHours) {
+          confTokenExhaustedAutoDeleteHours.value = Number(data.token_exhausted_auto_delete_hours || 24);
+        }
         confRefreshIntervalHours.value = Number(data.refresh_interval_hours || 15);
         currentBatchConcurrency = Math.max(1, Math.min(100, Number(data.batch_concurrency || 5)));
         confBatchConcurrency.value = currentBatchConcurrency;
@@ -1241,6 +1343,8 @@
         token_rotation_strategy: String(confTokenRotationStrategy.value || "round_robin").trim() || "round_robin",
         token_success_auto_disable_enabled: Boolean(confTokenSuccessAutoDisableEnabled?.checked),
         token_success_auto_disable_threshold: Math.max(1, Math.min(100000, Number(confTokenSuccessAutoDisableThreshold?.value || 2))),
+        token_exhausted_auto_delete_enabled: Boolean(confTokenExhaustedAutoDeleteEnabled?.checked),
+        token_exhausted_auto_delete_hours: Math.max(1, Math.min(8760, Number(confTokenExhaustedAutoDeleteHours?.value || 24))),
         refresh_interval_hours: Number(confRefreshIntervalHours.value || 15),
         batch_concurrency: Math.max(1, Math.min(100, Number(confBatchConcurrency.value || 5))),
         generated_max_size_mb: Math.max(100, Math.min(102400, Number(confGeneratedMaxSizeMb.value || 1024))),
@@ -1298,6 +1402,9 @@
       }
       if (!Number.isInteger(payload.token_success_auto_disable_threshold) || payload.token_success_auto_disable_threshold < 1 || payload.token_success_auto_disable_threshold > 100000) {
         throw new Error("Token 自动禁用成功次数必须是 1-100000 的整数");
+      }
+      if (!Number.isInteger(payload.token_exhausted_auto_delete_hours) || payload.token_exhausted_auto_delete_hours < 1 || payload.token_exhausted_auto_delete_hours > 8760) {
+        throw new Error("额度耗尽保留时长必须是 1-8760 的整数小时");
       }
 
       const res = await fetch("/api/v1/config", {

@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -896,8 +897,9 @@ class AdobeClient:
         timeline_events: Optional[dict] = None,
         audio: Optional[dict] = None,
         reference_mode: str = "frame",
+        seeds: Optional[list[int]] = None,
     ) -> dict:
-        seed_val = int(time.time()) % 999999
+        seed_values = self._normalize_video_seeds(seeds)
         engine = str(video_conf.get("engine") or "sora2")
         upstream_model = str(
             video_conf.get("upstream_model") or "openai:firefly:colligo:sora2"
@@ -925,7 +927,7 @@ class AdobeClient:
                     )
             payload = {
                 "n": 1,
-                "seeds": [seed_val],
+                "seeds": seed_values,
                 "modelId": str(video_conf.get("upstream_model_id") or "kling"),
                 "modelVersion": model_version,
                 "output": {"storeInputs": True},
@@ -956,7 +958,7 @@ class AdobeClient:
             )
             payload = {
                 "n": 1,
-                "seeds": [seed_val],
+                "seeds": seed_values,
                 "modelId": "veo",
                 "modelVersion": model_version,
                 "output": {"storeInputs": True},
@@ -995,7 +997,7 @@ class AdobeClient:
 
         payload = {
             "size": self._video_size(aspect_ratio, resolution),
-            "seeds": [seed_val],
+            "seeds": seed_values,
             "prompt": prompt,
             "duration": int(duration),
             "generateAudio": bool(generate_audio),
@@ -1017,6 +1019,20 @@ class AdobeClient:
                 payload["referenceBlobs"].append(blob)
         return payload
 
+    @staticmethod
+    def _normalize_video_seeds(seeds: Optional[list[int]] = None) -> list[int]:
+        normalized: list[int] = []
+        for seed in seeds or []:
+            try:
+                value = int(seed)
+            except Exception:
+                continue
+            if 0 <= value <= 999999:
+                normalized.append(value)
+        if normalized:
+            return normalized[:1]
+        return [random.SystemRandom().randint(1, 999999)]
+
     def generate_video(
         self,
         token: str,
@@ -1035,6 +1051,7 @@ class AdobeClient:
         out_path: Optional[Path] = None,
         progress_cb: Optional[Callable[[dict], None]] = None,
         return_upstream_url: bool = False,
+        seeds: Optional[list[int]] = None,
     ) -> tuple[Optional[bytes], dict]:
         payload = self._build_video_payload(
             video_conf=video_conf,
@@ -1048,6 +1065,7 @@ class AdobeClient:
             timeline_events=timeline_events,
             audio=audio,
             reference_mode=reference_mode,
+            seeds=seeds,
         )
         submit_resp = self._post_json(
             self.video_submit_url,

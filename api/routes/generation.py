@@ -105,6 +105,33 @@ def _resolve_sora_video_extras(data: dict) -> tuple[str, dict | None, dict | Non
     return locale, timeline_events, audio
 
 
+def _resolve_video_seeds(data: dict) -> list[int] | None:
+    raw_seeds = data.get("seeds")
+    if raw_seeds is None:
+        raw_seed = data.get("seed")
+        if raw_seed is None or str(raw_seed).strip() == "":
+            return None
+        raw_seeds = [raw_seed]
+    elif not isinstance(raw_seeds, list):
+        raw_seeds = [raw_seeds]
+
+    seeds: list[int] = []
+    for item in raw_seeds:
+        if item is None or str(item).strip() == "":
+            continue
+        try:
+            seed = int(str(item).strip())
+        except Exception:
+            raise HTTPException(status_code=400, detail="seed must be an integer")
+        if seed < 0 or seed > 999999:
+            raise HTTPException(
+                status_code=400,
+                detail="seed must be between 0 and 999999",
+            )
+        seeds.append(seed)
+    return seeds[:1] or None
+
+
 def _coerce_video_duration(value: Any, allowed: list[int], default: int) -> int:
     if value is None or str(value).strip() == "":
         return default
@@ -1248,6 +1275,7 @@ def build_generation_router(
         video_locale, timeline_events, video_audio = _resolve_sora_video_extras(
             normalized_data
         )
+        video_seeds = _resolve_video_seeds(normalized_data)
 
         job = store.create(
             prompt=prompt,
@@ -1388,6 +1416,7 @@ def build_generation_router(
                         out_path=None if direct_result_url else tmp_path,
                         progress_cb=_video_progress_cb,
                         return_upstream_url=direct_result_url,
+                        seeds=video_seeds,
                     )
                     upstream_video_url = _extract_upstream_asset_url(
                         video_meta, "video"
@@ -1625,6 +1654,7 @@ def build_generation_router(
         video_locale, timeline_events, video_audio = _resolve_sora_video_extras(
             normalized_data
         )
+        video_seeds = _resolve_video_seeds(normalized_data)
 
         try:
             input_images = load_input_images(normalized_data.get("messages") or [])
@@ -1693,6 +1723,7 @@ def build_generation_router(
                     out_path=None if direct_result_url else tmp_path,
                     progress_cb=_video_progress_cb,
                     return_upstream_url=direct_result_url,
+                    seeds=video_seeds,
                 )
                 upstream_video_url = _extract_upstream_asset_url(video_meta, "video")
                 video_ext = video_ext_from_meta(video_meta)

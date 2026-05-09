@@ -2409,7 +2409,8 @@ def build_admin_router(
             refresh_started = time.perf_counter()
             try:
                 refresh_result = refresh_manager.refresh_once(
-                    str(profile.get("id") or "")
+                    str(profile.get("id") or ""),
+                    refresh_credits=False,
                 )
             except Exception as exc:
                 refresh_error = str(exc)

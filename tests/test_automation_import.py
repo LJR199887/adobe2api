@@ -35,8 +35,10 @@ class DummyRefreshManager:
             "account": {"email": "account@example.com"},
         }
 
-    def refresh_once(self, profile_id):
-        self.refreshes.append(profile_id)
+    def refresh_once(self, profile_id, refresh_credits=True):
+        self.refreshes.append(
+            {"profile_id": profile_id, "refresh_credits": refresh_credits}
+        )
         return {
             "status": "ok",
             "profile_id": profile_id,
@@ -44,6 +46,7 @@ class DummyRefreshManager:
             "profile_email": "account@example.com",
             "token_created": True,
             "token_duplicate": False,
+            "credits_skipped": not refresh_credits,
             "timing": {},
         }
 
@@ -105,7 +108,10 @@ def test_automation_import_cookie_uses_token_pool_key_without_admin_session():
     assert payload["token_duplicate"] is False
     assert payload["profile_id"] == "profile-1"
     assert refresh_manager.imports == [{"cookie": "a=1; b=2", "name": "Account A"}]
-    assert refresh_manager.refreshes == ["profile-1"]
+    assert refresh_manager.refreshes == [
+        {"profile_id": "profile-1", "refresh_credits": False}
+    ]
+    assert payload["refresh_result"]["credits_skipped"] is True
 
 
 def test_automation_import_cookie_rejects_wrong_key():

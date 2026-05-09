@@ -2559,11 +2559,9 @@ def build_admin_router(
             result["profile_email"] = str(account.get("email") or "")
         return result
 
-    @router.post("/api/v1/refresh-profiles/import-cookie-batch")
-    def refresh_profiles_import_cookie_batch(
-        req: RefreshCookieBatchImportRequest, request: Request
-    ):
-        require_admin_auth(request)
+    def import_cookies_batch_and_queue_refresh(
+        req: RefreshCookieBatchImportRequest,
+    ) -> Dict[str, Any]:
         if not req.items:
             raise HTTPException(status_code=400, detail="items is required")
 
@@ -2662,9 +2660,31 @@ def build_admin_router(
         result = _build_import_refresh_payload(job_id) or {}
         return result
 
+    @router.post("/api/v1/refresh-profiles/import-cookie-batch")
+    def refresh_profiles_import_cookie_batch(
+        req: RefreshCookieBatchImportRequest, request: Request
+    ):
+        require_admin_auth(request)
+        return import_cookies_batch_and_queue_refresh(req)
+
+    @router.post("/api/v1/automation/import-cookie-batch")
+    def automation_import_cookie_batch(
+        req: RefreshCookieBatchImportRequest, request: Request
+    ):
+        require_automation_import_auth(request)
+        return import_cookies_batch_and_queue_refresh(req)
+
     @router.get("/api/v1/refresh-profiles/import-cookie-jobs/{job_id}")
     def refresh_profiles_import_cookie_job(job_id: str, request: Request):
         require_admin_auth(request)
+        payload = _build_import_refresh_payload(job_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail="import job not found")
+        return payload
+
+    @router.get("/api/v1/automation/import-cookie-jobs/{job_id}")
+    def automation_import_cookie_job(job_id: str, request: Request):
+        require_automation_import_auth(request)
         payload = _build_import_refresh_payload(job_id)
         if payload is None:
             raise HTTPException(status_code=404, detail="import job not found")

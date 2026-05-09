@@ -24,6 +24,9 @@ class DummyRefreshManager:
         self.imports = []
         self.refreshes = []
 
+    def cookie_fingerprint(self, cookie):
+        return str(cookie or "").strip()
+
     def import_cookie(self, cookie, name=None):
         self.imports.append({"cookie": cookie, "name": name})
         if not cookie:
@@ -49,6 +52,36 @@ class DummyRefreshManager:
             "credits_skipped": not refresh_credits,
             "timing": {},
         }
+
+    def import_cookies_batch(self, entries):
+        result = []
+        for entry in entries:
+            cookie = entry.get("cookie")
+            name = entry.get("name")
+            try:
+                imported = self.import_cookie(cookie, name=name)
+                result.append(
+                    {
+                        "index": entry.get("index"),
+                        "imported": imported,
+                        "failed": None,
+                        "timing": {"profile_import_ms": 1},
+                    }
+                )
+            except ValueError as exc:
+                result.append(
+                    {
+                        "index": entry.get("index"),
+                        "imported": None,
+                        "failed": {
+                            "index": entry.get("index"),
+                            "name": name,
+                            "detail": str(exc),
+                        },
+                        "timing": {"profile_import_ms": 1},
+                    }
+                )
+        return result
 
 
 class DummyStore:
@@ -124,6 +157,42 @@ def test_automation_import_cookie_rejects_wrong_key():
     )
 
     assert response.status_code == 401
+
+
+def test_automation_import_cookie_batch_uses_token_pool_key_without_admin_session():
+    refresh_manager = DummyRefreshManager()
+    client = build_client(DummyConfigManager(), refresh_manager)
+
+    response = client.post(
+        "/api/v1/automation/import-cookie-batch",
+        headers={"X-Token-Pool-Key": "import-secret"},
+        json={
+            "items": [
+                {"name": "Account A", "cookie": "a=1"},
+                {"name": "Account B", "cookie": "b=2"},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] in {"queued", "running", "ok"}
+    job_id = payload["background_refresh"]["job_id"]
+    assert job_id
+    assert payload["total"] == 2
+    assert refresh_manager.imports == [
+        {"cookie": "a=1", "name": "Account A"},
+        {"cookie": "b=2", "name": "Account B"},
+    ]
+
+    job_response = client.get(
+        f"/api/v1/automation/import-cookie-jobs/{job_id}",
+        headers={"Authorization": "Bearer import-secret"},
+    )
+
+    assert job_response.status_code == 200
+    job_payload = job_response.json()
+    assert job_payload["background_refresh"]["job_id"] == job_id
 
 
 def test_automation_import_cookie_is_disabled_without_configured_key():

@@ -39,6 +39,22 @@ curl -X POST "http://127.0.0.1:6001/api/v1/automation/import-cookie" \
 
 也可以使用请求头 `X-Token-Pool-Key: <automation_import_key>`。
 
+批量导入：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/automation/import-cookie-batch" \
+  -H "Authorization: Bearer <automation_import_key>" \
+  -H "Content-Type: application/json" \
+  -d '{"items":[{"name":"account-a","cookie":"k1=v1; k2=v2"},{"name":"account-b","cookie":"k3=v3; k4=v4"}]}'
+```
+
+批量接口会返回 `background_refresh.job_id`，可继续查询任务进度：
+
+```bash
+curl -X GET "http://127.0.0.1:6001/api/v1/automation/import-cookie-jobs/<job_id>" \
+  -H "Authorization: Bearer <automation_import_key>"
+```
+
 ## 无痕窗口支持
 
 插件会从当前活动标签页所在的 Cookie 存储中导出 Cookie。如果你在无痕窗口里打开 Adobe 或 Firefly，并从无痕标签页打开插件，导出的就是无痕窗口里的 Cookie。

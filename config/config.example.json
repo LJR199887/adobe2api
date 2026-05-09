@@ -1,5 +1,6 @@
 {
   "api_key": "your-api-key",
+  "automation_import_key": "your-token-pool-import-key",
   "admin_username": "admin",
   "admin_password": "admin",
   "admin_session_secret": "adobe2api-change-this-session-secret",

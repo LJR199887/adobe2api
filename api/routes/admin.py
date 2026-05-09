@@ -800,6 +800,26 @@ def build_admin_router(
             value = 5
         return max(1, min(100, value))
 
+    def extract_automation_import_key(request: Request) -> str:
+        auth = (request.headers.get("authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        for header_name in ("x-token-pool-key", "x-automation-key"):
+            value = (request.headers.get(header_name) or "").strip()
+            if value:
+                return value
+        return ""
+
+    def require_automation_import_auth(request: Request) -> None:
+        required = str(config_manager.get("automation_import_key", "") or "").strip()
+        if not required:
+            raise HTTPException(
+                status_code=403,
+                detail="automation_import_key is not configured",
+            )
+        if extract_automation_import_key(request) != required:
+            raise HTTPException(status_code=401, detail="Invalid automation import key")
+
     def delete_token_and_linked_profile(token_id: str) -> bool:
         token_info = token_manager.get_by_id(token_id)
         if not token_info:
@@ -2053,6 +2073,10 @@ def build_admin_router(
         update_data = {}
         if "api_key" in incoming:
             update_data["api_key"] = str(incoming["api_key"] or "").strip()
+        if "automation_import_key" in incoming:
+            update_data["automation_import_key"] = str(
+                incoming["automation_import_key"] or ""
+            ).strip()
         if "admin_username" in incoming:
             admin_username = str(incoming["admin_username"] or "").strip()
             if not admin_username:
@@ -2372,12 +2396,8 @@ def build_admin_router(
             "items": exported,
         }
 
-    @router.post("/api/v1/refresh-profiles/import-cookie")
-    def refresh_profiles_import_cookie(
-        req: RefreshCookieImportRequest, request: Request
-    ):
+    def import_cookie_and_refresh(req: RefreshCookieImportRequest) -> Dict[str, Any]:
         route_started = time.perf_counter()
-        require_admin_auth(request)
         profile_import_ms = 0.0
         refresh_call_ms = 0.0
         try:
@@ -2503,6 +2523,40 @@ def build_admin_router(
                 _elapsed_ms(route_started),
             )
             raise HTTPException(status_code=400, detail=str(exc))
+
+    @router.post("/api/v1/refresh-profiles/import-cookie")
+    def refresh_profiles_import_cookie(
+        req: RefreshCookieImportRequest, request: Request
+    ):
+        require_admin_auth(request)
+        return import_cookie_and_refresh(req)
+
+    @router.post("/api/v1/automation/import-cookie")
+    def automation_import_cookie(req: RefreshCookieImportRequest, request: Request):
+        require_automation_import_auth(request)
+        result = import_cookie_and_refresh(req)
+        refresh_result = (
+            result.get("refresh_result") if isinstance(result, dict) else None
+        )
+        profile = result.get("profile") if isinstance(result, dict) else None
+        if isinstance(refresh_result, dict):
+            result["token_added"] = bool(refresh_result.get("token_created"))
+            result["token_duplicate"] = bool(refresh_result.get("token_duplicate"))
+            result["profile_id"] = str(refresh_result.get("profile_id") or "")
+            result["profile_name"] = str(refresh_result.get("profile_name") or "")
+            result["profile_email"] = str(refresh_result.get("profile_email") or "")
+        elif isinstance(profile, dict):
+            account = (
+                profile.get("account")
+                if isinstance(profile.get("account"), dict)
+                else {}
+            )
+            result["token_added"] = False
+            result["token_duplicate"] = False
+            result["profile_id"] = str(profile.get("id") or "")
+            result["profile_name"] = str(profile.get("name") or "")
+            result["profile_email"] = str(account.get("email") or "")
+        return result
 
     @router.post("/api/v1/refresh-profiles/import-cookie-batch")
     def refresh_profiles_import_cookie_batch(

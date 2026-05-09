@@ -1,9 +1,8 @@
-# Adobe Cookie Exporter
+# Adobe Cookie 导出插件
 
-A small Chrome or Edge extension used to export Adobe or Firefly cookies in the
-minimal JSON format required by `adobe2api`.
+这是一个用于 Chrome 或 Edge 的小插件，可以从 Adobe / Firefly 页面导出当前浏览器 Cookie，并生成 `adobe2api` 可直接导入的最小 JSON 格式。
 
-## Export Format
+## 导出格式
 
 ```json
 {
@@ -11,40 +10,43 @@ minimal JSON format required by `adobe2api`.
 }
 ```
 
-## Install
+## 安装
 
-1. Open `chrome://extensions` or `edge://extensions`
-2. Enable developer mode
-3. Click `Load unpacked`
-4. Select the `browser-cookie-exporter/` folder
+1. 打开 `chrome://extensions` 或 `edge://extensions`
+2. 开启开发者模式
+3. 点击「加载已解压的扩展程序」
+4. 选择本项目里的 `browser-cookie-exporter/` 目录
 
-## Usage
+## 使用
 
-1. Log in to Adobe or Firefly
-2. Open the extension popup
-3. Choose an export scope:
-   - `Adobe domains (recommended)`
-   - `Current site`
-4. Click `Export Minimal JSON`
+1. 在浏览器中登录 Adobe 或 Firefly
+2. 打开插件弹窗
+3. 选择导出范围：
+   - `Adobe domains (recommended)`：推荐，导出 Adobe 相关域名 Cookie
+   - `Current site`：只导出当前站点 Cookie
+4. 点击 `Export Minimal JSON` 导出 JSON
 
-## Import Into adobe2api
+## 导入到 adobe2api
+
+先在 `config/config.json` 或后台「系统配置」中设置 `automation_import_key`。自动化程序只需要拿到项目网站地址和这个密钥，就可以把 Cookie 导入 Token 池。
 
 ```bash
-curl -X POST "http://127.0.0.1:6001/api/v1/refresh-profiles/import-cookie" \
+curl -X POST "http://127.0.0.1:6001/api/v1/automation/import-cookie" \
+  -H "Authorization: Bearer <automation_import_key>" \
   -H "Content-Type: application/json" \
   -d '{"name":"my-account","cookie":"k1=v1; k2=v2"}'
 ```
 
-## Incognito Support
+也可以使用请求头 `X-Token-Pool-Key: <automation_import_key>`。
 
-The extension exports cookies from the cookie store used by the active tab.
-If you open the popup from an incognito Adobe or Firefly tab, the exported JSON
-will contain the incognito cookie jar instead of the regular browser cookie jar.
+## 无痕窗口支持
 
-To use it in incognito:
+插件会从当前活动标签页所在的 Cookie 存储中导出 Cookie。如果你在无痕窗口里打开 Adobe 或 Firefly，并从无痕标签页打开插件，导出的就是无痕窗口里的 Cookie。
 
-1. Open `chrome://extensions` or `edge://extensions`
-2. Open this extension's details page
-3. Enable `Allow in Incognito`
-4. Open Adobe or Firefly in an incognito window
-5. Open the popup from that incognito tab and export the JSON
+启用方式：
+
+1. 打开 `chrome://extensions` 或 `edge://extensions`
+2. 进入本插件的详情页
+3. 开启「允许在无痕模式下运行」
+4. 在无痕窗口中打开 Adobe 或 Firefly 并登录
+5. 从该无痕标签页打开插件并导出 JSON

@@ -16,6 +16,7 @@ class ConfigManager:
         # Default config
         self.config = {
             "api_key": "clio-playground-web",
+            "automation_import_key": "",
             "admin_username": "admin",
             "admin_password": "admin",
             "admin_session_secret": "adobe2api-change-this-session-secret",

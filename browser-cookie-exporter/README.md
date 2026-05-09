@@ -28,7 +28,7 @@
 
 ## 导入到 adobe2api
 
-先在 `config/config.json` 或后台「系统配置」中设置 `automation_import_key`。如果部署在 Zeabur / Docker 这类环境，也可以直接设置环境变量 `AUTOMATION_IMPORT_KEY`。自动化程序只需要拿到项目网站地址和这个密钥，就可以把 Cookie 导入 Token 池。
+先在 `config/config.json` 或后台「系统配置」中设置 `automation_import_key`。自动化程序只需要拿到项目网站地址和这个密钥，就可以把 Cookie 导入 Token 池。
 
 ```bash
 curl -X POST "http://127.0.0.1:6001/api/v1/automation/import-cookie" \

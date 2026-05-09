@@ -1,5 +1,4 @@
 import json
-import os
 import threading
 from pathlib import Path
 
@@ -73,14 +72,6 @@ class ConfigManager:
                         )
                 except Exception:
                     pass
-            env_automation_import_key = str(
-                os.getenv("AUTOMATION_IMPORT_KEY")
-                or os.getenv("TOKEN_POOL_IMPORT_KEY")
-                or ""
-            ).strip()
-            if env_automation_import_key:
-                self.config["automation_import_key"] = env_automation_import_key
-
     def save(self):
         with self._lock:
             CONFIG_FILE.write_text(json.dumps(self.config, indent=2), encoding="utf-8")

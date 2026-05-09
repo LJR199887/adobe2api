@@ -66,7 +66,6 @@ Admin UI and admin APIs require login session cookie via `/api/v1/auth/login`.
 自动化导入 Cookie 到 Token 池：
 
 - 在 `config/config.json` 或后台「系统配置」中设置 `automation_import_key`
-- Zeabur / Docker 等部署环境也可以设置环境变量 `AUTOMATION_IMPORT_KEY`
 - 自动化程序只需要站点地址和该密钥即可调用导入接口
 
 ```bash

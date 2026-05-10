@@ -341,61 +341,6 @@
             </div>
           </section>
 
-          <section style="padding-top:0;">
-            <div class="form-group" style="margin-top: 12px;">
-              <label class="checkbox-label" style="user-select: none;">
-                <input type="checkbox" id="confAliyunOssEnabled" />
-                开启阿里云 OSS 储存（生成后自动上传 OSS）
-              </label>
-              <p class="help">仅在上方图床模式未开启时生效；如果图床和 OSS 同时开启，会继续优先使用原图床逻辑。</p>
-            </div>
-            <div class="config-inline-row">
-              <div class="form-group inline-item">
-                <label for="confAliyunOssEndpoint">OSS Endpoint</label>
-                <input type="text" id="confAliyunOssEndpoint" class="input-text" placeholder="例如：https://oss-cn-hangzhou.aliyuncs.com" />
-              </div>
-              <div class="form-group inline-item">
-                <label for="confAliyunOssBucket">Bucket</label>
-                <input type="text" id="confAliyunOssBucket" class="input-text" placeholder="例如：your-bucket" />
-              </div>
-            </div>
-            <div class="config-inline-row">
-              <div class="form-group inline-item">
-                <label for="confAliyunOssAccessKeyId">AccessKey ID</label>
-                <input type="text" id="confAliyunOssAccessKeyId" class="input-text" placeholder="填写 RAM 用户 AccessKey ID" />
-              </div>
-              <div class="form-group inline-item">
-                <label for="confAliyunOssAccessKeySecret">AccessKey Secret</label>
-                <input type="password" id="confAliyunOssAccessKeySecret" class="input-text" placeholder="填写 RAM 用户 AccessKey Secret" />
-              </div>
-            </div>
-            <div class="config-inline-row">
-              <div class="form-group inline-item">
-                <label for="confAliyunOssPrefix">对象前缀</label>
-                <input type="text" id="confAliyunOssPrefix" class="input-text" placeholder="默认：adobe2api" />
-              </div>
-              <div class="form-group inline-item">
-                <label for="confAliyunOssPublicBaseUrl">公开访问域名 / CDN</label>
-                <input type="text" id="confAliyunOssPublicBaseUrl" class="input-text" placeholder="可选，例如：https://cdn.example.com" />
-              </div>
-            </div>
-            <div class="config-inline-row">
-              <div class="form-group inline-item">
-                <label for="confAliyunOssSecurityToken">STS SecurityToken</label>
-                <input type="password" id="confAliyunOssSecurityToken" class="input-text" placeholder="可选，使用临时凭证时填写" />
-              </div>
-              <div class="form-group inline-item">
-                <label for="confAliyunOssAcl">对象 ACL</label>
-                <select id="confAliyunOssAcl" class="input-select">
-                  <option value="">不设置</option>
-                  <option value="private">private</option>
-                  <option value="public-read">public-read</option>
-                  <option value="public-read-write">public-read-write</option>
-                </select>
-              </div>
-            </div>
-          </section>
-
           <div class="actions" style="margin-top: 24px;">
             <button id="saveConfigBtn">保存配置</button>
             <span id="configMsg" class="msg"></span>

@@ -44,15 +44,6 @@ class ConfigManager:
             "imgbed_enabled": False,
             "imgbed_api_url": "",
             "imgbed_api_key": "",
-            "aliyun_oss_enabled": False,
-            "aliyun_oss_endpoint": "",
-            "aliyun_oss_bucket": "",
-            "aliyun_oss_access_key_id": "",
-            "aliyun_oss_access_key_secret": "",
-            "aliyun_oss_security_token": "",
-            "aliyun_oss_prefix": "adobe2api",
-            "aliyun_oss_public_base_url": "",
-            "aliyun_oss_acl": "",
         }
         self.load()
 

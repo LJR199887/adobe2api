@@ -542,29 +542,7 @@ curl -X GET "http://127.0.0.1:6001/api/v1/generate/<task_id>" \
 - 直接上传 `.json` 文件
 - 批量导入多个账号
 
-## 5. 生成结果外部存储
-
-默认情况下，生成的图片/视频会保存到本地 `data/generated/` 并返回本服务链接。
-
-可选返回方式：
-
-- `use_upstream_result_url=true`：直接返回上游 `presignedUrl`，不落本地，但链接通常会过期。
-- `imgbed_enabled=true`：保持原有图床上传逻辑，优先级最高。
-- `aliyun_oss_enabled=true`：当原有图床未开启时，生成完成后上传到阿里云 OSS，再返回 OSS/CDN 链接。
-
-阿里云 OSS 常用配置字段：
-
-- `aliyun_oss_endpoint`：例如 `https://oss-cn-hangzhou.aliyuncs.com`
-- `aliyun_oss_bucket`：Bucket 名称
-- `aliyun_oss_access_key_id` / `aliyun_oss_access_key_secret`：建议使用最小权限 RAM 用户
-- `aliyun_oss_prefix`：对象前缀，默认 `adobe2api`
-- `aliyun_oss_public_base_url`：可选，自定义域名或 CDN 域名；不填则返回 OSS bucket 域名
-- `aliyun_oss_security_token`：可选，使用 STS 临时凭证时填写
-- `aliyun_oss_acl`：可选，留空表示不设置，也可设为 `private`、`public-read` 或 `public-read-write`
-
-如果 `imgbed_enabled` 和 `aliyun_oss_enabled` 同时开启，会继续优先使用原有图床，避免改变旧配置行为。
-
-## 6. 存储路径
+## 5. 存储路径
 
 - 生成媒体文件：`data/generated/`
 - 请求日志：`data/request_logs.jsonl`

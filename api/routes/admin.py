@@ -2307,20 +2307,6 @@ def build_admin_router(
             update_data["imgbed_api_url"] = str(incoming["imgbed_api_url"] or "").strip()
         if "imgbed_api_key" in incoming:
             update_data["imgbed_api_key"] = str(incoming["imgbed_api_key"] or "").strip()
-        if "aliyun_oss_enabled" in incoming:
-            update_data["aliyun_oss_enabled"] = bool(incoming["aliyun_oss_enabled"])
-        for key in (
-            "aliyun_oss_endpoint",
-            "aliyun_oss_bucket",
-            "aliyun_oss_access_key_id",
-            "aliyun_oss_access_key_secret",
-            "aliyun_oss_security_token",
-            "aliyun_oss_prefix",
-            "aliyun_oss_public_base_url",
-            "aliyun_oss_acl",
-        ):
-            if key in incoming:
-                update_data[key] = str(incoming[key] or "").strip()
         effective_resource_use_proxy = bool(
             update_data.get(
                 "resource_use_proxy", config_manager.get("resource_use_proxy", False)
@@ -2356,91 +2342,6 @@ def build_admin_router(
                 raise HTTPException(
                     status_code=400,
                     detail="imgbed_api_key cannot be empty when imgbed is enabled",
-                )
-        effective_aliyun_oss_enabled = bool(
-            update_data.get(
-                "aliyun_oss_enabled",
-                config_manager.get("aliyun_oss_enabled", False),
-            )
-        )
-        effective_aliyun_oss_endpoint = str(
-            update_data.get(
-                "aliyun_oss_endpoint",
-                config_manager.get("aliyun_oss_endpoint", ""),
-            )
-            or ""
-        ).strip()
-        effective_aliyun_oss_bucket = str(
-            update_data.get(
-                "aliyun_oss_bucket",
-                config_manager.get("aliyun_oss_bucket", ""),
-            )
-            or ""
-        ).strip()
-        effective_aliyun_oss_access_key_id = str(
-            update_data.get(
-                "aliyun_oss_access_key_id",
-                config_manager.get("aliyun_oss_access_key_id", ""),
-            )
-            or ""
-        ).strip()
-        effective_aliyun_oss_access_key_secret = str(
-            update_data.get(
-                "aliyun_oss_access_key_secret",
-                config_manager.get("aliyun_oss_access_key_secret", ""),
-            )
-            or ""
-        ).strip()
-        effective_aliyun_oss_public_base_url = str(
-            update_data.get(
-                "aliyun_oss_public_base_url",
-                config_manager.get("aliyun_oss_public_base_url", ""),
-            )
-            or ""
-        ).strip()
-        effective_aliyun_oss_acl = str(
-            update_data.get("aliyun_oss_acl", config_manager.get("aliyun_oss_acl", ""))
-            or ""
-        ).strip()
-        if effective_aliyun_oss_enabled and not effective_imgbed_enabled:
-            if not effective_aliyun_oss_endpoint.startswith(("http://", "https://")):
-                raise HTTPException(
-                    status_code=400,
-                    detail="aliyun_oss_endpoint must start with http:// or https:// when aliyun oss is enabled",
-                )
-            if not effective_aliyun_oss_bucket:
-                raise HTTPException(
-                    status_code=400,
-                    detail="aliyun_oss_bucket cannot be empty when aliyun oss is enabled",
-                )
-            if not effective_aliyun_oss_access_key_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="aliyun_oss_access_key_id cannot be empty when aliyun oss is enabled",
-                )
-            if not effective_aliyun_oss_access_key_secret:
-                raise HTTPException(
-                    status_code=400,
-                    detail="aliyun_oss_access_key_secret cannot be empty when aliyun oss is enabled",
-                )
-            if (
-                effective_aliyun_oss_public_base_url
-                and not effective_aliyun_oss_public_base_url.startswith(
-                    ("http://", "https://")
-                )
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail="aliyun_oss_public_base_url must start with http:// or https://",
-                )
-            if effective_aliyun_oss_acl and effective_aliyun_oss_acl not in {
-                "private",
-                "public-read",
-                "public-read-write",
-            }:
-                raise HTTPException(
-                    status_code=400,
-                    detail="aliyun_oss_acl must be empty, private, public-read or public-read-write",
                 )
         effective_max = int(
             update_data.get(

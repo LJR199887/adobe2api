@@ -1091,15 +1091,6 @@
   const confImgBedEnabled = document.getElementById("confImgBedEnabled");
   const confImgBedApiUrl = document.getElementById("confImgBedApiUrl");
   const confImgBedApiKey = document.getElementById("confImgBedApiKey");
-  const confAliyunOssEnabled = document.getElementById("confAliyunOssEnabled");
-  const confAliyunOssEndpoint = document.getElementById("confAliyunOssEndpoint");
-  const confAliyunOssBucket = document.getElementById("confAliyunOssBucket");
-  const confAliyunOssAccessKeyId = document.getElementById("confAliyunOssAccessKeyId");
-  const confAliyunOssAccessKeySecret = document.getElementById("confAliyunOssAccessKeySecret");
-  const confAliyunOssSecurityToken = document.getElementById("confAliyunOssSecurityToken");
-  const confAliyunOssPrefix = document.getElementById("confAliyunOssPrefix");
-  const confAliyunOssPublicBaseUrl = document.getElementById("confAliyunOssPublicBaseUrl");
-  const confAliyunOssAcl = document.getElementById("confAliyunOssAcl");
   const generatedUsageInfo = document.getElementById("generatedUsageInfo");
   const configCatBtns = document.querySelectorAll(".config-cat-btn");
   const configCatPanes = document.querySelectorAll(".config-cat-pane");
@@ -1304,15 +1295,6 @@
         confImgBedEnabled.checked = Boolean(data.imgbed_enabled || false);
         confImgBedApiUrl.value = data.imgbed_api_url || "";
         confImgBedApiKey.value = data.imgbed_api_key || "";
-        if (confAliyunOssEnabled) confAliyunOssEnabled.checked = Boolean(data.aliyun_oss_enabled || false);
-        if (confAliyunOssEndpoint) confAliyunOssEndpoint.value = data.aliyun_oss_endpoint || "";
-        if (confAliyunOssBucket) confAliyunOssBucket.value = data.aliyun_oss_bucket || "";
-        if (confAliyunOssAccessKeyId) confAliyunOssAccessKeyId.value = data.aliyun_oss_access_key_id || "";
-        if (confAliyunOssAccessKeySecret) confAliyunOssAccessKeySecret.value = data.aliyun_oss_access_key_secret || "";
-        if (confAliyunOssSecurityToken) confAliyunOssSecurityToken.value = data.aliyun_oss_security_token || "";
-        if (confAliyunOssPrefix) confAliyunOssPrefix.value = data.aliyun_oss_prefix || "adobe2api";
-        if (confAliyunOssPublicBaseUrl) confAliyunOssPublicBaseUrl.value = data.aliyun_oss_public_base_url || "";
-        if (confAliyunOssAcl) confAliyunOssAcl.value = data.aliyun_oss_acl || "";
         if (generatedUsageInfo) {
           const usageMb = Number(data.generated_usage_mb || 0);
           const fileCount = Number(data.generated_file_count || 0);
@@ -1367,15 +1349,6 @@
         imgbed_enabled: confImgBedEnabled.checked,
         imgbed_api_url: confImgBedApiUrl.value.trim(),
         imgbed_api_key: confImgBedApiKey.value.trim(),
-        aliyun_oss_enabled: Boolean(confAliyunOssEnabled?.checked),
-        aliyun_oss_endpoint: String(confAliyunOssEndpoint?.value || "").trim(),
-        aliyun_oss_bucket: String(confAliyunOssBucket?.value || "").trim(),
-        aliyun_oss_access_key_id: String(confAliyunOssAccessKeyId?.value || "").trim(),
-        aliyun_oss_access_key_secret: String(confAliyunOssAccessKeySecret?.value || "").trim(),
-        aliyun_oss_security_token: String(confAliyunOssSecurityToken?.value || "").trim(),
-        aliyun_oss_prefix: String(confAliyunOssPrefix?.value || "").trim(),
-        aliyun_oss_public_base_url: String(confAliyunOssPublicBaseUrl?.value || "").trim(),
-        aliyun_oss_acl: String(confAliyunOssAcl?.value || "").trim(),
       };
 
       if (!payload.admin_username) {
@@ -1412,26 +1385,6 @@
         }
         if (!payload.imgbed_api_key) {
           throw new Error("开启图传模式时，图床密钥不能为空");
-        }
-      }
-      if (payload.aliyun_oss_enabled && !payload.imgbed_enabled) {
-        if (!/^https?:\/\//i.test(payload.aliyun_oss_endpoint)) {
-          throw new Error("OSS Endpoint 必须以 http:// 或 https:// 开头");
-        }
-        if (!payload.aliyun_oss_bucket) {
-          throw new Error("开启 OSS 储存时，Bucket 不能为空");
-        }
-        if (!payload.aliyun_oss_access_key_id) {
-          throw new Error("开启 OSS 储存时，AccessKey ID 不能为空");
-        }
-        if (!payload.aliyun_oss_access_key_secret) {
-          throw new Error("开启 OSS 储存时，AccessKey Secret 不能为空");
-        }
-        if (payload.aliyun_oss_public_base_url && !/^https?:\/\//i.test(payload.aliyun_oss_public_base_url)) {
-          throw new Error("OSS 公开访问域名必须以 http:// 或 https:// 开头");
-        }
-        if (payload.aliyun_oss_acl && !["private", "public-read", "public-read-write"].includes(payload.aliyun_oss_acl)) {
-          throw new Error("OSS 对象 ACL 无效");
         }
       }
       if (!Number.isInteger(payload.retry_max_attempts) || payload.retry_max_attempts < 1 || payload.retry_max_attempts > 10) {

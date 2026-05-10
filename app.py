@@ -36,7 +36,6 @@ from core.adobe_client import (
 )
 from core.token_mgr import token_manager
 from core.config_mgr import config_manager
-from core.aliyun_oss_client import AliyunOssClient
 from core.refresh_mgr import refresh_manager
 from core.imgbed_client import ImgBedClient
 from core.proxy_utils import build_requests_proxies, resolve_resource_proxy
@@ -60,7 +59,6 @@ from core.models import (
 
 logger = logging.getLogger("adobe2api")
 imgbed_client = ImgBedClient()
-aliyun_oss_client = AliyunOssClient()
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1171,7 +1169,6 @@ def _require_admin_auth(request: Request) -> None:
 def _apply_client_config() -> None:
     client.apply_config(config_manager.get_all())
     imgbed_client.apply_config(config_manager.get_all())
-    aliyun_oss_client.apply_config(config_manager.get_all())
 
 
 _apply_client_config()
@@ -1266,18 +1263,6 @@ def _upload_generated_asset_to_imgbed(
     source_url: str, filename: str, mime_type: str | None = None
 ) -> str:
     return imgbed_client.upload_from_url(source_url, filename=filename, mime_type=mime_type)
-
-
-def _use_aliyun_oss_upload() -> bool:
-    return bool(config_manager.get("aliyun_oss_enabled", False))
-
-
-def _upload_generated_asset_to_aliyun_oss(
-    source_url: str, filename: str, mime_type: str | None = None
-) -> str:
-    return aliyun_oss_client.upload_from_url(
-        source_url, filename=filename, mime_type=mime_type
-    )
 
 
 def _public_generated_url(request: Request, filename: str) -> str:
@@ -1542,8 +1527,6 @@ app.include_router(
         use_upstream_result_url=_use_upstream_result_url,
         use_imgbed_upload=_use_imgbed_upload,
         upload_generated_asset_to_imgbed=_upload_generated_asset_to_imgbed,
-        use_aliyun_oss_upload=_use_aliyun_oss_upload,
-        upload_generated_asset_to_aliyun_oss=_upload_generated_asset_to_aliyun_oss,
         resolve_video_options=_resolve_video_options,
         load_input_images=_load_input_images,
         prepare_video_source_image=_prepare_video_source_image,

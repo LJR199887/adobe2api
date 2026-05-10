@@ -81,6 +81,15 @@ class ConfigUpdateRequest(BaseModel):
     imgbed_enabled: Optional[bool] = None
     imgbed_api_url: Optional[str] = None
     imgbed_api_key: Optional[str] = None
+    aliyun_oss_enabled: Optional[bool] = None
+    aliyun_oss_endpoint: Optional[str] = None
+    aliyun_oss_bucket: Optional[str] = None
+    aliyun_oss_access_key_id: Optional[str] = None
+    aliyun_oss_access_key_secret: Optional[str] = None
+    aliyun_oss_security_token: Optional[str] = None
+    aliyun_oss_prefix: Optional[str] = None
+    aliyun_oss_public_base_url: Optional[str] = None
+    aliyun_oss_acl: Optional[str] = None
 
 
 class RefreshCookieImportRequest(BaseModel):

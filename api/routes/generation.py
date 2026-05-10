@@ -282,6 +282,8 @@ def build_generation_router(
     use_upstream_result_url: Callable[[], bool],
     use_imgbed_upload: Callable[[], bool],
     upload_generated_asset_to_imgbed: Callable[[str, str, str | None], str],
+    use_aliyun_oss_upload: Callable[[], bool],
+    upload_generated_asset_to_aliyun_oss: Callable[[str, str, str | None], str],
     resolve_video_options: Callable[[dict], tuple[bool, str, str]],
     load_input_images: Callable[[Any], list[tuple[bytes, str]]],
     prepare_video_source_image: Callable[[bytes, str, str], tuple[bytes, str]],
@@ -306,6 +308,30 @@ def build_generation_router(
         if isinstance(token_info, dict):
             disable_auto_refresh_for_token(token_info)
         return token_info
+
+    def _asset_upload_backend() -> str:
+        if bool(use_imgbed_upload()):
+            return "imgbed"
+        if bool(use_aliyun_oss_upload()):
+            return "aliyun_oss"
+        return ""
+
+    def _use_external_asset_upload() -> bool:
+        return bool(_asset_upload_backend())
+
+    def _upload_generated_asset(
+        source_url: str, filename: str, mime_type: str | None = None
+    ) -> str:
+        backend = _asset_upload_backend()
+        if backend == "imgbed":
+            return upload_generated_asset_to_imgbed(
+                source_url, filename, mime_type
+            )
+        if backend == "aliyun_oss":
+            return upload_generated_asset_to_aliyun_oss(
+                source_url, filename, mime_type
+            )
+        raise RuntimeError("external asset upload is not enabled")
 
     def _normalize_image_request_data(data: dict, prompt: str) -> dict:
         normalized = dict(data or {})
@@ -472,8 +498,10 @@ def build_generation_router(
                         error=update.get("error"),
                     )
 
-                imgbed_upload_enabled = bool(use_imgbed_upload())
-                direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
+                external_upload_enabled = _use_external_asset_upload()
+                direct_result_url = (
+                    bool(use_upstream_result_url()) or external_upload_enabled
+                )
                 job_id = uuid.uuid4().hex
                 out_path = generated_dir / f"{job_id}.png"
                 old_size = 0
@@ -511,13 +539,13 @@ def build_generation_router(
                     ),
                 )
                 upstream_image_url = _extract_upstream_asset_url(meta, "image")
-                if imgbed_upload_enabled:
+                if external_upload_enabled:
                     if not upstream_image_url:
                         raise HTTPException(
                             status_code=502,
                             detail="upstream result url missing",
                         )
-                    image_url = upload_generated_asset_to_imgbed(
+                    image_url = _upload_generated_asset(
                         upstream_image_url,
                         filename=f"{job_id}.png",
                         mime_type="image/png",
@@ -773,8 +801,10 @@ def build_generation_router(
                                 token, image_bytes, image_mime or "image/jpeg"
                             )
                         )
-                    imgbed_upload_enabled = bool(use_imgbed_upload())
-                    direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
+                    external_upload_enabled = _use_external_asset_upload()
+                    direct_result_url = (
+                        bool(use_upstream_result_url()) or external_upload_enabled
+                    )
                     out_path = generated_dir / f"{job_id}.png"
                     old_size = 0
                     if not direct_result_url:
@@ -805,10 +835,10 @@ def build_generation_router(
                         seeds=None if force_random_image_seed else image_seeds,
                     )
                     upstream_image_url = _extract_upstream_asset_url(meta, "image")
-                    if imgbed_upload_enabled:
+                    if external_upload_enabled:
                         if not upstream_image_url:
                             raise RuntimeError("upstream result url missing")
-                        image_url = upload_generated_asset_to_imgbed(
+                        image_url = _upload_generated_asset(
                             upstream_image_url,
                             filename=f"{job_id}.png",
                             mime_type="image/png",
@@ -1411,9 +1441,9 @@ def build_generation_router(
                             error=update.get("error"),
                         )
 
-                    imgbed_upload_enabled = bool(use_imgbed_upload())
+                    external_upload_enabled = _use_external_asset_upload()
                     direct_result_url = (
-                        bool(use_upstream_result_url()) or imgbed_upload_enabled
+                        bool(use_upstream_result_url()) or external_upload_enabled
                     )
                     tmp_path = generated_dir / f"{job_id}.video.tmp"
                     old_size = 0
@@ -1448,10 +1478,10 @@ def build_generation_router(
                         video_meta, "video"
                     )
                     video_ext = video_ext_from_meta(video_meta)
-                    if imgbed_upload_enabled:
+                    if external_upload_enabled:
                         if not upstream_video_url:
                             raise RuntimeError("upstream result url missing")
-                        video_url = upload_generated_asset_to_imgbed(
+                        video_url = _upload_generated_asset(
                             upstream_video_url,
                             filename=f"{job_id}.{video_ext}",
                             mime_type=_video_mime_type(video_ext),
@@ -1725,9 +1755,9 @@ def build_generation_router(
                         error=update.get("error"),
                     )
 
-                imgbed_upload_enabled = bool(use_imgbed_upload())
+                external_upload_enabled = _use_external_asset_upload()
                 direct_result_url = (
-                    bool(use_upstream_result_url()) or imgbed_upload_enabled
+                    bool(use_upstream_result_url()) or external_upload_enabled
                 )
                 task_id = uuid.uuid4().hex
                 tmp_path = generated_dir / f"{task_id}.video.tmp"
@@ -1767,13 +1797,13 @@ def build_generation_router(
                     raise
                 upstream_video_url = _extract_upstream_asset_url(video_meta, "video")
                 video_ext = video_ext_from_meta(video_meta)
-                if imgbed_upload_enabled:
+                if external_upload_enabled:
                     if not upstream_video_url:
                         raise HTTPException(
                             status_code=502,
                             detail="upstream result url missing",
                         )
-                    video_url = upload_generated_asset_to_imgbed(
+                    video_url = _upload_generated_asset(
                         upstream_video_url,
                         filename=f"{task_id}.{video_ext}",
                         mime_type=_video_mime_type(video_ext),
@@ -2119,8 +2149,10 @@ def build_generation_router(
                         error=update.get("error"),
                     )
 
-                imgbed_upload_enabled = bool(use_imgbed_upload())
-                direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
+                external_upload_enabled = _use_external_asset_upload()
+                direct_result_url = (
+                    bool(use_upstream_result_url()) or external_upload_enabled
+                )
                 job_id = uuid.uuid4().hex
                 out_path = generated_dir / f"{job_id}.png"
                 old_size = 0
@@ -2163,13 +2195,13 @@ def build_generation_router(
                     ),
                 )
                 upstream_image_url = _extract_upstream_asset_url(meta, "image")
-                if imgbed_upload_enabled:
+                if external_upload_enabled:
                     if not upstream_image_url:
                         raise HTTPException(
                             status_code=502,
                             detail="upstream result url missing",
                         )
-                    image_url = upload_generated_asset_to_imgbed(
+                    image_url = _upload_generated_asset(
                         upstream_image_url,
                         filename=f"{job_id}.png",
                         mime_type="image/png",

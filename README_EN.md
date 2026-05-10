@@ -625,6 +625,14 @@ Once you have the exported JSON file, follow these steps to import it:
 - Service config: `config/config.json`
 - On first startup, legacy `config/tokens.json` and `config/refresh_profile.json` are migrated into SQLite automatically
 
+External generated media storage:
+
+- By default, generated images/videos are stored under `data/generated/` and returned as local service URLs.
+- `use_upstream_result_url=true` returns the upstream `presignedUrl` directly, but those URLs usually expire.
+- `imgbed_enabled=true` keeps the existing ImgBed upload behavior and still has the highest priority.
+- `aliyun_oss_enabled=true` uploads generated assets to Alibaba Cloud OSS when ImgBed is not enabled, then returns the OSS/CDN URL.
+- Common OSS fields: `aliyun_oss_endpoint`, `aliyun_oss_bucket`, `aliyun_oss_access_key_id`, `aliyun_oss_access_key_secret`, `aliyun_oss_prefix`, `aliyun_oss_public_base_url`, optional `aliyun_oss_security_token`, and optional `aliyun_oss_acl`.
+
 Generated media retention policy:
 
 - Files under `data/generated/` are preserved and served via `/generated/*`

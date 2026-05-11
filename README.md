@@ -38,6 +38,35 @@ docker compose up -d --build
 
 管理后台和管理 API 需要先通过 `/api/v1/auth/login` 登录并持有会话 Cookie。
 
+自动化导入 Cookie 到 Token 池：
+- 在 `config/config.json` 或后台「系统配置」中设置 `automation_import_key`
+- 自动化程序只需要站点地址和该密钥即可调用导入接口
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/automation/import-cookie" \
+  -H "Authorization: Bearer <automation_import_key>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"account-a","cookie":"k1=v1; k2=v2"}'
+```
+
+也可以使用请求头 `X-Token-Pool-Key: <automation_import_key>`。
+
+批量导入：
+
+```bash
+curl -X POST "http://127.0.0.1:6001/api/v1/automation/import-cookie-batch" \
+  -H "Authorization: Bearer <automation_import_key>" \
+  -H "Content-Type: application/json" \
+  -d '{"items":[{"name":"account-a","cookie":"k1=v1; k2=v2"},{"name":"account-b","cookie":"k3=v3; k4=v4"}]}'
+```
+
+批量接口会返回 `background_refresh.job_id`，可用下面的接口查询任务进度：
+
+```bash
+curl -X GET "http://127.0.0.1:6001/api/v1/automation/import-cookie-jobs/<job_id>" \
+  -H "Authorization: Bearer <automation_import_key>"
+```
+
 ## 3. 外部 API 使用
 
 ### 3.0 支持的模型

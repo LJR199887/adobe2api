@@ -1060,6 +1060,7 @@
 
   // Config Management
   const confApiKey = document.getElementById("confApiKey");
+  const confAutomationImportKey = document.getElementById("confAutomationImportKey");
   const confAdminUsername = document.getElementById("confAdminUsername");
   const confAdminPassword = document.getElementById("confAdminPassword");
   const confPublicBaseUrl = document.getElementById("confPublicBaseUrl");
@@ -1252,6 +1253,9 @@
       if (res.ok) {
         const data = await res.json();
         confApiKey.value = data.api_key || "";
+        if (confAutomationImportKey) {
+          confAutomationImportKey.value = data.automation_import_key || "";
+        }
         confAdminUsername.value = data.admin_username || "admin";
         confAdminPassword.value = data.admin_password || "admin";
         confPublicBaseUrl.value = data.public_base_url || "";
@@ -1312,6 +1316,7 @@
       const payload = {
         ...currentData,
         api_key: confApiKey.value.trim(),
+        automation_import_key: String(confAutomationImportKey?.value || "").trim(),
         admin_username: confAdminUsername.value.trim() || "admin",
         admin_password: confAdminPassword.value || "admin",
         public_base_url: confPublicBaseUrl.value.trim(),

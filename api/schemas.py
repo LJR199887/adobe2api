@@ -54,6 +54,7 @@ class TokenExhaustedCleanupRequest(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     api_key: Optional[str] = None
+    automation_import_key: Optional[str] = None
     admin_username: Optional[str] = None
     admin_password: Optional[str] = None
     public_base_url: Optional[str] = None

@@ -148,6 +148,12 @@
             </div>
 
             <div class="form-group">
+              <label for="confAutomationImportKey">Token 池导入密钥</label>
+              <input type="text" id="confAutomationImportKey" class="input-text" placeholder="给自动化程序导入 Cookie 使用" />
+              <p class="help">把站点地址和这个密钥给自动化程序，即可调用 /api/v1/automation/import-cookie 导入 Cookie 到 Token 池。</p>
+            </div>
+
+            <div class="form-group">
               <label for="confAdminUsername">管理员账号</label>
               <input type="text" id="confAdminUsername" class="input-text" placeholder="默认 admin" />
               <p class="help">管理后台登录账号。</p>
@@ -539,6 +545,6 @@
 
   <div id="appToast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="/static/admin.js?v=20260508-1"></script>
+  <script src="/static/admin.js?v=20260509-automation-key"></script>
 </body>
 </html>

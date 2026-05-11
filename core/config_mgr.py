@@ -16,6 +16,7 @@ class ConfigManager:
         # Default config
         self.config = {
             "api_key": "clio-playground-web",
+            "automation_import_key": "",
             "admin_username": "admin",
             "admin_password": "admin",
             "admin_session_secret": "adobe2api-change-this-session-secret",
@@ -71,7 +72,6 @@ class ConfigManager:
                         )
                 except Exception:
                     pass
-
     def save(self):
         with self._lock:
             CONFIG_FILE.write_text(json.dumps(self.config, indent=2), encoding="utf-8")

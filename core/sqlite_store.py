@@ -1,4 +1,5 @@
 import json
+import base64
 import sqlite3
 import threading
 import time
@@ -39,6 +40,7 @@ class SQLiteStore:
                         email TEXT,
                         name TEXT,
                         credits_error TEXT,
+                        expires_at REAL,
                         added_at REAL,
                         updated_at REAL,
                         payload TEXT NOT NULL
@@ -74,9 +76,15 @@ class SQLiteStore:
                 }
                 if "credits_error" not in token_columns:
                     conn.execute("ALTER TABLE tokens ADD COLUMN credits_error TEXT")
+                if "expires_at" not in token_columns:
+                    conn.execute("ALTER TABLE tokens ADD COLUMN expires_at REAL")
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_tokens_credits_error "
                     "ON tokens(credits_error)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_tokens_status_expires_at "
+                    "ON tokens(status, expires_at)"
                 )
                 conn.execute(
                     "CREATE INDEX IF NOT EXISTS idx_refresh_profiles_fingerprint "
@@ -101,6 +109,41 @@ class SQLiteStore:
         return value
 
     @staticmethod
+    def _decode_token_expires_at(token_value: str):
+        value = SQLiteStore._token_value_key({"value": token_value})
+        parts = value.split(".")
+        if len(parts) < 2:
+            return None
+        payload_b64 = parts[1]
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+        try:
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64.encode()))
+        except Exception:
+            return None
+
+        exp = payload.get("exp")
+        if isinstance(exp, (int, float)):
+            return int(exp)
+
+        created_at = payload.get("created_at")
+        expires_in = payload.get("expires_in")
+        try:
+            created_at_val = int(str(created_at).strip())
+            expires_in_val = int(str(expires_in).strip())
+        except Exception:
+            return None
+
+        if created_at_val <= 0 or expires_in_val <= 0:
+            return None
+        if created_at_val > 10_000_000_000:
+            created_at_val = int(created_at_val / 1000)
+        if expires_in_val > 86400 * 2:
+            expires_in_val = int(expires_in_val / 1000)
+        return created_at_val + expires_in_val
+
+    @staticmethod
     def _number(value, default=0) -> float:
         try:
             return float(value)
@@ -119,6 +162,7 @@ class SQLiteStore:
             str(token.get("refresh_profile_email") or "").strip(),
             str(token.get("refresh_profile_name") or "").strip(),
             str(token.get("credits_error") or "").strip(),
+            cls._decode_token_expires_at(token.get("value") or ""),
             cls._number(token.get("added_at"), now_ts),
             cls._number(token.get("updated_at"), token.get("added_at") or now_ts),
             cls._json_payload(token),
@@ -205,12 +249,55 @@ class SQLiteStore:
                 """
                 INSERT OR REPLACE INTO tokens (
                     id, value_key, profile_id, status, email, name, credits_error,
-                    added_at, updated_at, payload
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    expires_at, added_at, updated_at, payload
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
             conn.commit()
+
+    def update_tokens(self, tokens: Iterable[Dict]):
+        self._ensure_schema()
+        rows = [self._token_row(token) for token in tokens if isinstance(token, dict)]
+        if not rows:
+            return
+        with self._lock, self._connect() as conn:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO tokens (
+                    id, value_key, profile_id, status, email, name, credits_error,
+                    expires_at, added_at, updated_at, payload
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+
+    def list_earliest_expiring_active_tokens(self, limit: int = 200) -> List[Dict]:
+        self._ensure_schema()
+        limit = max(1, min(1000, int(limit or 200)))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT payload
+                FROM tokens
+                WHERE status = 'active'
+                  AND expires_at IS NOT NULL
+                  AND expires_at > 0
+                ORDER BY expires_at ASC, updated_at ASC, added_at ASC, id ASC
+                LIMIT ?
+                """,
+                [limit],
+            ).fetchall()
+
+        tokens: List[Dict] = []
+        for row in rows:
+            try:
+                payload = json.loads(row["payload"])
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                tokens.append(payload)
+        return tokens
 
     @staticmethod
     def _token_filter_sql(status: str = "", credits: str = ""):

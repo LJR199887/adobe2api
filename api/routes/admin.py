@@ -1670,15 +1670,6 @@ def build_admin_router(
 
             if result.get("result") == "invalid":
                 updated = token_manager.report_invalid_by_identity(token_id=tid)
-                profile_disabled = False
-                disabled_profile_id = ""
-                if isinstance(updated, dict):
-                    try:
-                        profile_disabled, disabled_profile_id = (
-                            disable_auto_refresh_for_token_info(updated)
-                        )
-                    except Exception as exc:
-                        result["auto_refresh_disable_error"] = str(exc)
                 result.update(
                     {
                         "previous_status": (
@@ -1687,8 +1678,8 @@ def build_admin_router(
                             else current_status
                         ),
                         "status": "invalid",
-                        "auto_refresh_disabled": profile_disabled,
-                        "disabled_profile_id": disabled_profile_id or None,
+                        "auto_refresh_disabled": False,
+                        "disabled_profile_id": None,
                     }
                 )
                 return index, "invalid", result
@@ -2199,10 +2190,13 @@ def build_admin_router(
             update_data["retry_on_error_types"] = sorted(set(error_types))
         if "token_rotation_strategy" in incoming:
             strategy = str(incoming["token_rotation_strategy"] or "").strip().lower()
-            if strategy not in {"round_robin", "random"}:
+            if strategy not in {"round_robin", "random", "finish_success"}:
                 raise HTTPException(
                     status_code=400,
-                    detail="token_rotation_strategy must be one of: round_robin, random",
+                    detail=(
+                        "token_rotation_strategy must be one of: "
+                        "round_robin, random, finish_success"
+                    ),
                 )
             update_data["token_rotation_strategy"] = strategy
         if "token_success_auto_disable_enabled" in incoming:

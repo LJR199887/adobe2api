@@ -167,7 +167,7 @@ class AdobeClient:
             .strip()
             .lower()
         )
-        if strategy not in {"round_robin", "random"}:
+        if strategy not in {"round_robin", "random", "finish_success"}:
             strategy = "round_robin"
         self.token_rotation_strategy = strategy
         self.token_success_auto_disable_enabled = bool(

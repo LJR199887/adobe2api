@@ -126,6 +126,7 @@ error_store = ErrorDetailStore(DATA_DIR / "request_errors.jsonl", max_items=5000
 live_log_store = LiveRequestStore(max_items=2000)
 client = AdobeClient()
 refresh_manager.start()
+token_manager.start_expired_token_scanner(interval_seconds=300, batch_limit=200)
 
 
 def _extract_model_params(data: dict[str, Any]) -> Optional[str]:
@@ -436,7 +437,6 @@ def _report_token_exhausted(token: str) -> Optional[dict]:
 
 def _report_token_invalid(token: str) -> Optional[dict]:
     token_info = token_manager.report_invalid(token)
-    _disable_auto_refresh_for_token(token_info)
     return token_info
 
 
@@ -766,6 +766,7 @@ def _run_with_token_retries(
                     error_code=err_code,
                     task_status_override="FAILED",
                 )
+                token_manager.release(token)
                 return result
             _append_attempt_log(
                 request=request,
@@ -876,6 +877,7 @@ def _run_with_token_retries(
                 task_status_override="FAILED",
             )
         except HTTPException as exc:
+            token_manager.release(token)
             err_code = report_error(
                 request,
                 error=str(exc.detail),
@@ -900,6 +902,7 @@ def _run_with_token_retries(
             )
             raise
         except Exception as exc:
+            token_manager.release(token)
             err_code = report_error(
                 request,
                 error=exc,

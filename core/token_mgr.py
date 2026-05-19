@@ -29,6 +29,8 @@ class TokenManager:
         self._value_index: Dict[str, Dict] = {}
         self._auto_refresh_profile_index: Dict[str, Dict] = {}
         self._rr_index = 0
+        self._expired_scanner_started = False
+        self._expired_scanner_stop_event = threading.Event()
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         self._store = SQLiteStore(CONFIG_DIR / "app.db")
         self.load()
@@ -64,6 +66,8 @@ class TokenManager:
             token.setdefault("success_count", 0)
             token.setdefault("added_at", now_ts)
             token.setdefault("error_until", 0)
+            token.pop("lease_id", None)
+            token.pop("leased_at", None)
             normalized.append(token)
         return normalized
 
@@ -437,13 +441,26 @@ class TokenManager:
     def _pick_active_token_locked(
         self, strategy: str = "round_robin"
     ) -> Optional[Dict]:
-        active = [t for t in self.tokens if t["status"] == "active"]
+        active = [
+            t
+            for t in self.tokens
+            if t["status"] == "active" and not str(t.get("lease_id") or "").strip()
+        ]
         if not active:
             return None
 
         chosen = None
         mode = str(strategy or "round_robin").strip().lower()
-        if mode == "random":
+        if mode == "finish_success":
+            active.sort(
+                key=lambda t: (
+                    -max(0, int(t.get("success_count", 0) or 0)),
+                    self._token_sort_ts(t),
+                    str(t.get("id") or ""),
+                )
+            )
+            chosen = active[0]
+        elif mode == "random":
             chosen = random.choice(active)
         else:
             idx = self._rr_index % len(active)
@@ -455,6 +472,9 @@ class TokenManager:
         with self._lock:
             chosen = self._pick_active_token_locked(strategy=strategy)
             if chosen is not None:
+                chosen["lease_id"] = uuid.uuid4().hex[:12]
+                chosen["leased_at"] = time.time()
+                self.save()
                 return chosen["value"]
 
             # Auto-revive one recoverable token after cooldown.
@@ -463,6 +483,7 @@ class TokenManager:
                 t
                 for t in self.tokens
                 if t["status"] == "error"
+                and not str(t.get("lease_id") or "").strip()
                 and float(t.get("error_until", 0) or 0) <= now_ts
             ]
             if not recoverable:
@@ -474,7 +495,29 @@ class TokenManager:
             chosen["error_until"] = 0
             self.save()
             picked = self._pick_active_token_locked(strategy=strategy)
-            return (picked or chosen)["value"]
+            leased = picked or chosen
+            leased["lease_id"] = uuid.uuid4().hex[:12]
+            leased["leased_at"] = time.time()
+            self.save()
+            return leased["value"]
+
+    @staticmethod
+    def _release_token_lease(token: Dict):
+        token.pop("lease_id", None)
+        token.pop("leased_at", None)
+
+    def release(self, value: str) -> Optional[Dict]:
+        updated = None
+        with self._lock:
+            t = self._value_index.get(self._normalize_token_value(value))
+            if t is not None:
+                self._release_token_lease(t)
+                updated = dict(t)
+                try:
+                    self._store.update_tokens([updated])
+                except Exception:
+                    self.save()
+        return updated
 
     def report_exhausted(self, value: str) -> Optional[Dict]:
         updated = None
@@ -486,6 +529,7 @@ class TokenManager:
                 t["error_until"] = 0
                 t["updated_at"] = now_ts
                 t.setdefault("exhausted_at", now_ts)
+                self._release_token_lease(t)
                 updated = dict(t)
             self.save()
         return updated
@@ -537,6 +581,7 @@ class TokenManager:
                 target["status"] = status
                 target["error_until"] = 0
                 target["updated_at"] = now_ts
+                self._release_token_lease(target)
                 if status == "exhausted":
                     target.setdefault("exhausted_at", now_ts)
                 updated = dict(target)
@@ -597,9 +642,90 @@ class TokenManager:
                 t["status"] = "invalid"
                 t["error_until"] = 0
                 t["updated_at"] = now_ts
+                self._release_token_lease(t)
                 updated = dict(t)
             self.save()
         return updated
+
+    def mark_expired_active_tokens_invalid(self, limit: int = 200) -> Dict:
+        now_ts = int(time.time())
+        try:
+            candidates = self._store.list_earliest_expiring_active_tokens(limit=limit)
+        except Exception:
+            candidates = []
+
+        changed: List[Dict] = []
+        checked = 0
+        with self._lock:
+            for candidate in candidates:
+                tid = str(candidate.get("id") or "").strip()
+                if not tid:
+                    continue
+                token = self._id_index.get(tid)
+                if not isinstance(token, dict):
+                    continue
+                if str(token.get("status") or "active").strip().lower() != "active":
+                    continue
+
+                exp_ts = self._decode_jwt_exp(str(token.get("value") or ""))
+                if exp_ts is None:
+                    continue
+                checked += 1
+                if int(exp_ts) >= now_ts:
+                    continue
+
+                token["status"] = "invalid"
+                token["error_until"] = 0
+                token["updated_at"] = now_ts
+                changed.append(dict(token))
+
+            if changed:
+                try:
+                    self._store.update_tokens(changed)
+                except Exception:
+                    self.save()
+
+        return {
+            "checked": checked,
+            "marked_invalid": len(changed),
+            "limit": max(1, int(limit or 200)),
+        }
+
+    def start_expired_token_scanner(
+        self,
+        *,
+        interval_seconds: int = 300,
+        batch_limit: int = 200,
+    ) -> None:
+        with self._lock:
+            if self._expired_scanner_started:
+                return
+            self._expired_scanner_started = True
+
+        interval = max(60, int(interval_seconds or 300))
+        limit = max(1, int(batch_limit or 200))
+
+        def worker():
+            while not self._expired_scanner_stop_event.is_set():
+                try:
+                    result = self.mark_expired_active_tokens_invalid(limit=limit)
+                    marked = int(result.get("marked_invalid") or 0)
+                    if marked:
+                        logger.info(
+                            "expired token scanner marked invalid count=%s checked=%s limit=%s",
+                            marked,
+                            result.get("checked"),
+                            result.get("limit"),
+                        )
+                except Exception:
+                    logger.exception("expired token scanner failed")
+                self._expired_scanner_stop_event.wait(interval)
+
+        threading.Thread(
+            target=worker,
+            name="token-expired-scanner",
+            daemon=True,
+        ).start()
 
     def report_error(self, value: str):
         with self._lock:
@@ -608,6 +734,7 @@ class TokenManager:
                 t["fails"] += 1
                 t["status"] = "error"
                 t["error_until"] = time.time() + self.ERROR_COOLDOWN_SECONDS
+                self._release_token_lease(t)
             self.save()
 
     def report_success(self, value: str):
@@ -619,6 +746,7 @@ class TokenManager:
                 if t["status"] == "error":
                     t["status"] = "active"
                     t["error_until"] = 0
+                self._release_token_lease(t)
             self.save()
 
     def report_success_with_auto_disable(
@@ -651,6 +779,7 @@ class TokenManager:
                 t["updated_at"] = now_ts
                 t.setdefault("exhausted_at", now_ts)
                 disabled_by_limit = True
+            self._release_token_lease(t)
             self.save()
             result = dict(t)
             result["_disabled_by_success_limit"] = disabled_by_limit

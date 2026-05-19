@@ -302,10 +302,7 @@ def build_generation_router(
         return JSONResponse(status_code=status_code, content=content)
 
     def _report_token_invalid(token: str) -> Any:
-        token_info = token_manager.report_invalid(token)
-        if isinstance(token_info, dict):
-            disable_auto_refresh_for_token(token_info)
-        return token_info
+        return token_manager.report_invalid(token)
 
     def _normalize_image_request_data(data: dict, prompt: str) -> dict:
         normalized = dict(data or {})
@@ -876,6 +873,7 @@ def build_generation_router(
                     if retryable:
                         force_random_image_seed = True
                 except Exception as exc:
+                    token_manager.release(token)
                     final_status_code = 500
                     set_request_task_progress(
                         request, task_status="FAILED", task_progress=0.0, error=str(exc)
@@ -908,6 +906,7 @@ def build_generation_router(
                     if delay > 0:
                         time.sleep(delay)
                     continue
+                token_manager.release(token)
                 break
 
             set_request_task_progress(
@@ -1521,6 +1520,7 @@ def build_generation_router(
                     if retryable:
                         force_random_video_seed = True
                 except Exception as exc:
+                    token_manager.release(token)
                     final_status_code = 500
                     set_request_task_progress(
                         request, task_status="FAILED", task_progress=0.0, error=str(exc)
@@ -1553,6 +1553,7 @@ def build_generation_router(
                     if delay > 0:
                         time.sleep(delay)
                     continue
+                token_manager.release(token)
                 break
 
             set_request_task_progress(

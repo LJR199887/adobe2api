@@ -153,6 +153,48 @@ def test_invalid_check_marks_error_status_token_abnormal_and_auto_refresh_off():
     assert refresh_manager.disabled_profile_ids == ["profile-2"]
 
 
+def test_invalid_check_keeps_auto_refresh_enabled_for_invalid_response(monkeypatch):
+    token_manager = DummyTokenManager(
+        [
+            {
+                "id": "tok-invalid",
+                "value": "token-invalid",
+                "status": "active",
+                "auto_refresh": True,
+                "refresh_profile_id": "profile-invalid",
+            }
+        ]
+    )
+    refresh_manager = DummyRefreshManager({"token-invalid": "account-invalid"})
+    client = build_client(token_manager, refresh_manager)
+
+    class FakeResponse:
+        status_code = 401
+        text = '{"error":{"message":"Token invalid or expired"}}'
+
+        def json(self):
+            return {"error": {"message": "Token invalid or expired"}}
+
+    monkeypatch.setattr(
+        "api.routes.admin.requests.get", lambda *args, **kwargs: FakeResponse()
+    )
+
+    response = client.post(
+        "/api/v1/tokens/check-invalid-batch", json={"ids": ["tok-invalid"]}
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["invalid_count"] == 1
+    assert payload["invalid_changed_count"] == 1
+    assert payload["disabled_auto_refresh_count"] == 0
+    invalid = payload["invalid"][0]
+    assert invalid["status"] == "invalid"
+    assert invalid["auto_refresh_disabled"] is False
+    assert token_manager.get_by_id("tok-invalid")["status"] == "invalid"
+    assert refresh_manager.disabled_profile_ids == []
+
+
 def test_invalid_check_marks_403_response_as_abnormal(monkeypatch):
     token_manager = DummyTokenManager(
         [

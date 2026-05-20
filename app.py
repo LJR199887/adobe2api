@@ -923,6 +923,7 @@ def _run_with_token_retries(
             )
             raise
 
+        token_manager.release(token)
         if retryable:
             delay = client._retry_delay_for_attempt(attempt)
             if on_retry:

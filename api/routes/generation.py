@@ -896,6 +896,7 @@ def build_generation_router(
                     return
 
                 if retryable:
+                    token_manager.release(token)
                     delay = client._retry_delay_for_attempt(attempt)
                     set_request_task_progress(
                         request,
@@ -1334,6 +1335,8 @@ def build_generation_router(
                         f"video model supports at most {max_video_inputs} input image(s)"
                     )
             except Exception as exc:
+                if first_token:
+                    token_manager.release(first_token)
                 set_request_task_progress(
                     request, task_status="FAILED", task_progress=0.0, error=str(exc)
                 )
@@ -1543,6 +1546,7 @@ def build_generation_router(
                     return
 
                 if retryable:
+                    token_manager.release(token)
                     delay = client._retry_delay_for_attempt(attempt)
                     set_request_task_progress(
                         request,

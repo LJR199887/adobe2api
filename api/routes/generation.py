@@ -304,6 +304,133 @@ def build_generation_router(
     def _report_token_invalid(token: str) -> Any:
         return token_manager.report_invalid(token)
 
+    def _safe_file_size(path: Path) -> int:
+        try:
+            return int(path.stat().st_size) if path.exists() else 0
+        except Exception:
+            return 0
+
+    def _cleanup_generated_file(path: Path) -> None:
+        try:
+            if path.exists() and path.is_file():
+                path.unlink()
+        except Exception:
+            logger.warning("failed to remove temporary generated file path=%s", path)
+
+    def _download_upstream_asset(upstream_url: str, out_path: Path, timeout: int) -> None:
+        client._download_to_file(
+            upstream_url,
+            headers={"accept": "*/*"},
+            out_path=out_path,
+            timeout=timeout,
+        )
+
+    def _local_image_url(
+        request: Request,
+        *,
+        job_id: str,
+        out_path: Path,
+        image_bytes: bytes | None,
+        old_size: int,
+        upstream_url: str = "",
+    ) -> str:
+        if image_bytes is not None:
+            out_path.write_bytes(image_bytes)
+        elif upstream_url and not out_path.exists():
+            _download_upstream_asset(upstream_url, out_path, timeout=30)
+        new_size = _safe_file_size(out_path)
+        if new_size <= 0:
+            raise RuntimeError("generated image file missing")
+        on_generated_file_written(out_path, old_size, new_size)
+        return public_image_url(request, job_id)
+
+    def _local_video_url(
+        request: Request,
+        *,
+        filename: str,
+        tmp_path: Path,
+        video_bytes: bytes | None,
+        old_size: int,
+        upstream_url: str = "",
+    ) -> str:
+        out_path = generated_dir / filename
+        if video_bytes is not None:
+            out_path.write_bytes(video_bytes)
+        elif tmp_path.exists():
+            tmp_path.replace(out_path)
+        elif upstream_url:
+            _download_upstream_asset(upstream_url, out_path, timeout=60)
+        new_size = _safe_file_size(out_path)
+        if new_size <= 0:
+            raise RuntimeError("generated video file missing")
+        on_generated_file_written(out_path, old_size, new_size)
+        return public_generated_url(request, filename)
+
+    def _upload_image_or_local_url(
+        request: Request,
+        *,
+        upstream_url: str,
+        job_id: str,
+        out_path: Path,
+        image_bytes: bytes | None,
+        old_size: int,
+    ) -> str:
+        try:
+            image_url = upload_generated_asset_to_imgbed(
+                upstream_url,
+                filename=f"{job_id}.png",
+                mime_type="image/png",
+            )
+            _cleanup_generated_file(out_path)
+            return image_url
+        except Exception as exc:
+            logger.warning(
+                "imgbed upload failed; falling back to local image url job_id=%s error=%s",
+                job_id,
+                exc,
+            )
+            return _local_image_url(
+                request,
+                job_id=job_id,
+                out_path=out_path,
+                image_bytes=image_bytes,
+                old_size=old_size,
+                upstream_url=upstream_url,
+            )
+
+    def _upload_video_or_local_url(
+        request: Request,
+        *,
+        upstream_url: str,
+        filename: str,
+        tmp_path: Path,
+        video_bytes: bytes | None,
+        old_size: int,
+        mime_type: str,
+    ) -> str:
+        try:
+            video_url = upload_generated_asset_to_imgbed(
+                upstream_url,
+                filename=filename,
+                mime_type=mime_type,
+            )
+            _cleanup_generated_file(tmp_path)
+            return video_url
+        except Exception as exc:
+            logger.warning(
+                "imgbed upload failed; falling back to local video url filename=%s error=%s",
+                filename,
+                exc,
+            )
+            return _local_video_url(
+                request,
+                filename=filename,
+                tmp_path=tmp_path,
+                video_bytes=video_bytes,
+                old_size=old_size,
+                upstream_url=upstream_url,
+            )
+
     def _normalize_image_request_data(data: dict, prompt: str) -> dict:
         normalized = dict(data or {})
         messages = normalized.get("messages")
@@ -471,15 +598,12 @@ def build_generation_router(
 
                 imgbed_upload_enabled = bool(use_imgbed_upload())
                 direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
+                local_result_needed = not direct_result_url
                 job_id = uuid.uuid4().hex
                 out_path = generated_dir / f"{job_id}.png"
                 old_size = 0
-                if not direct_result_url:
-                    try:
-                        if out_path.exists():
-                            old_size = int(out_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                if local_result_needed:
+                    old_size = _safe_file_size(out_path)
 
                 image_bytes, meta = client.generate(
                     token=token,
@@ -498,7 +622,7 @@ def build_generation_router(
                     model_specific_payload=model_conf.get("model_specific_payload"),
                     source_image_ids=source_image_ids,
                     timeout=client.generate_timeout,
-                    out_path=None if direct_result_url else out_path,
+                    out_path=out_path if local_result_needed else None,
                     progress_cb=_image_progress_cb,
                     return_upstream_url=direct_result_url,
                     seeds=(
@@ -514,10 +638,13 @@ def build_generation_router(
                             status_code=502,
                             detail="upstream result url missing",
                         )
-                    image_url = upload_generated_asset_to_imgbed(
-                        upstream_image_url,
-                        filename=f"{job_id}.png",
-                        mime_type="image/png",
+                    image_url = _upload_image_or_local_url(
+                        request,
+                        upstream_url=upstream_image_url,
+                        job_id=job_id,
+                        out_path=out_path,
+                        image_bytes=image_bytes,
+                        old_size=old_size,
                     )
                 elif direct_result_url:
                     image_url = upstream_image_url
@@ -527,11 +654,13 @@ def build_generation_router(
                             detail="upstream result url missing",
                         )
                 else:
-                    if image_bytes is not None:
-                        out_path.write_bytes(image_bytes)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
-                    image_url = public_image_url(request, job_id)
+                    image_url = _local_image_url(
+                        request,
+                        job_id=job_id,
+                        out_path=out_path,
+                        image_bytes=image_bytes,
+                        old_size=old_size,
+                    )
                 set_request_preview(request, image_url, kind="image")
                 return {
                     "created": int(time.time()),
@@ -772,14 +901,11 @@ def build_generation_router(
                         )
                     imgbed_upload_enabled = bool(use_imgbed_upload())
                     direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
+                    local_result_needed = not direct_result_url
                     out_path = generated_dir / f"{job_id}.png"
                     old_size = 0
-                    if not direct_result_url:
-                        try:
-                            if out_path.exists():
-                                old_size = int(out_path.stat().st_size)
-                        except Exception:
-                            old_size = 0
+                    if local_result_needed:
+                        old_size = _safe_file_size(out_path)
 
                     image_bytes, meta = client.generate(
                         token=token,
@@ -797,7 +923,7 @@ def build_generation_router(
                         generation_settings=model_conf.get("generation_settings"),
                         model_specific_payload=model_conf.get("model_specific_payload"),
                         source_image_ids=source_image_ids,
-                        out_path=None if direct_result_url else out_path,
+                        out_path=out_path if local_result_needed else None,
                         return_upstream_url=direct_result_url,
                         seeds=None if force_random_image_seed else image_seeds,
                     )
@@ -805,23 +931,26 @@ def build_generation_router(
                     if imgbed_upload_enabled:
                         if not upstream_image_url:
                             raise RuntimeError("upstream result url missing")
-                        image_url = upload_generated_asset_to_imgbed(
-                            upstream_image_url,
-                            filename=f"{job_id}.png",
-                            mime_type="image/png",
+                        image_url = _upload_image_or_local_url(
+                            request,
+                            upstream_url=upstream_image_url,
+                            job_id=job_id,
+                            out_path=out_path,
+                            image_bytes=image_bytes,
+                            old_size=old_size,
                         )
                     elif direct_result_url:
                         image_url = upstream_image_url
                         if not image_url:
                             raise RuntimeError("upstream result url missing")
                     else:
-                        if image_bytes is not None:
-                            out_path.write_bytes(image_bytes)
-                        new_size = (
-                            int(out_path.stat().st_size) if out_path.exists() else 0
+                        image_url = _local_image_url(
+                            request,
+                            job_id=job_id,
+                            out_path=out_path,
+                            image_bytes=image_bytes,
+                            old_size=old_size,
                         )
-                        on_generated_file_written(out_path, old_size, new_size)
-                        image_url = public_image_url(request, job_id)
                     set_request_preview(request, image_url, kind="image")
                     set_request_task_progress(
                         request, task_status="COMPLETED", task_progress=100.0
@@ -1417,14 +1546,11 @@ def build_generation_router(
                     direct_result_url = (
                         bool(use_upstream_result_url()) or imgbed_upload_enabled
                     )
+                    local_result_needed = not direct_result_url
                     tmp_path = generated_dir / f"{job_id}.video.tmp"
                     old_size = 0
-                    if not direct_result_url:
-                        try:
-                            if tmp_path.exists():
-                                old_size = int(tmp_path.stat().st_size)
-                        except Exception:
-                            old_size = 0
+                    if local_result_needed:
+                        old_size = _safe_file_size(tmp_path)
 
                     attempt_video_seeds = None if force_random_video_seed else video_seeds
                     video_bytes, video_meta = client.generate_video(
@@ -1441,7 +1567,7 @@ def build_generation_router(
                         timeline_events=timeline_events,
                         audio=video_audio,
                         reference_mode=video_reference_mode,
-                        out_path=None if direct_result_url else tmp_path,
+                        out_path=tmp_path if local_result_needed else None,
                         progress_cb=_video_progress_cb,
                         return_upstream_url=direct_result_url,
                         seeds=attempt_video_seeds,
@@ -1453,9 +1579,13 @@ def build_generation_router(
                     if imgbed_upload_enabled:
                         if not upstream_video_url:
                             raise RuntimeError("upstream result url missing")
-                        video_url = upload_generated_asset_to_imgbed(
-                            upstream_video_url,
+                        video_url = _upload_video_or_local_url(
+                            request,
+                            upstream_url=upstream_video_url,
                             filename=f"{job_id}.{video_ext}",
+                            tmp_path=tmp_path,
+                            video_bytes=video_bytes,
+                            old_size=old_size,
                             mime_type=_video_mime_type(video_ext),
                         )
                     elif direct_result_url:
@@ -1464,14 +1594,13 @@ def build_generation_router(
                             raise RuntimeError("upstream result url missing")
                     else:
                         filename = f"{job_id}.{video_ext}"
-                        out_path = generated_dir / filename
-                        if video_bytes is not None:
-                            out_path.write_bytes(video_bytes)
-                        elif tmp_path.exists():
-                            tmp_path.replace(out_path)
-                        new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                        on_generated_file_written(out_path, old_size, new_size)
-                        video_url = public_generated_url(request, filename)
+                        video_url = _local_video_url(
+                            request,
+                            filename=filename,
+                            tmp_path=tmp_path,
+                            video_bytes=video_bytes,
+                            old_size=old_size,
+                        )
 
                     set_request_preview(request, video_url, kind="video")
                     set_request_task_progress(
@@ -1734,15 +1863,12 @@ def build_generation_router(
                 direct_result_url = (
                     bool(use_upstream_result_url()) or imgbed_upload_enabled
                 )
+                local_result_needed = not direct_result_url
                 task_id = uuid.uuid4().hex
                 tmp_path = generated_dir / f"{task_id}.video.tmp"
                 old_size = 0
-                if not direct_result_url:
-                    try:
-                        if tmp_path.exists():
-                            old_size = int(tmp_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                if local_result_needed:
+                    old_size = _safe_file_size(tmp_path)
 
                 attempt_video_seeds = (
                     None if video_retry_state.get("force_random_seed") else video_seeds
@@ -1762,7 +1888,7 @@ def build_generation_router(
                         timeline_events=timeline_events,
                         audio=video_audio,
                         reference_mode=video_reference_mode,
-                        out_path=None if direct_result_url else tmp_path,
+                        out_path=tmp_path if local_result_needed else None,
                         progress_cb=_video_progress_cb,
                         return_upstream_url=direct_result_url,
                         seeds=attempt_video_seeds,
@@ -1778,9 +1904,13 @@ def build_generation_router(
                             status_code=502,
                             detail="upstream result url missing",
                         )
-                    video_url = upload_generated_asset_to_imgbed(
-                        upstream_video_url,
+                    video_url = _upload_video_or_local_url(
+                        request,
+                        upstream_url=upstream_video_url,
                         filename=f"{task_id}.{video_ext}",
+                        tmp_path=tmp_path,
+                        video_bytes=video_bytes,
+                        old_size=old_size,
                         mime_type=_video_mime_type(video_ext),
                     )
                 elif direct_result_url:
@@ -1792,14 +1922,13 @@ def build_generation_router(
                         )
                 else:
                     filename = f"{task_id}.{video_ext}"
-                    out_path = generated_dir / filename
-                    if video_bytes is not None:
-                        out_path.write_bytes(video_bytes)
-                    elif tmp_path.exists():
-                        tmp_path.replace(out_path)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
-                    video_url = public_generated_url(request, filename)
+                    video_url = _local_video_url(
+                        request,
+                        filename=filename,
+                        tmp_path=tmp_path,
+                        video_bytes=video_bytes,
+                        old_size=old_size,
+                    )
 
                 set_request_preview(request, video_url, kind="video")
                 created_ts = int(time.time())
@@ -2126,15 +2255,12 @@ def build_generation_router(
 
                 imgbed_upload_enabled = bool(use_imgbed_upload())
                 direct_result_url = bool(use_upstream_result_url()) or imgbed_upload_enabled
+                local_result_needed = not direct_result_url
                 job_id = uuid.uuid4().hex
                 out_path = generated_dir / f"{job_id}.png"
                 old_size = 0
-                if not direct_result_url:
-                    try:
-                        if out_path.exists():
-                            old_size = int(out_path.stat().st_size)
-                    except Exception:
-                        old_size = 0
+                if local_result_needed:
+                    old_size = _safe_file_size(out_path)
 
                 image_bytes, meta = client.generate(
                     token=token,
@@ -2158,7 +2284,7 @@ def build_generation_router(
                         "model_specific_payload"
                     ),
                     timeout=client.generate_timeout,
-                    out_path=None if direct_result_url else out_path,
+                    out_path=out_path if local_result_needed else None,
                     progress_cb=_image_progress_cb,
                     return_upstream_url=direct_result_url,
                     seeds=(
@@ -2174,10 +2300,13 @@ def build_generation_router(
                             status_code=502,
                             detail="upstream result url missing",
                         )
-                    image_url = upload_generated_asset_to_imgbed(
-                        upstream_image_url,
-                        filename=f"{job_id}.png",
-                        mime_type="image/png",
+                    image_url = _upload_image_or_local_url(
+                        request,
+                        upstream_url=upstream_image_url,
+                        job_id=job_id,
+                        out_path=out_path,
+                        image_bytes=image_bytes,
+                        old_size=old_size,
                     )
                 elif direct_result_url:
                     image_url = upstream_image_url
@@ -2187,11 +2316,13 @@ def build_generation_router(
                             detail="upstream result url missing",
                         )
                 else:
-                    if image_bytes is not None:
-                        out_path.write_bytes(image_bytes)
-                    new_size = int(out_path.stat().st_size) if out_path.exists() else 0
-                    on_generated_file_written(out_path, old_size, new_size)
-                    image_url = public_image_url(request, job_id)
+                    image_url = _local_image_url(
+                        request,
+                        job_id=job_id,
+                        out_path=out_path,
+                        image_bytes=image_bytes,
+                        old_size=old_size,
+                    )
                 set_request_preview(request, image_url, kind="image")
                 response_content = f"![Generated Image]({image_url})"
 

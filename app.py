@@ -712,7 +712,10 @@ def _run_with_token_retries(
     report_error = set_request_error_detail or _set_request_error_detail
 
     for attempt in range(1, max_attempts + 1):
-        token = token_manager.get_available(strategy=client.token_rotation_strategy)
+        token = token_manager.get_available(
+            strategy=client.token_rotation_strategy,
+            concurrency_limit=client.token_concurrency,
+        )
         if not token:
             break
         token_meta = _set_request_token_context(request, token, attempt)

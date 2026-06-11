@@ -334,3 +334,55 @@ def test_token_list_page_falls_back_to_memory_if_sqlite_fails(tmp_path, monkeypa
 
     assert payload["backend"] == "memory"
     assert [item["id"] for item in payload["tokens"]] == ["token-A"]
+
+
+def test_round_robin_keeps_import_order_while_tokens_are_leased(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    for value in ("token-A", "token-B", "token-C", "token-D"):
+        manager.add(value, meta={"id": value})
+
+    leased = [
+        manager.get_available(strategy="round_robin")
+        for _ in range(4)
+    ]
+
+    assert leased == ["token-A", "token-B", "token-C", "token-D"]
+
+
+def test_round_robin_supports_multiple_leases_per_token(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    for value in ("token-A", "token-B", "token-C"):
+        manager.add(value, meta={"id": value})
+
+    leased = [
+        manager.get_available(strategy="round_robin", concurrency_limit=2)
+        for _ in range(6)
+    ]
+
+    assert leased == [
+        "token-A",
+        "token-A",
+        "token-B",
+        "token-B",
+        "token-C",
+        "token-C",
+    ]
+    assert manager.get_available(strategy="round_robin", concurrency_limit=2) is None
+
+    manager.release("token-B")
+
+    assert manager.get_available(
+        strategy="round_robin", concurrency_limit=2
+    ) == "token-B"
+
+
+def test_round_robin_starts_from_earliest_token_for_each_request(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    for value in ("token-A", "token-B", "token-C"):
+        manager.add(value, meta={"id": value})
+
+    assert manager.get_available("round_robin", concurrency_limit=3) == "token-A"
+    assert manager.get_available("round_robin", concurrency_limit=3) == "token-A"
+    manager.tokens[0]["status"] = "error"
+
+    assert manager.get_available("round_robin", concurrency_limit=3) == "token-B"

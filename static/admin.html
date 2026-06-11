@@ -245,10 +245,16 @@
             <div class="form-group">
               <label for="confTokenRotationStrategy">Token 轮换策略</label>
               <select id="confTokenRotationStrategy" class="input-select">
-                <option value="round_robin">round_robin（始终轮换）</option>
+                <option value="round_robin">round_robin（按导入顺序优先使用）</option>
                 <option value="random">random（随机轮换）</option>
                 <option value="finish_success">finish_success（优先用满成功次数）</option>
               </select>
+            </div>
+
+            <div class="form-group">
+              <label for="confTokenConcurrency">单 Token 并发数</label>
+              <input type="number" id="confTokenConcurrency" class="input-text" min="1" max="10" step="1" placeholder="默认 1" />
+              <p class="help">每个 Token 同时允许执行的任务数，范围 1-10。提高后会增加单账号请求压力。</p>
             </div>
 
             <div class="form-group">

@@ -1077,6 +1077,7 @@
   const confRetryOnStatusCodes = document.getElementById("confRetryOnStatusCodes");
   const confRetryOnErrorTypes = document.getElementById("confRetryOnErrorTypes");
   const confTokenRotationStrategy = document.getElementById("confTokenRotationStrategy");
+  const confTokenConcurrency = document.getElementById("confTokenConcurrency");
   const confTokenSuccessAutoDisableEnabled = document.getElementById("confTokenSuccessAutoDisableEnabled");
   const confTokenSuccessAutoDisableThreshold = document.getElementById("confTokenSuccessAutoDisableThreshold");
   const confTokenExhaustedAutoDeleteEnabled = document.getElementById("confTokenExhaustedAutoDeleteEnabled");
@@ -1274,6 +1275,9 @@
           ? data.retry_on_error_types.join(",")
           : "timeout,connection,proxy";
         confTokenRotationStrategy.value = String(data.token_rotation_strategy || "round_robin");
+        if (confTokenConcurrency) {
+          confTokenConcurrency.value = Number(data.token_concurrency || 1);
+        }
         if (confTokenSuccessAutoDisableEnabled) {
           confTokenSuccessAutoDisableEnabled.checked = Boolean(data.token_success_auto_disable_enabled || false);
         }
@@ -1337,6 +1341,7 @@
           .map(s => String(s).trim().toLowerCase())
           .filter(Boolean),
         token_rotation_strategy: String(confTokenRotationStrategy.value || "round_robin").trim() || "round_robin",
+        token_concurrency: Math.max(1, Math.min(10, Number(confTokenConcurrency?.value || 1))),
         token_success_auto_disable_enabled: Boolean(confTokenSuccessAutoDisableEnabled?.checked),
         token_success_auto_disable_threshold: Math.max(1, Math.min(100000, Number(confTokenSuccessAutoDisableThreshold?.value || 2))),
         token_exhausted_auto_delete_enabled: Boolean(confTokenExhaustedAutoDeleteEnabled?.checked),
@@ -1395,6 +1400,9 @@
       }
       if (!["round_robin", "random", "finish_success"].includes(payload.token_rotation_strategy)) {
         throw new Error("Token 轮换策略无效");
+      }
+      if (!Number.isInteger(payload.token_concurrency) || payload.token_concurrency < 1 || payload.token_concurrency > 10) {
+        throw new Error("单 Token 并发数必须是 1-10 的整数");
       }
       if (!Number.isInteger(payload.token_success_auto_disable_threshold) || payload.token_success_auto_disable_threshold < 1 || payload.token_success_auto_disable_threshold > 100000) {
         throw new Error("Token 自动禁用成功次数必须是 1-100000 的整数");

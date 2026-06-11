@@ -28,7 +28,6 @@ class TokenManager:
         self._id_index: Dict[str, Dict] = {}
         self._value_index: Dict[str, Dict] = {}
         self._auto_refresh_profile_index: Dict[str, Dict] = {}
-        self._rr_index = 0
         self._expired_scanner_started = False
         self._expired_scanner_stop_event = threading.Event()
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -68,6 +67,7 @@ class TokenManager:
             token.setdefault("error_until", 0)
             token.pop("lease_id", None)
             token.pop("leased_at", None)
+            token.pop("lease_count", None)
             normalized.append(token)
         return normalized
 
@@ -438,19 +438,50 @@ class TokenManager:
                 if t.get("status") == "active"
             ]
 
+    @staticmethod
+    def _token_lease_count(token: Dict) -> int:
+        try:
+            count = int(token.get("lease_count", 0) or 0)
+        except Exception:
+            count = 0
+        if count <= 0 and str(token.get("lease_id") or "").strip():
+            return 1
+        return max(0, count)
+
+    @classmethod
+    def _token_has_capacity(cls, token: Dict, concurrency_limit: int) -> bool:
+        return cls._token_lease_count(token) < concurrency_limit
+
+    @classmethod
+    def _acquire_token_lease(cls, token: Dict) -> None:
+        token["lease_count"] = cls._token_lease_count(token) + 1
+        token["leased_at"] = time.time()
+        token.pop("lease_id", None)
+
     def _pick_active_token_locked(
-        self, strategy: str = "round_robin"
+        self, strategy: str = "round_robin", concurrency_limit: int = 1
     ) -> Optional[Dict]:
+        concurrency_limit = max(1, min(int(concurrency_limit or 1), 10))
+        mode = str(strategy or "round_robin").strip().lower()
+        if mode not in {"finish_success", "random"}:
+            for token in self.tokens:
+                if (
+                    token["status"] == "active"
+                    and self._token_has_capacity(token, concurrency_limit)
+                ):
+                    return token
+            return None
+
         active = [
             t
             for t in self.tokens
-            if t["status"] == "active" and not str(t.get("lease_id") or "").strip()
+            if t["status"] == "active"
+            and self._token_has_capacity(t, concurrency_limit)
         ]
         if not active:
             return None
 
         chosen = None
-        mode = str(strategy or "round_robin").strip().lower()
         if mode == "finish_success":
             active.sort(
                 key=lambda t: (
@@ -460,20 +491,20 @@ class TokenManager:
                 )
             )
             chosen = active[0]
-        elif mode == "random":
-            chosen = random.choice(active)
         else:
-            idx = self._rr_index % len(active)
-            chosen = active[idx]
-            self._rr_index = (idx + 1) % len(active)
+            chosen = random.choice(active)
         return chosen
 
-    def get_available(self, strategy: str = "round_robin") -> Optional[str]:
+    def get_available(
+        self, strategy: str = "round_robin", concurrency_limit: int = 1
+    ) -> Optional[str]:
+        concurrency_limit = max(1, min(int(concurrency_limit or 1), 10))
         with self._lock:
-            chosen = self._pick_active_token_locked(strategy=strategy)
+            chosen = self._pick_active_token_locked(
+                strategy=strategy, concurrency_limit=concurrency_limit
+            )
             if chosen is not None:
-                chosen["lease_id"] = uuid.uuid4().hex[:12]
-                chosen["leased_at"] = time.time()
+                self._acquire_token_lease(chosen)
                 self.save()
                 return chosen["value"]
 
@@ -483,7 +514,7 @@ class TokenManager:
                 t
                 for t in self.tokens
                 if t["status"] == "error"
-                and not str(t.get("lease_id") or "").strip()
+                and self._token_has_capacity(t, concurrency_limit)
                 and float(t.get("error_until", 0) or 0) <= now_ts
             ]
             if not recoverable:
@@ -494,17 +525,23 @@ class TokenManager:
             chosen["fails"] = max(0, int(chosen.get("fails", 0)) - 1)
             chosen["error_until"] = 0
             self.save()
-            picked = self._pick_active_token_locked(strategy=strategy)
+            picked = self._pick_active_token_locked(
+                strategy=strategy, concurrency_limit=concurrency_limit
+            )
             leased = picked or chosen
-            leased["lease_id"] = uuid.uuid4().hex[:12]
-            leased["leased_at"] = time.time()
+            self._acquire_token_lease(leased)
             self.save()
             return leased["value"]
 
-    @staticmethod
-    def _release_token_lease(token: Dict):
+    @classmethod
+    def _release_token_lease(cls, token: Dict):
+        remaining = max(0, cls._token_lease_count(token) - 1)
         token.pop("lease_id", None)
-        token.pop("leased_at", None)
+        if remaining:
+            token["lease_count"] = remaining
+        else:
+            token.pop("lease_count", None)
+            token.pop("leased_at", None)
 
     def release(self, value: str) -> Optional[Dict]:
         updated = None

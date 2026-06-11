@@ -77,6 +77,7 @@ class AdobeClient:
         self.retry_on_status_codes = [429, 451, 500, 502, 503, 504]
         self.retry_on_error_types = {"timeout", "connection", "proxy"}
         self.token_rotation_strategy = "round_robin"
+        self.token_concurrency = 1
         self.token_success_auto_disable_enabled = False
         self.token_success_auto_disable_threshold = 2
         self.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
@@ -182,6 +183,11 @@ class AdobeClient:
         if strategy not in {"round_robin", "random", "finish_success"}:
             strategy = "round_robin"
         self.token_rotation_strategy = strategy
+        try:
+            token_concurrency = int(cfg.get("token_concurrency", 1))
+        except Exception:
+            token_concurrency = 1
+        self.token_concurrency = max(1, min(token_concurrency, 10))
         self.token_success_auto_disable_enabled = bool(
             cfg.get("token_success_auto_disable_enabled", False)
         )

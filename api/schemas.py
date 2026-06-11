@@ -70,6 +70,7 @@ class ConfigUpdateRequest(BaseModel):
     retry_on_status_codes: Optional[List[int]] = None
     retry_on_error_types: Optional[List[str]] = None
     token_rotation_strategy: Optional[str] = None
+    token_concurrency: Optional[int] = None
     token_success_auto_disable_enabled: Optional[bool] = None
     token_success_auto_disable_threshold: Optional[int] = None
     token_exhausted_auto_delete_enabled: Optional[bool] = None

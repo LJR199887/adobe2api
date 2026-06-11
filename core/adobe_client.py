@@ -1,9 +1,11 @@
+import base64
 import hashlib
 import json
 import logging
 import os
 import random
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional
 from urllib.parse import urlparse
@@ -22,6 +24,16 @@ except Exception:
 
 
 logger = logging.getLogger("adobe2api")
+
+
+def _build_arp_session_id() -> str:
+    now_ms = int(time.time() * 1000)
+    ftr = f"{os.urandom(16).hex()}_{now_ms}_{os.getpid()}_dUAL43-mnts-ants-d4_31ck__tt"
+    raw = json.dumps(
+        {"sid": str(uuid.uuid4()), "ftr": ftr},
+        separators=(",", ":"),
+    )
+    return base64.b64encode(raw.encode("utf-8")).decode("ascii")
 
 
 class AdobeRequestError(Exception):
@@ -346,6 +358,7 @@ class AdobeClient:
                 "Authorization": f"Bearer {token}",
                 "x-api-key": self.api_key,
                 "x-nonce": self._compute_nonce(user_id, prompt),
+                "x-arp-session-id": _build_arp_session_id(),
                 "content-type": "application/json",
                 "accept": "*/*",
             }
@@ -358,6 +371,7 @@ class AdobeClient:
             "Authorization": f"Bearer {token}",
             "x-api-key": self.api_key,
             "x-nonce": self._compute_nonce(user_id, prompt),
+            "x-arp-session-id": _build_arp_session_id(),
             "content-type": "application/json",
             "accept": "*/*",
         }

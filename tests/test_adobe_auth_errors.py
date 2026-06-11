@@ -41,6 +41,19 @@ def test_submit_headers_include_nonce_from_user_id_and_prompt():
     assert headers["x-api-key"] == client.api_key
 
 
+def test_submit_headers_include_fresh_arp_session_id():
+    client = AdobeClient()
+
+    first = client._submit_headers("token")
+    second = client._submit_headers_minimal("token")
+
+    for headers in (first, second):
+        decoded = json.loads(base64.b64decode(headers["x-arp-session-id"]))
+        assert decoded["sid"]
+        assert decoded["ftr"].endswith("_dUAL43-mnts-ants-d4_31ck__tt")
+    assert first["x-arp-session-id"] != second["x-arp-session-id"]
+
+
 def test_poll_headers_include_api_key_and_browser_fetch_headers():
     client = AdobeClient()
 

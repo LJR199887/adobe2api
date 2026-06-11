@@ -864,7 +864,8 @@ def build_generation_router(
         request_started = time.time()
         _init_async_image_request_log(request)
         initial_token = token_manager.get_available(
-            strategy=client.token_rotation_strategy
+            strategy=client.token_rotation_strategy,
+            concurrency_limit=client.token_concurrency,
         )
         if initial_token:
             _set_async_video_token_context(request, initial_token, 1)
@@ -885,7 +886,8 @@ def build_generation_router(
                     token = first_token
                 else:
                     token = token_manager.get_available(
-                        strategy=client.token_rotation_strategy
+                        strategy=client.token_rotation_strategy,
+                        concurrency_limit=client.token_concurrency,
                     )
                 if not token:
                     break
@@ -1439,7 +1441,8 @@ def build_generation_router(
         request_started = time.time()
         _init_async_video_request_log(request)
         initial_token = token_manager.get_available(
-            strategy=client.token_rotation_strategy
+            strategy=client.token_rotation_strategy,
+            concurrency_limit=client.token_concurrency,
         )
         if initial_token:
             _set_async_video_token_context(request, initial_token, 1)
@@ -1491,7 +1494,8 @@ def build_generation_router(
                     token = first_token
                 else:
                     token = token_manager.get_available(
-                        strategy=client.token_rotation_strategy
+                        strategy=client.token_rotation_strategy,
+                        concurrency_limit=client.token_concurrency,
                     )
                 if not token:
                     break

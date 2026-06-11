@@ -2199,6 +2199,20 @@ def build_admin_router(
                     ),
                 )
             update_data["token_rotation_strategy"] = strategy
+        if "token_concurrency" in incoming:
+            try:
+                token_concurrency = int(incoming["token_concurrency"])
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail="token_concurrency must be an integer between 1 and 10",
+                )
+            if token_concurrency < 1 or token_concurrency > 10:
+                raise HTTPException(
+                    status_code=400,
+                    detail="token_concurrency must be between 1 and 10",
+                )
+            update_data["token_concurrency"] = token_concurrency
         if "token_success_auto_disable_enabled" in incoming:
             update_data["token_success_auto_disable_enabled"] = bool(
                 incoming["token_success_auto_disable_enabled"]

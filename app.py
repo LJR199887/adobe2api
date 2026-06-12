@@ -1053,6 +1053,28 @@ def _normalize_image_mime(mime_type: str) -> str:
     return normalized
 
 
+def _download_input_image(image_url: str):
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return requests.get(
+                image_url,
+                timeout=120,
+                proxies=build_requests_proxies(
+                    resolve_resource_proxy(config_manager.get_all())
+                ),
+            )
+        except requests.exceptions.RequestException:
+            if attempt >= max_attempts:
+                raise
+            logger.warning(
+                "input image download failed; retrying attempt=%s/%s",
+                attempt,
+                max_attempts,
+            )
+            time.sleep(attempt)
+
+
 def _load_input_images(messages) -> list[tuple[bytes, str]]:
     image_urls = _extract_image_urls_from_messages(messages, max_items=6)
     if not image_urls:
@@ -1071,11 +1093,7 @@ def _load_input_images(messages) -> list[tuple[bytes, str]]:
                     status_code=400,
                     detail="Only http/https or data URL images are supported",
                 )
-            resp = requests.get(
-                image_url,
-                timeout=30,
-                proxies=build_requests_proxies(resolve_resource_proxy(config_manager.get_all())),
-            )
+            resp = _download_input_image(image_url)
             if resp.status_code != 200:
                 raise HTTPException(
                     status_code=400,

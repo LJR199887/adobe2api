@@ -179,6 +179,44 @@ def test_refresh_manager_bulk_disables_profiles(tmp_path, monkeypatch):
     assert enabled["missing"] is None
 
 
+def test_missing_access_token_marks_token_abnormal_and_disables_refresh(
+    tmp_path, monkeypatch
+):
+    token_manager = make_token_manager(tmp_path, monkeypatch)
+    monkeypatch.setattr(refresh_mgr, "token_manager", token_manager)
+    manager = make_refresh_manager(tmp_path, monkeypatch)
+    profile = manager.import_cookie("cookie: a=1", name="Broken Refresh")
+    token = token_manager.upsert_auto_refresh_token(
+        "old-token",
+        profile_id=profile["id"],
+        profile_name="Broken Refresh",
+    )
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {"expires_in": 0}
+
+    monkeypatch.setattr(refresh_mgr.requests, "post", lambda *args, **kwargs: FakeResponse())
+
+    try:
+        manager.refresh_once(profile["id"])
+    except RuntimeError as exc:
+        assert str(exc) == "refresh response missing access_token"
+    else:
+        raise AssertionError("refresh_once should fail without access_token")
+
+    updated = token_manager.get_by_id(token["id"])
+    summary = manager.list_profiles()[0]
+    assert updated["status"] == "abnormal"
+    assert token_manager.list_active_ids() == []
+    assert summary["enabled"] is False
+    assert summary["state"]["last_error"] == "refresh response missing access_token"
+    assert summary["state"]["consecutive_failures"] == 1
+
+
 def test_refresh_manager_remove_profiles_only_saves_once(tmp_path, monkeypatch):
     manager = make_refresh_manager(tmp_path, monkeypatch)
     first = manager.import_cookie("cookie: a=1", name="First")

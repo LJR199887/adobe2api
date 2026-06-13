@@ -302,7 +302,9 @@ def build_generation_router(
         return JSONResponse(status_code=status_code, content=content)
 
     def _report_token_invalid(token: str) -> Any:
-        return token_manager.report_invalid(token)
+        token_info = token_manager.report_invalid(token)
+        disable_auto_refresh_for_token(token_info)
+        return token_info
 
     def _safe_file_size(path: Path) -> int:
         try:

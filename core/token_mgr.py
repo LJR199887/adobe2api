@@ -576,10 +576,12 @@ class TokenManager:
         status: str,
         *,
         token_id: str = "",
+        refresh_profile_id: str = "",
         token_account_email: str = "",
         token_account_name: str = "",
     ) -> Optional[Dict]:
         token_id = str(token_id or "").strip()
+        profile_id = str(refresh_profile_id or "").strip()
         email = str(token_account_email or "").strip().casefold()
         name = str(token_account_name or "").strip().casefold()
 
@@ -587,6 +589,11 @@ class TokenManager:
         with self._lock:
             target = self._id_index.get(token_id) if token_id else None
             match_reason = "token_id" if target is not None else ""
+
+            if target is None and profile_id:
+                target = self._auto_refresh_profile_index.get(profile_id)
+                if target is not None:
+                    match_reason = "refresh_profile_id"
 
             if target is None and email:
                 matches = [
@@ -660,12 +667,14 @@ class TokenManager:
         self,
         *,
         token_id: str = "",
+        refresh_profile_id: str = "",
         token_account_email: str = "",
         token_account_name: str = "",
     ) -> Optional[Dict]:
         return self._report_status_by_identity(
             "abnormal",
             token_id=token_id,
+            refresh_profile_id=refresh_profile_id,
             token_account_email=token_account_email,
             token_account_name=token_account_name,
         )

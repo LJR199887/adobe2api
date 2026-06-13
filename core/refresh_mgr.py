@@ -942,6 +942,10 @@ class RefreshManager:
                 "refresh response missing access_token",
                 http_status=resp.status_code,
             )
+            token_manager.report_abnormal_by_identity(
+                refresh_profile_id=profile_id,
+            )
+            self.set_enabled(profile_id, False)
             raise RuntimeError("refresh response missing access_token")
 
         account_started = time.perf_counter()

@@ -42,13 +42,13 @@
             <button id="exportTokensBtn" class="secondary">导出 Token</button>
             <button id="exportCookiesBtn" class="secondary">导出 Cookie</button>
             <button id="cleanupExhaustedTokensBtn" class="danger">清理额度耗尽</button>
+            <button id="cleanupInvalidTokensBtn" class="danger">清理已失效</button>
+            <button id="cleanupAbnormalTokensBtn" class="danger">清理异常</button>
             <button id="deleteTokensBatchBtn" class="danger">批量删除</button>
             <button id="enableAutoRefreshBatchBtn" class="secondary">开启自动刷新</button>
             <button id="disableAutoRefreshBatchBtn" class="secondary">关闭自动刷新</button>
             <button id="refreshTokensBatchBtn" class="secondary">刷新 Token</button>
-            <button id="checkInvalidTokensBatchBtn" class="secondary">检测失效Token</button>
             <button id="refreshCreditsBatchBtn" class="secondary">批量刷新积分</button>
-            <button id="refreshBtn" class="secondary">刷新列表</button>
           </div>
         </div>
         <div id="tokenSummary" class="token-summary">
@@ -504,13 +504,13 @@
   </div>
 
   <div id="cleanupExhaustedModal" class="dialog-modal" aria-hidden="true">
-    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="清理额度耗尽 Token">
+    <div class="dialog-card" role="dialog" aria-modal="true" aria-label="清理 Token">
       <div class="list-head" style="margin-bottom: 10px;">
-        <h2>清理额度耗尽</h2>
+        <h2 id="cleanupTokenTitle">清理额度耗尽</h2>
         <button id="cleanupExhaustedCloseBtn" class="secondary small" type="button">关闭</button>
       </div>
       <div class="cleanup-summary">
-        <div><span>额度耗尽 Token</span><strong id="cleanupExhaustedTokenCount">0</strong></div>
+        <div><span id="cleanupTokenCountLabel">额度耗尽 Token</span><strong id="cleanupExhaustedTokenCount">0</strong></div>
         <div><span>将删除刷新配置</span><strong id="cleanupExhaustedProfileCount">0</strong></div>
       </div>
       <div class="actions" style="margin-top: 16px;">

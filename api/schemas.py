@@ -35,10 +35,6 @@ class TokenCreditsBatchRefreshRequest(BaseModel):
     ids: Optional[List[str]] = None
 
 
-class TokenInvalidCheckRequest(BaseModel):
-    ids: List[str]
-
-
 class TokenAutoRefreshBatchRequest(BaseModel):
     ids: List[str]
     enabled: bool
@@ -48,7 +44,7 @@ class TokenRefreshBatchRequest(BaseModel):
     ids: Optional[List[str]] = None
 
 
-class TokenExhaustedCleanupRequest(BaseModel):
+class TokenStatusCleanupRequest(BaseModel):
     include_refresh_profiles: bool = True
 
 

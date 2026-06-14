@@ -64,11 +64,12 @@
   const exportTokensBtn = document.getElementById("exportTokensBtn");
   const exportCookiesBtn = document.getElementById("exportCookiesBtn");
   const cleanupExhaustedTokensBtn = document.getElementById("cleanupExhaustedTokensBtn");
+  const cleanupInvalidTokensBtn = document.getElementById("cleanupInvalidTokensBtn");
+  const cleanupAbnormalTokensBtn = document.getElementById("cleanupAbnormalTokensBtn");
   const deleteTokensBatchBtn = document.getElementById("deleteTokensBatchBtn");
   const enableAutoRefreshBatchBtn = document.getElementById("enableAutoRefreshBatchBtn");
   const disableAutoRefreshBatchBtn = document.getElementById("disableAutoRefreshBatchBtn");
   const refreshTokensBatchBtn = document.getElementById("refreshTokensBatchBtn");
-  const checkInvalidTokensBatchBtn = document.getElementById("checkInvalidTokensBatchBtn");
   const refreshModal = document.getElementById("refreshModal");
   const refreshModalCloseBtn = document.getElementById("refreshModalCloseBtn");
   const taskReportModal = document.getElementById("taskReportModal");
@@ -83,10 +84,11 @@
   const cleanupExhaustedModal = document.getElementById("cleanupExhaustedModal");
   const cleanupExhaustedCloseBtn = document.getElementById("cleanupExhaustedCloseBtn");
   const cleanupExhaustedConfirmBtn = document.getElementById("cleanupExhaustedConfirmBtn");
+  const cleanupTokenTitle = document.getElementById("cleanupTokenTitle");
+  const cleanupTokenCountLabel = document.getElementById("cleanupTokenCountLabel");
   const cleanupExhaustedTokenCount = document.getElementById("cleanupExhaustedTokenCount");
   const cleanupExhaustedProfileCount = document.getElementById("cleanupExhaustedProfileCount");
   const cleanupExhaustedMsg = document.getElementById("cleanupExhaustedMsg");
-  const refreshBtn = document.getElementById("refreshBtn");
   const refreshCreditsBatchBtn = document.getElementById("refreshCreditsBatchBtn");
   const tokenSelectAll = document.getElementById("tokenSelectAll");
   const tbody = document.querySelector("#tokenTable tbody");
@@ -224,7 +226,6 @@
     if (enableAutoRefreshBatchBtn) enableAutoRefreshBatchBtn.disabled = selectedCount <= 0;
     if (disableAutoRefreshBatchBtn) disableAutoRefreshBatchBtn.disabled = selectedCount <= 0;
     if (refreshTokensBatchBtn) refreshTokensBatchBtn.disabled = selectedCount <= 0;
-    if (checkInvalidTokensBatchBtn) checkInvalidTokensBatchBtn.disabled = selectedCount <= 0;
     if (selectAllFilteredTokensBtn) {
       const filteredCount = Array.isArray(latestTokens) ? latestTokens.length : 0;
       selectAllFilteredTokensBtn.disabled = filteredCount <= 0 || selectedCount >= filteredCount;
@@ -283,18 +284,28 @@
     modalEl.setAttribute("aria-hidden", "true");
   }
 
-  let cleanupExhaustedPreview = { exhausted_token_count: 0, refresh_profile_count: 0 };
+  const cleanupTokenConfigs = {
+    exhausted: { endpoint: "cleanup-exhausted", title: "清理额度耗尽", label: "额度耗尽 Token" },
+    invalid: { endpoint: "cleanup-invalid", title: "清理已失效", label: "已失效 Token" },
+    abnormal: { endpoint: "cleanup-abnormal", title: "清理异常", label: "异常 Token" },
+  };
+  let cleanupTokenStatus = "exhausted";
+  let cleanupExhaustedPreview = { token_count: 0, refresh_profile_count: 0 };
 
   function renderCleanupExhaustedPreview() {
-    const tokenCount = Number(cleanupExhaustedPreview.exhausted_token_count || 0);
+    const config = cleanupTokenConfigs[cleanupTokenStatus];
+    const tokenCount = Number(cleanupExhaustedPreview.token_count || 0);
     const profileCount = Number(cleanupExhaustedPreview.refresh_profile_count || 0);
+    if (cleanupTokenTitle) cleanupTokenTitle.textContent = config.title;
+    if (cleanupTokenCountLabel) cleanupTokenCountLabel.textContent = config.label;
     if (cleanupExhaustedTokenCount) cleanupExhaustedTokenCount.textContent = String(tokenCount);
     if (cleanupExhaustedProfileCount) cleanupExhaustedProfileCount.textContent = String(profileCount);
     if (cleanupExhaustedConfirmBtn) cleanupExhaustedConfirmBtn.disabled = tokenCount <= 0;
   }
 
   async function loadCleanupExhaustedPreview() {
-    const res = await fetch("/api/v1/tokens/cleanup-exhausted/preview");
+    const config = cleanupTokenConfigs[cleanupTokenStatus];
+    const res = await fetch(`/api/v1/tokens/${config.endpoint}/preview`);
     if (!res.ok) {
       throw new Error("加载清理预览失败");
     }
@@ -473,16 +484,6 @@
       showMsg(addMsg, err.message || "导入失败", true);
     }
     addBtn.disabled = false;
-  });
-
-  refreshBtn.addEventListener("click", async () => {
-    showToast("Token 列表刷新中...", false, { duration: 0 });
-    try {
-      await loadTokens();
-      showToast("Token 列表已刷新", false);
-    } catch (err) {
-      showToast("Token 列表刷新失败", true);
-    }
   });
 
   [tokenStatusFilter, tokenCreditsFilter].forEach((filterEl) => {
@@ -795,53 +796,6 @@
     });
   }
 
-  if (checkInvalidTokensBatchBtn) {
-    checkInvalidTokensBatchBtn.addEventListener("click", async () => {
-      const selectedIds = Array.from(tokenSelectedIds);
-      if (!selectedIds.length) {
-        alert("请先选择要检测的 Token");
-        return;
-      }
-      const ok = confirm(
-        `将主动检测选中的 ${selectedIds.length} 个 Token。明确返回 Token invalid or expired 时会标记为已失效；检测到本地异常或 403 时会标记为异常并关闭自动刷新。确定继续吗？`
-      );
-      if (!ok) return;
-
-      checkInvalidTokensBatchBtn.disabled = true;
-      showToast("正在检测 Token 状态...", false, { duration: 0 });
-      try {
-        const res = await fetch("/api/v1/tokens/check-invalid-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: selectedIds }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(data?.detail || "检测 Token 状态失败");
-        }
-        const invalid = Number(data.invalid_count || 0);
-        const changed = Number(data.changed_count || 0);
-        const valid = Number(data.valid_count || 0);
-        const abnormal = Number(data.abnormal_count || 0);
-        const abnormalChanged = Number(data.abnormal_changed_count || 0);
-        const skipped = Number(data.skipped_count || 0);
-        const failed = Number(data.failed_count || 0);
-        const disabled = Number(data.disabled_auto_refresh_count || 0);
-        showToast(
-          `检测完成：已失效 ${invalid}，新失效 ${changed}，异常 ${abnormal}，新异常 ${abnormalChanged}，正常 ${valid}，关闭自动刷新 ${disabled}，跳过 ${skipped}，失败 ${failed}`,
-          failed > 0,
-          { duration: 8000 }
-        );
-        await loadTokens();
-      } catch (err) {
-        showToast(err.message || "检测 Token 状态失败", true, { duration: 8000 });
-      } finally {
-        checkInvalidTokensBatchBtn.disabled = false;
-        updateTokenSelectionSummary();
-      }
-    });
-  }
-
   if (refreshCreditsBatchBtn) {
     refreshCreditsBatchBtn.addEventListener("click", async () => {
       refreshCreditsBatchBtn.disabled = true;
@@ -880,44 +834,54 @@
     cleanupExhaustedCloseBtn.addEventListener("click", () => closeDialog(cleanupExhaustedModal));
   }
 
+  async function openTokenCleanup(status, triggerBtn) {
+    cleanupTokenStatus = status;
+    triggerBtn.disabled = true;
+    showMsg(cleanupExhaustedMsg, "", false, { duration: 0 });
+    try {
+      await loadCleanupExhaustedPreview();
+      openDialog(cleanupExhaustedModal);
+    } catch (err) {
+      showToast(err.message || "加载清理预览失败", true);
+    } finally {
+      triggerBtn.disabled = false;
+    }
+  }
+
   if (cleanupExhaustedTokensBtn) {
-    cleanupExhaustedTokensBtn.addEventListener("click", async () => {
-      cleanupExhaustedTokensBtn.disabled = true;
-      showMsg(cleanupExhaustedMsg, "", false, { duration: 0 });
-      try {
-        await loadCleanupExhaustedPreview();
-        openDialog(cleanupExhaustedModal);
-      } catch (err) {
-        showToast(err.message || "加载清理预览失败", true);
-      } finally {
-        cleanupExhaustedTokensBtn.disabled = false;
-      }
-    });
+    cleanupExhaustedTokensBtn.addEventListener("click", () => openTokenCleanup("exhausted", cleanupExhaustedTokensBtn));
+  }
+  if (cleanupInvalidTokensBtn) {
+    cleanupInvalidTokensBtn.addEventListener("click", () => openTokenCleanup("invalid", cleanupInvalidTokensBtn));
+  }
+  if (cleanupAbnormalTokensBtn) {
+    cleanupAbnormalTokensBtn.addEventListener("click", () => openTokenCleanup("abnormal", cleanupAbnormalTokensBtn));
   }
 
   if (cleanupExhaustedConfirmBtn) {
     cleanupExhaustedConfirmBtn.addEventListener("click", async () => {
-      const tokenCount = Number(cleanupExhaustedPreview.exhausted_token_count || 0);
+      const config = cleanupTokenConfigs[cleanupTokenStatus];
+      const tokenCount = Number(cleanupExhaustedPreview.token_count || 0);
       if (tokenCount <= 0) {
-        showMsg(cleanupExhaustedMsg, "当前没有额度耗尽 Token", true);
+        showMsg(cleanupExhaustedMsg, `当前没有${config.label}`, true);
         return;
       }
       cleanupExhaustedConfirmBtn.disabled = true;
       try {
-        const res = await fetch("/api/v1/tokens/cleanup-exhausted", {
+        const res = await fetch(`/api/v1/tokens/${config.endpoint}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ include_refresh_profiles: true }),
         });
         if (!res.ok) {
-          let detail = "清理额度耗尽失败";
+          let detail = `${config.title}失败`;
           try {
             const body = await res.json();
             detail = body.detail || JSON.stringify(body);
           } catch (_) {
             detail = await res.text();
           }
-          throw new Error(detail || "清理额度耗尽失败");
+          throw new Error(detail || `${config.title}失败`);
         }
         const data = await res.json();
         const deleted = Number(data.deleted_count || 0);
@@ -927,8 +891,8 @@
         await loadTokens();
         showToast(`清理完成：删除 ${deleted} 个 Token，刷新配置 ${deletedProfiles} 个`, false, { duration: 5000 });
       } catch (err) {
-        showMsg(cleanupExhaustedMsg, err.message || "清理额度耗尽失败", true, { duration: 0 });
-        showToast(err.message || "清理额度耗尽失败", true);
+        showMsg(cleanupExhaustedMsg, err.message || `${config.title}失败`, true, { duration: 0 });
+        showToast(err.message || `${config.title}失败`, true);
       } finally {
         cleanupExhaustedConfirmBtn.disabled = false;
       }

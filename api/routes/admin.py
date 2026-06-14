@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-import requests
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from starlette.responses import RedirectResponse
@@ -25,12 +24,10 @@ from api.schemas import (
     TokenAutoRefreshBatchRequest,
     TokenBatchAddRequest,
     TokenCreditsBatchRefreshRequest,
-    TokenExhaustedCleanupRequest,
-    TokenInvalidCheckRequest,
+    TokenStatusCleanupRequest,
     TokenRefreshBatchRequest,
 )
 from core.proxy_utils import (
-    build_requests_proxies,
     resolve_basic_proxy,
     resolve_resource_proxy,
     test_authorized_endpoint,
@@ -869,11 +866,12 @@ def build_admin_router(
             "deleted_profile_ids": list(profile_result.get("deleted_ids") or []),
         }
 
-    def _exhausted_tokens() -> list[dict]:
+    def _tokens_with_status(status: str) -> list[dict]:
+        target_status = str(status or "").strip().lower()
         return [
             token
             for token in token_manager.list_all()
-            if str(token.get("status") or "").strip().lower() == "exhausted"
+            if str(token.get("status") or "").strip().lower() == target_status
         ]
 
     def _linked_profile_ids_for_tokens(tokens: list[dict]) -> list[str]:
@@ -895,26 +893,29 @@ def build_admin_router(
         }
         return sorted(targets & existing)
 
-    def _cleanup_exhausted_preview(tokens: list[dict] | None = None) -> dict:
-        exhausted = _exhausted_tokens() if tokens is None else list(tokens)
+    def _cleanup_status_preview(status: str, tokens: list[dict] | None = None) -> dict:
+        candidates = _tokens_with_status(status) if tokens is None else list(tokens)
         profile_ids = _existing_refresh_profile_ids(
-            _linked_profile_ids_for_tokens(exhausted)
+            _linked_profile_ids_for_tokens(candidates)
         )
         return {
             "status": "ok",
-            "exhausted_token_count": len(exhausted),
+            "token_status": status,
+            "token_count": len(candidates),
+            f"{status}_token_count": len(candidates),
             "refresh_profile_count": len(profile_ids),
         }
 
-    def _delete_exhausted_tokens(
+    def _delete_tokens_with_status(
+        status: str,
         *,
         include_refresh_profiles: bool = True,
         older_than_ts: float | None = None,
     ) -> dict:
-        exhausted = _exhausted_tokens()
+        candidates = _tokens_with_status(status)
         if older_than_ts is not None:
             filtered = []
-            for token in exhausted:
+            for token in candidates:
                 status_ts = 0.0
                 for key in ("exhausted_at", "updated_at", "added_at"):
                     try:
@@ -925,15 +926,15 @@ def build_admin_router(
                         break
                 if status_ts > 0 and status_ts <= older_than_ts:
                     filtered.append(token)
-            exhausted = filtered
+            candidates = filtered
 
         token_ids = [
             str(token.get("id") or "").strip()
-            for token in exhausted
+            for token in candidates
             if str(token.get("id") or "").strip()
         ]
         profile_ids = _existing_refresh_profile_ids(
-            _linked_profile_ids_for_tokens(exhausted)
+            _linked_profile_ids_for_tokens(candidates)
         )
         if include_refresh_profiles and profile_ids:
             profile_result = refresh_manager.remove_profiles_only(profile_ids)
@@ -944,7 +945,8 @@ def build_admin_router(
         missing = list(token_result.get("missing_ids") or [])
         return {
             "status": "ok" if not missing else "partial",
-            "candidate_count": len(exhausted),
+            "token_status": status,
+            "candidate_count": len(candidates),
             "deleted_count": len(deleted),
             "missing_count": len(missing),
             "deleted_ids": deleted,
@@ -967,7 +969,8 @@ def build_admin_router(
             keep_hours = 24
         keep_hours = max(1, min(8760, keep_hours))
         older_than_ts = time.time() - keep_hours * 3600
-        result = _delete_exhausted_tokens(
+        result = _delete_tokens_with_status(
+            "exhausted",
             include_refresh_profiles=True,
             older_than_ts=older_than_ts,
         )
@@ -1002,148 +1005,6 @@ def build_admin_router(
         ).start()
 
     _start_exhausted_auto_cleanup_worker()
-
-    def disable_auto_refresh_for_token_info(token_info: dict) -> tuple[bool, str]:
-        if not isinstance(token_info, dict) or not bool(token_info.get("auto_refresh")):
-            return False, ""
-        profile_id = str(token_info.get("refresh_profile_id") or "").strip()
-        if not profile_id:
-            return False, ""
-        refresh_manager.set_enabled(profile_id, False)
-        return True, profile_id
-
-    def _mark_token_abnormal_for_check(
-        token_info: dict,
-        *,
-        detail: str,
-    ) -> dict:
-        token_id = str(token_info.get("id") or "").strip()
-        previous_status = str(token_info.get("status") or "").strip().lower() or "active"
-        final_status = previous_status
-        status_changed = False
-        if token_id and previous_status not in {"invalid", "exhausted", "abnormal"}:
-            updated = token_manager.report_abnormal_by_identity(token_id=token_id)
-            refreshed = (
-                updated
-                if isinstance(updated, dict) and updated
-                else token_manager.get_by_id(token_id) or {}
-            )
-            if isinstance(refreshed, dict) and refreshed:
-                token_info = refreshed
-            final_status = "abnormal"
-            status_changed = previous_status != "abnormal"
-
-        profile_disabled = False
-        disabled_profile_id = ""
-        auto_refresh_disable_error = ""
-        try:
-            profile_disabled, disabled_profile_id = disable_auto_refresh_for_token_info(
-                token_info
-            )
-        except Exception as exc:
-            auto_refresh_disable_error = str(exc)
-
-        payload = {
-            "token_id": token_id,
-            "result": "abnormal",
-            "detail": str(detail or "").strip() or "token marked as abnormal",
-            "previous_status": previous_status,
-            "status": final_status,
-            "status_changed": status_changed,
-            "auto_refresh_disabled": profile_disabled,
-            "disabled_profile_id": disabled_profile_id or None,
-        }
-        if auto_refresh_disable_error:
-            payload["auto_refresh_disable_error"] = auto_refresh_disable_error
-        return payload
-
-    def _response_text_for_invalid_check(resp) -> str:
-        parts = [str(getattr(resp, "text", "") or "")]
-        try:
-            payload = resp.json()
-        except Exception:
-            payload = None
-
-        def collect(value: Any):
-            if isinstance(value, dict):
-                for child in value.values():
-                    collect(child)
-            elif isinstance(value, list):
-                for child in value:
-                    collect(child)
-            elif value is not None:
-                parts.append(str(value))
-
-        collect(payload)
-        return "\n".join(parts).casefold()
-
-    def _check_token_invalid_or_expired(token_info: dict) -> dict:
-        token_id = str(token_info.get("id") or "").strip()
-        token_value = str(token_info.get("value") or "").strip()
-        if not token_value:
-            return {
-                "token_id": token_id,
-                "result": "abnormal",
-                "detail": "empty token",
-            }
-
-        account_id = ""
-        try:
-            account_id = str(
-                refresh_manager._extract_account_id(token_value) or ""
-            ).strip()
-        except Exception:
-            account_id = ""
-        if not account_id:
-            return {
-                "token_id": token_id,
-                "result": "abnormal",
-                "detail": "account_id not found in token",
-            }
-
-        cfg = config_manager.get_all()
-        proxy = resolve_basic_proxy(cfg)
-        resp = requests.get(
-            "https://firefly.adobe.io/v1/credits/balance",
-            headers={
-                "Authorization": f"Bearer {token_value}",
-                "x-api-key": "SunbreakWebUI1",
-                "x-account-id": account_id,
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-            },
-            timeout=20,
-            proxies=build_requests_proxies(proxy),
-        )
-        status_code = int(resp.status_code)
-        text = _response_text_for_invalid_check(resp)
-        if "token invalid or expired" in text:
-            return {
-                "token_id": token_id,
-                "status_code": status_code,
-                "result": "invalid",
-                "detail": "Token invalid or expired",
-            }
-        if status_code == 200:
-            return {
-                "token_id": token_id,
-                "status_code": status_code,
-                "result": "valid",
-                "detail": "authorized request succeeded",
-            }
-        if status_code == 403:
-            return {
-                "token_id": token_id,
-                "status_code": status_code,
-                "result": "abnormal",
-                "detail": "credits endpoint returned 403",
-            }
-        return {
-            "token_id": token_id,
-            "status_code": status_code,
-            "result": "unknown",
-            "detail": f"response did not contain Token invalid or expired ({status_code})",
-        }
 
     def build_basic_business_proxy_result(proxy: str) -> dict[str, Any]:
         result = {
@@ -1593,15 +1454,16 @@ def build_admin_router(
     @router.get("/api/v1/tokens/cleanup-exhausted/preview")
     def preview_cleanup_exhausted_tokens(request: Request):
         require_admin_auth(request)
-        return _cleanup_exhausted_preview()
+        return _cleanup_status_preview("exhausted")
 
     @router.post("/api/v1/tokens/cleanup-exhausted")
     def cleanup_exhausted_tokens(
-        req: TokenExhaustedCleanupRequest, request: Request
+        req: TokenStatusCleanupRequest, request: Request
     ):
         require_admin_auth(request)
         started = time.perf_counter()
-        result = _delete_exhausted_tokens(
+        result = _delete_tokens_with_status(
+            "exhausted",
             include_refresh_profiles=bool(req.include_refresh_profiles)
         )
         logger.info(
@@ -1614,147 +1476,31 @@ def build_admin_router(
         )
         return result
 
-    @router.post("/api/v1/tokens/check-invalid-batch")
-    def check_invalid_tokens_batch(req: TokenInvalidCheckRequest, request: Request):
+    @router.get("/api/v1/tokens/cleanup-invalid/preview")
+    def preview_cleanup_invalid_tokens(request: Request):
         require_admin_auth(request)
-        token_ids = [
-            str(x or "").strip() for x in (req.ids or []) if str(x or "").strip()
-        ]
-        if not token_ids:
-            raise HTTPException(status_code=400, detail="ids is required")
+        return _cleanup_status_preview("invalid")
 
-        checked = []
-        invalid = []
-        valid = []
-        abnormal = []
-        skipped = []
-        failed = []
-        disabled_profile_ids = []
-        disabled_tokens = []
-        max_workers = min(get_batch_concurrency(), len(token_ids))
-
-        def check_one(index: int, tid: str):
-            token_info = token_manager.get_by_id(tid)
-            if not token_info:
-                return index, "skipped", {"token_id": tid, "detail": "token not found"}
-
-            current_status = str(token_info.get("status") or "").strip().lower()
-            if current_status in {"invalid", "exhausted", "abnormal"}:
-                return index, "skipped", {
-                    "token_id": tid,
-                    "status": current_status,
-                    "detail": f"token already in terminal status: {current_status}",
-                }
-            if current_status == "disabled":
-                return index, "skipped", {
-                    "token_id": tid,
-                    "status": current_status,
-                    "detail": "disabled token is not checked",
-                }
-            if current_status == "error":
-                return index, "abnormal", _mark_token_abnormal_for_check(
-                    token_info,
-                    detail="token already in request error status",
-                )
-            if current_status != "active":
-                return index, "skipped", {
-                    "token_id": tid,
-                    "status": current_status,
-                    "detail": f"unsupported token status: {current_status or 'unknown'}",
-                }
-
-            try:
-                result = _check_token_invalid_or_expired(token_info)
-            except Exception as exc:
-                return index, "failed", {"token_id": tid, "detail": str(exc)}
-
-            if result.get("result") == "invalid":
-                updated = token_manager.report_invalid_by_identity(token_id=tid)
-                result.update(
-                    {
-                        "previous_status": (
-                            updated.get("_previous_status")
-                            if isinstance(updated, dict)
-                            else current_status
-                        ),
-                        "status": "invalid",
-                        "auto_refresh_disabled": False,
-                        "disabled_profile_id": None,
-                    }
-                )
-                return index, "invalid", result
-
-            if result.get("result") == "valid":
-                return index, "valid", result
-            if result.get("result") == "abnormal":
-                abnormal_payload = _mark_token_abnormal_for_check(
-                    token_info,
-                    detail=str(result.get("detail") or "").strip()
-                    or "token marked as abnormal during invalid check",
-                )
-                abnormal_payload["status_code"] = result.get("status_code")
-                return index, "abnormal", abnormal_payload
-            return index, "skipped", result
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(check_one, index, tid)
-                for index, tid in enumerate(token_ids)
-            ]
-            done_items = [future.result() for future in as_completed(futures)]
-
-        done_items.sort(key=lambda item: item[0])
-        for _, status, payload in done_items:
-            checked.append(payload)
-            if status == "invalid":
-                invalid.append(payload)
-                disabled_profile_id = str(
-                    payload.get("disabled_profile_id") or ""
-                ).strip()
-                if disabled_profile_id:
-                    disabled_profile_ids.append(disabled_profile_id)
-            elif status == "abnormal":
-                abnormal.append(payload)
-                disabled_profile_id = str(
-                    payload.get("disabled_profile_id") or ""
-                ).strip()
-                if disabled_profile_id:
-                    disabled_profile_ids.append(disabled_profile_id)
-                if str(payload.get("status") or "").strip().lower() == "abnormal":
-                    disabled_tokens.append(str(payload.get("token_id") or "").strip())
-            elif status == "valid":
-                valid.append(payload)
-            elif status == "failed":
-                failed.append(payload)
-            else:
-                skipped.append(payload)
-
-        changed_count = len(
-            [
-                item
-                for item in invalid
-                if str(item.get("previous_status") or "").strip().lower() != "invalid"
-            ]
+    @router.post("/api/v1/tokens/cleanup-invalid")
+    def cleanup_invalid_tokens(req: TokenStatusCleanupRequest, request: Request):
+        require_admin_auth(request)
+        return _delete_tokens_with_status(
+            "invalid",
+            include_refresh_profiles=bool(req.include_refresh_profiles),
         )
 
-        return {
-            "status": "ok" if not failed else "partial",
-            "total": len(token_ids),
-            "checked_count": len(checked),
-            "invalid_count": len(invalid),
-            "changed_count": changed_count,
-            "valid_count": len(valid),
-            "abnormal_count": len(abnormal),
-            "skipped_count": len(skipped),
-            "failed_count": len(failed),
-            "abnormal_changed_count": len({tid for tid in disabled_tokens if tid}),
-            "disabled_auto_refresh_count": len(set(disabled_profile_ids)),
-            "invalid": invalid,
-            "valid": valid,
-            "abnormal": abnormal,
-            "skipped": skipped,
-            "failed": failed,
-        }
+    @router.get("/api/v1/tokens/cleanup-abnormal/preview")
+    def preview_cleanup_abnormal_tokens(request: Request):
+        require_admin_auth(request)
+        return _cleanup_status_preview("abnormal")
+
+    @router.post("/api/v1/tokens/cleanup-abnormal")
+    def cleanup_abnormal_tokens(req: TokenStatusCleanupRequest, request: Request):
+        require_admin_auth(request)
+        return _delete_tokens_with_status(
+            "abnormal",
+            include_refresh_profiles=bool(req.include_refresh_profiles),
+        )
 
     @router.delete("/api/v1/tokens/{tid}")
     def delete_token(tid: str, request: Request):

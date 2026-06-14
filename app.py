@@ -437,6 +437,7 @@ def _report_token_exhausted(token: str) -> Optional[dict]:
 
 def _report_token_invalid(token: str) -> Optional[dict]:
     token_info = token_manager.report_invalid(token)
+    _disable_auto_refresh_for_token(token_info)
     return token_info
 
 

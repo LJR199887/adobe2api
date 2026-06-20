@@ -441,6 +441,24 @@ def _report_token_invalid(token: str) -> Optional[dict]:
     return token_info
 
 
+def _is_system_under_load_timeout_error(exc: Exception) -> bool:
+    text = str(exc or "").casefold()
+    return (
+        int(getattr(exc, "status_code", 0) or 0) == 408
+        and "timeout_error" in text
+        and "system under load" in text
+    )
+
+
+def _report_system_under_load_timeout(token: str) -> Optional[dict]:
+    token_info = token_manager.report_system_under_load_timeout(token, threshold=3)
+    if isinstance(token_info, dict) and bool(
+        token_info.get("_disabled_by_system_under_load_timeout")
+    ):
+        _disable_auto_refresh_for_token(token_info)
+    return token_info
+
+
 def _append_attempt_log(
     request: Request,
     operation: str,
@@ -844,6 +862,8 @@ def _run_with_token_retries(
                 task_status_override="FAILED",
             )
         except UpstreamTemporaryError as exc:
+            if _is_system_under_load_timeout_error(exc):
+                _report_system_under_load_timeout(token)
             last_exc = exc
             upstream_job_created = bool(
                 str(getattr(request.state, "log_upstream_job_id", "") or "").strip()

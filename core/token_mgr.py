@@ -783,11 +783,36 @@ class TokenManager:
                 self._release_token_lease(t)
             self.save()
 
+    def report_system_under_load_timeout(
+        self, value: str, *, threshold: int = 3
+    ) -> Optional[Dict]:
+        threshold = max(1, int(threshold or 3))
+        updated = None
+        with self._lock:
+            t = self._value_index.get(self._normalize_token_value(value))
+            if t is not None:
+                count = int(t.get("system_under_load_timeout_fails", 0) or 0) + 1
+                t["system_under_load_timeout_fails"] = count
+                t["fails"] = max(int(t.get("fails", 0) or 0), count)
+                t["updated_at"] = time.time()
+                disabled = count >= threshold
+                if disabled:
+                    t["status"] = "error"
+                    # Keep the request-error token out of rotation until manually changed.
+                    t["error_until"] = time.time() + 10 * 365 * 24 * 3600
+                    self._release_token_lease(t)
+                updated = dict(t)
+                updated["_system_under_load_timeout_count"] = count
+                updated["_disabled_by_system_under_load_timeout"] = disabled
+            self.save()
+        return updated
+
     def report_success(self, value: str):
         with self._lock:
             t = self._value_index.get(self._normalize_token_value(value))
             if t is not None:
                 t["fails"] = max(0, int(t.get("fails", 0)) - 1)
+                t["system_under_load_timeout_fails"] = 0
                 t["success_count"] = max(0, int(t.get("success_count", 0))) + 1
                 if t["status"] == "error":
                     t["status"] = "active"
@@ -808,6 +833,7 @@ class TokenManager:
                 self.save()
                 return None
             t["fails"] = max(0, int(t.get("fails", 0)) - 1)
+            t["system_under_load_timeout_fails"] = 0
             success_count = max(0, int(t.get("success_count", 0))) + 1
             t["success_count"] = success_count
             if t["status"] == "error":

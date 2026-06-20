@@ -306,6 +306,22 @@ def build_generation_router(
         disable_auto_refresh_for_token(token_info)
         return token_info
 
+    def _is_system_under_load_timeout_error(exc: Exception) -> bool:
+        text = str(exc or "").casefold()
+        return (
+            int(getattr(exc, "status_code", 0) or 0) == 408
+            and "timeout_error" in text
+            and "system under load" in text
+        )
+
+    def _report_system_under_load_timeout(token: str) -> Any:
+        token_info = token_manager.report_system_under_load_timeout(token, threshold=3)
+        if isinstance(token_info, dict) and bool(
+            token_info.get("_disabled_by_system_under_load_timeout")
+        ):
+            disable_auto_refresh_for_token(token_info)
+        return token_info
+
     def _safe_file_size(path: Path) -> int:
         try:
             return int(path.stat().st_size) if path.exists() else 0
@@ -997,6 +1013,8 @@ def build_generation_router(
                     if retryable:
                         force_random_image_seed = True
                 except upstream_temp_error_cls as exc:
+                    if _is_system_under_load_timeout_error(exc):
+                        _report_system_under_load_timeout(token)
                     last_error = str(exc)
                     final_status_code = int(getattr(exc, "status_code", 503) or 503)
                     retryable = (
@@ -1649,6 +1667,8 @@ def build_generation_router(
                     if retryable:
                         force_random_video_seed = True
                 except upstream_temp_error_cls as exc:
+                    if _is_system_under_load_timeout_error(exc):
+                        _report_system_under_load_timeout(token)
                     last_error = str(exc)
                     final_status_code = int(getattr(exc, "status_code", 503) or 503)
                     retryable = (

@@ -223,12 +223,24 @@ class AdobeClient:
         if isinstance(exc, UpstreamTemporaryError):
             if exc.status_code is not None:
                 try:
+                    if (
+                        int(exc.status_code) == 408
+                        and str(exc.error_type or "").strip().lower() == "timeout"
+                    ):
+                        return True
                     return int(exc.status_code) in set(self.retry_on_status_codes)
                 except Exception:
                     return False
             if exc.error_type:
                 return exc.error_type in set(self.retry_on_error_types)
         return False
+
+    @staticmethod
+    def _is_system_under_load_timeout_response(resp) -> bool:
+        if int(getattr(resp, "status_code", 0) or 0) != 408:
+            return False
+        text = str(getattr(resp, "text", "") or "").casefold()
+        return "timeout_error" in text and "system under load" in text
 
     @staticmethod
     def _classify_network_error_type(exc: Exception) -> str:
@@ -1116,11 +1128,17 @@ class AdobeClient:
             self._raise_auth_or_quota(submit_resp)
 
         if submit_resp.status_code != 200:
-            if submit_resp.status_code in (429, 451) or submit_resp.status_code >= 500:
+            if (
+                self._is_system_under_load_timeout_response(submit_resp)
+                or submit_resp.status_code in (429, 451)
+                or submit_resp.status_code >= 500
+            ):
                 raise UpstreamTemporaryError(
                     f"video submit failed: {submit_resp.status_code} {submit_resp.text[:300]}",
                     status_code=submit_resp.status_code,
-                    error_type="status",
+                    error_type="timeout"
+                    if self._is_system_under_load_timeout_response(submit_resp)
+                    else "status",
                 )
             raise AdobeRequestError(
                 f"video submit failed: {submit_resp.status_code} {submit_resp.text[:300]}"
@@ -1377,11 +1395,17 @@ class AdobeClient:
                 submit_resp.status_code,
                 submit_resp.text[:500],
             )
-            if submit_resp.status_code in (429, 451) or submit_resp.status_code >= 500:
+            if (
+                self._is_system_under_load_timeout_response(submit_resp)
+                or submit_resp.status_code in (429, 451)
+                or submit_resp.status_code >= 500
+            ):
                 raise UpstreamTemporaryError(
                     f"submit failed: {submit_resp.status_code} {submit_resp.text[:300]}",
                     status_code=submit_resp.status_code,
-                    error_type="status",
+                    error_type="timeout"
+                    if self._is_system_under_load_timeout_response(submit_resp)
+                    else "status",
                 )
             if last_error:
                 raise AdobeRequestError(

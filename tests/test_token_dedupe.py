@@ -424,3 +424,19 @@ def test_round_robin_starts_from_earliest_token_for_each_request(tmp_path, monke
     manager.tokens[0]["status"] = "error"
 
     assert manager.get_available("round_robin", concurrency_limit=3) == "token-B"
+
+
+def test_system_under_load_timeout_third_failure_disables_token(tmp_path, monkeypatch):
+    manager = make_token_manager(tmp_path, monkeypatch)
+    manager.add("token-A", meta={"id": "token-A"})
+
+    first = manager.report_system_under_load_timeout("token-A", threshold=3)
+    second = manager.report_system_under_load_timeout("token-A", threshold=3)
+    third = manager.report_system_under_load_timeout("token-A", threshold=3)
+
+    assert first["_disabled_by_system_under_load_timeout"] is False
+    assert second["_disabled_by_system_under_load_timeout"] is False
+    assert third["_disabled_by_system_under_load_timeout"] is True
+    assert third["status"] == "error"
+    assert third["system_under_load_timeout_fails"] == 3
+    assert manager.get_available() is None
